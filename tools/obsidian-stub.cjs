@@ -2,11 +2,140 @@
  * A minimal stand-in for the `obsidian` module, so the built main.js can be
  * loaded and exercised under plain Node (see smoke-test.cjs).
  *
- * It only implements what main.ts touches: Plugin lifecycle, addCommand,
+ * It implements what the plugin touches: Plugin lifecycle, addCommand,
  * addSettingTab, the workspace "file-menu" event, Menu/MenuItem, Notice,
- * Modal, Setting and TFolder/TFile.
+ * Modal, Setting (text / textarea / dropdown / button), TFolder/TFile, plus a
+ * tiny DOM (`FakeEl`) good enough to build and inspect the settings tab and the
+ * right-click modal headlessly.
  */
-const registry = { commands: [], menus: [], tabs: [], notices: [] };
+const registry = { commands: [], menus: [], tabs: [], notices: [], modals: [], savedData: null };
+
+/** Minimal element: enough of the Obsidian HTMLElement API for the UI code. */
+class FakeEl {
+  constructor(tag, opts) {
+    opts = opts || {};
+    this.tagName = String(tag || "div").toUpperCase();
+    this.children = [];
+    this.attributes = {};
+    this.classes = [];
+    this._listeners = {};
+    this._text = "";
+    this._value = "";
+    this.placeholder = "";
+    this._type = opts.type || "";
+    this.parentElement = null;
+  }
+
+  get type() {
+    return this._type;
+  }
+  set type(value) {
+    this._type = value;
+  }
+  get value() {
+    return this._value;
+  }
+  set value(value) {
+    this._value = String(value);
+  }
+  get textContent() {
+    return this._text;
+  }
+  set textContent(value) {
+    this._text = String(value);
+  }
+
+  createEl(tag, opts, callback) {
+    let o = {};
+    if (typeof opts === "string") o = { cls: opts };
+    else if (opts && typeof opts === "object") o = opts;
+    const el = new FakeEl(tag, o);
+    if (o.cls !== undefined) el.addClass(...[].concat(o.cls));
+    if (o.text !== undefined) el._text = String(o.text);
+    if (o.type !== undefined) el._type = o.type;
+    if (o.value !== undefined) el._value = String(o.value);
+    if (o.placeholder !== undefined) el.placeholder = o.placeholder;
+    if (o.attr !== undefined) for (const key of Object.keys(o.attr)) el.setAttr(key, o.attr[key]);
+    el.parentElement = this;
+    this.children.push(el);
+    if (typeof callback === "function") callback(el);
+    return el;
+  }
+  createDiv(opts, callback) {
+    return this.createEl("div", opts, callback);
+  }
+  createSpan(opts, callback) {
+    return this.createEl("span", opts, callback);
+  }
+  empty() {
+    this.children = [];
+    return this;
+  }
+  setText(text) {
+    this._text = String(text);
+    return this;
+  }
+  addClass(...classes) {
+    for (const cls of classes) {
+      for (const part of String(cls).split(/\s+/)) if (part) this.classes.push(part);
+    }
+    return this;
+  }
+  addClasses(classes) {
+    return this.addClass(...classes);
+  }
+  removeClass(cls) {
+    this.classes = this.classes.filter((c) => c !== cls);
+    return this;
+  }
+  hasClass(cls) {
+    return this.classes.includes(cls);
+  }
+  setAttr(name, value) {
+    if (value === null || value === false) delete this.attributes[name];
+    else this.attributes[name] = String(value);
+    return this;
+  }
+  getAttr(name) {
+    return this.attributes[name];
+  }
+  setAttribute(name, value) {
+    return this.setAttr(name, value);
+  }
+  getAttribute(name) {
+    return this.attributes[name] === undefined ? null : this.attributes[name];
+  }
+  addEventListener(type, fn) {
+    (this._listeners[type] || (this._listeners[type] = [])).push(fn);
+    return this;
+  }
+  removeEventListener(type, fn) {
+    if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter((f) => f !== fn);
+    return this;
+  }
+  focus() {}
+  click() {
+    const evt = { type: "click", target: this, preventDefault() {} };
+    for (const fn of this._listeners.click || []) fn(evt);
+  }
+  dispatchEvent(evt) {
+    evt = evt || {};
+    evt.target = evt.target || this;
+    if (typeof evt.preventDefault !== "function") evt.preventDefault = () => {};
+    for (const fn of this._listeners[evt.type] || []) fn(evt);
+    return true;
+  }
+}
+
+/** Depth-first list of every descendant (root excluded). */
+function walk(root, out) {
+  out = out || [];
+  for (const child of root.children || []) {
+    out.push(child);
+    walk(child, out);
+  }
+  return out;
+}
 
 class TAbstractFile {
   constructor(path) {
@@ -70,75 +199,183 @@ class Menu {
     return this;
   }
 }
-const textComponent = () => {
+
+function makeTextComponent(inputEl) {
   const component = {
-    setValue() {
+    inputEl,
+    setValue(value) {
+      inputEl.value = value;
       return component;
     },
-    setPlaceholder() {
+    getValue() {
+      return inputEl.value;
+    },
+    setPlaceholder(placeholder) {
+      inputEl.placeholder = placeholder;
       return component;
     },
-    onChange() {
+    onChange(callback) {
+      component._onChange = callback;
+      inputEl.addEventListener("input", () => callback(inputEl.value));
+      inputEl.addEventListener("change", () => callback(inputEl.value));
       return component;
     },
-    inputEl: { focus() {}, addEventListener() {} },
   };
   return component;
-};
+}
+
+function makeDropdownComponent(selectEl) {
+  const component = {
+    selectEl,
+    options: [],
+    addOption(value, display) {
+      const option = selectEl.createEl("option", { text: display });
+      option.setAttr("value", value);
+      component.options.push({ value: String(value), text: String(display) });
+      return component;
+    },
+    setValue(value) {
+      selectEl.value = value;
+      return component;
+    },
+    getValue() {
+      return selectEl.value;
+    },
+    onChange(callback) {
+      component._onChange = callback;
+      selectEl.addEventListener("change", () => callback(selectEl.value));
+      return component;
+    },
+  };
+  return component;
+}
+
+function makeButtonComponent(buttonEl) {
+  const component = {
+    buttonEl,
+    setButtonText(text) {
+      buttonEl.setText(text);
+      return component;
+    },
+    setCta() {
+      buttonEl.addClass("mod-cta");
+      return component;
+    },
+    setIcon() {
+      return component;
+    },
+    setTooltip() {
+      return component;
+    },
+    onClick(callback) {
+      buttonEl.addEventListener("click", callback);
+      return component;
+    },
+  };
+  return component;
+}
+
 class Setting {
-  setName() {
+  constructor(containerEl) {
+    this.containerEl = containerEl;
+    this.settingEl =
+      containerEl && typeof containerEl.createDiv === "function" ? containerEl.createDiv({ cls: "setting-item" }) : new FakeEl("div");
+    this.components = [];
+  }
+  setName(name) {
+    this.name = name;
+    this.settingEl.setAttr("data-name", String(name));
     return this;
   }
-  setDesc() {
+  setDesc(desc) {
+    this.desc = desc;
+    return this;
+  }
+  setHeading() {
+    return this;
+  }
+  setClass(cls) {
+    this.settingEl.addClass(cls);
     return this;
   }
   setCta() {
     return this;
   }
-  setButtonText() {
+  setButtonText(text) {
+    this.buttonText = text;
     return this;
   }
-  onClick() {
+  onClick(callback) {
+    this._onClick = callback;
     return this;
   }
   addText(build) {
-    build(textComponent());
+    const component = makeTextComponent(this.settingEl.createEl("input", { cls: "setting-text", type: "text" }));
+    this.components.push(component);
+    build(component);
+    return this;
+  }
+  addTextArea(build) {
+    const component = makeTextComponent(this.settingEl.createEl("textarea", { cls: "setting-textarea" }));
+    this.components.push(component);
+    build(component);
+    return this;
+  }
+  addDropdown(build) {
+    const component = makeDropdownComponent(this.settingEl.createEl("select", { cls: "setting-dropdown" }));
+    this.components.push(component);
+    build(component);
     return this;
   }
   addButton(build) {
-    build(this);
+    const component = makeButtonComponent(this.settingEl.createEl("button", { cls: "setting-button" }));
+    this.components.push(component);
+    build(component);
     return this;
   }
 }
+
 class PluginSettingTab {
-  constructor(app) {
+  constructor(app, plugin) {
     this.app = app;
-    this.containerEl = { empty() {} };
+    this.plugin = plugin;
+    this.containerEl = new FakeEl("div");
   }
   display() {}
 }
+
 class Modal {
   constructor(app) {
     this.app = app;
-    this.contentEl = { empty() {}, createEl() {} };
-    this.titleEl = { setText() {} };
+    this.containerEl = new FakeEl("div");
+    this.modalEl = new FakeEl("div");
+    this.contentEl = new FakeEl("div");
+    this.titleEl = new FakeEl("div");
+  }
+  setTitle(title) {
+    this.titleEl.setText(title);
+    return this;
   }
   open() {
+    registry.modals.push(this);
     if (typeof this.onOpen === "function") this.onOpen();
   }
   close() {
     if (typeof this.onClose === "function") this.onClose();
   }
 }
+
 class Plugin {
   constructor(app, manifest) {
     this.app = app;
     this.manifest = manifest;
   }
   async loadData() {
-    return null;
+    return registry.savedData === null ? null : JSON.parse(JSON.stringify(registry.savedData));
   }
-  async saveData() {}
+  async saveData(data) {
+    registry.savedData = JSON.parse(JSON.stringify(data));
+  }
   addCommand(command) {
     registry.commands.push(command);
   }
@@ -146,6 +383,8 @@ class Plugin {
     registry.tabs.push(tab);
   }
   registerEvent() {}
+  registerDomEvent() {}
+  registerInterval() {}
 }
 
 function makeApp(vaultPath) {
@@ -172,6 +411,8 @@ module.exports = {
   PluginSettingTab,
   Modal,
   Plugin,
+  FakeEl,
+  walk,
   registry,
   makeApp,
 };

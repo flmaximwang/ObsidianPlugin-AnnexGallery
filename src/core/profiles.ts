@@ -134,17 +134,154 @@ export interface ProfileIssue {
   message: string;
 }
 
-/** 按 one-of profile 的规则解析一个名字。 */
-export function parseWithProfile(_profile: ParseProfile, _ctx: ParseContext): ParsedFields {
-  throw new Error("parseWithProfile 还没实现（见计划块 T-008#B-002）");
+/** 编译一条正则；失败时抛出带 label（通常是 profile id）的错误。 */
+function compileRegex(pattern: string, flags: string | undefined, label: string): RegExp {
+  try {
+    return new RegExp(pattern, flags ?? "");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label}：正则无法编译（${message}）`);
+  }
+}
+
+/** 扫出正则源码里的具名捕获组（`(?<name>`；`(?<=` / `(?<!` 不算）。 */
+function namedGroups(pattern: string): string[] {
+  const names: string[] = [];
+  const scan = /\(\?<([A-Za-z_$][A-Za-z0-9_$]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = scan.exec(pattern)) !== null) names.push(m[1]);
+  return names;
+}
+
+/** 把一个具名组的值按 FieldSpec 归位（missing ⇒ whenMissing；number ⇒ 裸数字字符串）。 */
+function placeField(
+  spec: FieldSpec,
+  groups: Record<string, string | undefined>,
+  values: Record<string, string>,
+  missingGroups: string[],
+): void {
+  const key = spec.key ?? spec.group;
+  const raw = groups[spec.group];
+  if (raw === undefined) {
+    values[key] = spec.whenMissing ?? "";
+    missingGroups.push(spec.group);
+    return;
+  }
+  values[key] = spec.type === "number" ? String(Number.parseInt(raw, 10)) : raw;
+}
+
+/** 按一条 profile 的规则解析一个名字（纯函数，不 import obsidian）。 */
+export function parseWithProfile(profile: ParseProfile, ctx: ParseContext): ParsedFields {
+  const source: PatternSource = profile.source ?? "stem";
+  const subject = source === "relpath" ? ctx.relpath : source === "filename" ? ctx.filename : ctx.stem;
+
+  const re = compileRegex(profile.regex, profile.flags, `profile ${profile.id}`);
+  const match = re.exec(subject);
+  const groups = (match?.groups ?? {}) as Record<string, string | undefined>;
+
+  const values: Record<string, string> = {};
+  const missingGroups: string[] = [];
+  for (const spec of profile.fields) placeField(spec, groups, values, missingGroups);
+
+  const declared = new Set(profile.fields.map((spec) => spec.group));
+  const extraGroups = namedGroups(profile.regex).filter((name) => !declared.has(name));
+
+  // pathFields 跑在相对 vault 的路径上，同名键覆盖上面的值。
+  if (profile.pathRegex !== undefined) {
+    const pathRe = compileRegex(profile.pathRegex, profile.flags, `profile ${profile.id} pathRegex`);
+    const pathMatch = pathRe.exec(ctx.relpath);
+    if (pathMatch !== null) {
+      const pathGroups = (pathMatch.groups ?? {}) as Record<string, string | undefined>;
+      for (const spec of profile.pathFields ?? []) placeField(spec, pathGroups, values, missingGroups);
+    }
+  }
+
+  return { values, missingGroups, matched: match !== null, extraGroups };
 }
 
 /** 校验一条 profile 是否可用（供设置页与 CLI 共用）。 */
-export function validateProfile(_profile: ParseProfile): ProfileIssue[] {
-  throw new Error("validateProfile 还没实现（见计划块 T-008#B-002）");
+export function validateProfile(profile: ParseProfile): ProfileIssue[] {
+  const issues: ProfileIssue[] = [];
+  const add = (level: ProfileIssue["level"], message: string): void => {
+    issues.push({ level, message });
+  };
+
+  if (typeof profile.id !== "string" || profile.id.trim() === "") add("error", "profile.id 不能为空");
+
+  // 主正则能否编译；能编译才谈得上组名检查。
+  let mainOk = false;
+  try {
+    new RegExp(profile.regex, profile.flags ?? "");
+    mainOk = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    add("error", `regex 无法编译：${message}`);
+  }
+  if (mainOk) {
+    const names = new Set(namedGroups(profile.regex));
+    for (const spec of profile.fields) {
+      if (!names.has(spec.group)) add("error", `fields 里的组 "${spec.group}" 在 regex 的具名组里不存在`);
+    }
+  }
+
+  if (profile.pathRegex !== undefined) {
+    let pathOk = false;
+    try {
+      new RegExp(profile.pathRegex, profile.flags ?? "");
+      pathOk = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      add("error", `pathRegex 无法编译：${message}`);
+    }
+    if (pathOk) {
+      const names = new Set(namedGroups(profile.pathRegex));
+      for (const spec of profile.pathFields ?? []) {
+        if (!names.has(spec.group)) add("error", `pathFields 里的组 "${spec.group}" 在 pathRegex 的具名组里不存在`);
+      }
+    }
+  }
+
+  const order = Array.isArray(profile.keyOrder) ? profile.keyOrder : [];
+  if (order.length === 0) {
+    add("error", "keyOrder 不能为空");
+  } else {
+    const seen = new Set<string>();
+    for (const key of order) {
+      if (seen.has(key)) add("error", `keyOrder 里键 "${key}" 重复`);
+      seen.add(key);
+    }
+  }
+
+  const fieldKeys = new Set<string>();
+  for (const spec of profile.fields) {
+    const key = spec.key ?? spec.group;
+    if (fieldKeys.has(key)) add("error", `fields 里的键 "${key}" 重复`);
+    fieldKeys.add(key);
+  }
+
+  const known = new Set(order);
+  for (const key of profile.ask ?? DEFAULT_ASK) {
+    if (!known.has(key)) add("error", `ask 的键 "${key}" 不在 keyOrder 里`);
+  }
+
+  return issues;
 }
 
 /** 按 match 规则挑第一条命中的 profile；都不命中返回 null（由调用方让用户选）。 */
-export function pickProfile(_profiles: ParseProfile[], _ctx: ParseContext): ParseProfile | null {
-  throw new Error("pickProfile 还没实现（见计划块 T-008#B-002）");
+export function pickProfile(profiles: ParseProfile[], ctx: ParseContext): ParseProfile | null {
+  for (const profile of profiles) {
+    const match = profile.match;
+    if (match === undefined) continue;
+    if (match.relpathRegex === undefined && match.filenameRegex === undefined) continue;
+    if (match.relpathRegex !== undefined) {
+      const re = compileRegex(match.relpathRegex, "", `profile ${profile.id} match.relpathRegex`);
+      if (!re.test(ctx.relpath)) continue;
+    }
+    if (match.filenameRegex !== undefined) {
+      const re = compileRegex(match.filenameRegex, "", `profile ${profile.id} match.filenameRegex`);
+      if (!re.test(ctx.filename)) continue;
+    }
+    return profile;
+  }
+  return null;
 }

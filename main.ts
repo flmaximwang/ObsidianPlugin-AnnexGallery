@@ -5,56 +5,151 @@ import { initGallery } from "./src/core/init";
 import { SidecarReport, generateSidecars } from "./src/core/sidecar";
 import { ThumbnailReport, generateThumbnails } from "./src/core/thumbnails";
 import { progressPrefix } from "./src/core/types";
-import { AnnexGallerySettingTab, DEFAULT_SETTINGS, PluginSettings, SettingsHost } from "./src/ui/settings";
 
-/** Asks for the `sample` name before generating sidecars; remembered per folder. */
+import {
+  DEFAULT_ASK,
+  DEFAULT_PROFILES,
+  type ParseContext,
+  type ParseProfile,
+  pickProfile,
+} from "./src/core/profiles";
+import {
+  AnnexGallerySettingTab,
+  DEFAULT_SETTINGS,
+  PluginSettings,
+  SettingsHost,
+  cloneProfiles,
+  readAsk,
+  writeAsk,
+} from "./src/ui/settings";
+
+/** 弹窗提交时用的 profile 与其 ask 键 → 值。 */
+type PromptSubmit = (profile: ParseProfile, values: Record<string, string>) => void;
+
+/** 取一条 profile 要现场问的键（缺省 ["sample"]）。 */
+function askKeysFor(profile: ParseProfile): string[] {
+  return Array.isArray(profile.ask) && profile.ask.length > 0 ? profile.ask : DEFAULT_ASK;
+}
+
+/** 用文件夹的相对路径当 pickProfile / 预览的 ctx（右键的是文件夹，不是某张图）。 */
+function promptContext(relpath: string, subject: string): ParseContext {
+  const filename = subject === "/" ? "" : subject;
+  const parts = filename.split("/");
+  const folderName = parts.length > 0 ? parts[parts.length - 1] : filename;
+  return { stem: filename, filename, relpath: relpath === "" ? filename : relpath, folderName };
+}
+
+/** 弹窗要问的：选 profile（默认 pickProfile 命中或记住的那条）+ 该 profile 的 ask 字段。 */
 class SamplePromptModal extends Modal {
-  private value: string;
+  private readonly profiles: ParseProfile[];
+  private selectedProfile: ParseProfile;
+  private values: Record<string, string> = {};
+  private askContainer!: HTMLElement;
 
   constructor(
     app: App,
     private readonly subject: string,
-    initial: string,
-    private readonly onSubmit: (sample: string) => void,
+    private readonly host: SettingsHost,
+    private readonly dir: string,
+    private readonly relpath: string,
+    private readonly onSubmit: PromptSubmit,
   ) {
     super(app);
-    this.value = initial;
+    this.profiles = host.settings.profiles.length > 0 ? host.settings.profiles : DEFAULT_PROFILES;
+    this.selectedProfile = this.pickDefault();
+  }
+
+  /** 记住的 → pickProfile 命中 → 第一条（引擎未实现/无命中时静默回退，列出全部让用户挑）。 */
+  private pickDefault(): ParseProfile {
+    const remembered = this.host.settings.folderProfiles[this.dir];
+    if (remembered !== undefined) {
+      const found = this.profiles.find((profile) => profile.id === remembered);
+      if (found !== undefined) return found;
+    }
+    try {
+      const picked = pickProfile(this.profiles, promptContext(this.relpath, this.subject));
+      if (picked !== null) return picked;
+    } catch {
+      // pickProfile 是并行块 B-002 的桩（还在抛错）：回退到第一条。
+    }
+    return this.profiles[0];
   }
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    titleEl.setText("生成 metadata — 样品名");
+    titleEl.setText("生成 metadata — 选配置 + 填字段");
     contentEl.createEl("p", {
-      text: `为 ${this.subject} 里每张图生成一份 sidecar .md，需要一个样品名写进 sample 字段（按文件夹记住，下次自动填上）。`,
+      text: `为 ${this.subject} 里每张图生成一份 sidecar .md；先选解析配置（profile），再填需要现场获得的字段（按文件夹记住，下次自动填上）。`,
     });
 
-    new Setting(contentEl).setName("样品名").addText((text) => {
-      text.setValue(this.value);
-      text.onChange((value) => {
-        this.value = value;
-      });
-      text.inputEl.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          this.submit();
+    new Setting(contentEl)
+      .setName("解析配置（profile）")
+      .setDesc("默认按 match 自动预选，选不出来时列出全部；显示 name 并带上 id。")
+      .addDropdown((dropdown) => {
+        for (const profile of this.profiles) {
+          dropdown.addOption(profile.id, `${profile.name}（${profile.id}）`);
         }
+        dropdown.setValue(this.selectedProfile.id);
+        dropdown.onChange((value) => {
+          const found = this.profiles.find((profile) => profile.id === value);
+          if (found !== undefined) this.selectedProfile = found;
+          this.renderAskFields();
+        });
       });
-      setTimeout(() => text.inputEl.focus(), 0);
-    });
+
+    this.askContainer = contentEl.createDiv({ cls: "annex-ask-fields" });
+    this.renderAskFields();
 
     new Setting(contentEl)
       .addButton((button) => button.setButtonText("生成 metadata").setCta().onClick(() => this.submit()))
       .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
   }
 
-  private submit(): void {
-    const sample = this.value.trim();
-    if (sample === "") {
-      new Notice("样品名不能为空");
-      return;
+  private renderAskFields(): void {
+    this.askContainer.empty();
+    this.values = {};
+    const ask = askKeysFor(this.selectedProfile);
+    for (const key of ask) {
+      const prefilled = readAsk(this.host.settings, this.dir, key);
+      this.values[key] = prefilled;
+      new Setting(this.askContainer).setName(`询问字段：${key}`).addText((text) => {
+        text.setValue(prefilled);
+        text.onChange((value) => {
+          this.values[key] = value;
+        });
+        text.inputEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            this.submit();
+          }
+        });
+        text.inputEl.addClass("annex-ask-input");
+        text.inputEl.setAttr("data-ask-key", key);
+        setTimeout(() => text.inputEl.focus(), 0);
+      });
     }
+  }
+
+  private submit(): void {
+    const ask = askKeysFor(this.selectedProfile);
+    for (const key of ask) {
+      if ((this.values[key] ?? "").trim() === "") {
+        new Notice(`${key} 不能为空`);
+        return;
+      }
+    }
+    this.host.settings.folderProfiles[this.dir] = this.selectedProfile.id;
+    for (const key of ask) {
+      writeAsk(this.host.settings, this.dir, key, (this.values[key] ?? "").trim());
+    }
+    if (ask.includes("sample")) {
+      this.host.settings.defaultSample = (this.values["sample"] ?? "").trim();
+    }
+    void this.host.saveSettings();
+    const values: Record<string, string> = {};
+    for (const key of ask) values[key] = (this.values[key] ?? "").trim();
     this.close();
-    this.onSubmit(sample);
+    this.onSubmit(this.selectedProfile, values);
   }
 
   onClose(): void {
@@ -109,7 +204,17 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   // ── settings plumbing ────────────────────────────────────────────────────
 
   async loadSettings(): Promise<void> {
+    // 顺序不变：用户已有的 data.json 优先，缺失的键才用 DEFAULT_SETTINGS，绝不冲掉现有配置。
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // profiles 缺失/非法 → 内置 DEFAULT_PROFILES；并总是深拷贝，免得编辑时改到模块常量。
+    const profiles = Array.isArray(this.settings.profiles) ? this.settings.profiles : DEFAULT_PROFILES;
+    this.settings.profiles = cloneProfiles(profiles);
+    if (this.settings.folderProfiles === null || typeof this.settings.folderProfiles !== "object") {
+      this.settings.folderProfiles = {};
+    }
+    if (this.settings.folderSamples === null || typeof this.settings.folderSamples !== "object") {
+      this.settings.folderSamples = {};
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -189,18 +294,23 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
 
   private async runSidecars(folder: TFolder): Promise<void> {
     const dir = this.folderPath(folder);
-    const remembered = this.settings.folderSamples[dir] ?? this.settings.defaultSample;
-    new SamplePromptModal(this.app, folder.path, remembered, (sample) => {
-      void this.executeSidecars(folder, dir, sample);
+    const relpath = folder.path === "/" ? "" : folder.path;
+    new SamplePromptModal(this.app, folder.path, this, dir, relpath, (profile, values) => {
+      void this.executeSidecars(folder, dir, profile, values);
     }).open();
   }
 
-  private async executeSidecars(folder: TFolder, dir: string, sample: string): Promise<void> {
-    this.settings.folderSamples[dir] = sample;
-    this.settings.defaultSample = sample;
-    await this.saveSettings();
-
-    const progress = new Notice(`生成 metadata：${folder.path}（sample=${sample}）`, 0);
+  private async executeSidecars(
+    folder: TFolder,
+    dir: string,
+    profile: ParseProfile,
+    values: Record<string, string>,
+  ): Promise<void> {
+    // profile 选择与 ask 值已由弹窗写进 folderProfiles / folderSamples 并落盘。
+    const ask = askKeysFor(profile);
+    const sample = (values["sample"] ?? values[ask[0]] ?? "").trim();
+    const summary = ask.map((key) => `${key}=${values[key] ?? ""}`).join(" · ");
+    const progress = new Notice(`生成 metadata：${folder.path}（${profile.name}｜${summary}）`, 0);
     try {
       const report: SidecarReport = await generateSidecars(dir, {
         vaultRoot: this.vaultRoot(),

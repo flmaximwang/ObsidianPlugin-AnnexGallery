@@ -3,8 +3,20 @@ import * as path from "path";
 import { Progress } from "./types";
 import { git, magickBinary, run } from "./git";
 import { collectImages, stemOf } from "./stems";
+import {
+  DEFAULT_PROFILES,
+  parseWithProfile,
+  pickProfile,
+  type FieldType,
+  type ParseContext,
+  type ParseProfile,
+} from "./profiles";
 
-/** Frontmatter keys, in the exact order the 218 existing sidecars use. */
+/**
+ * Legacy default frontmatter key order (TECNAI). Kept as an exported constant
+ * because older callers/tests reference it; the authoritative order now lives
+ * in each profile's `keyOrder`.
+ */
 export const SIDECAR_KEYS = [
   "tags",
   "sample",
@@ -22,14 +34,39 @@ export const SIDECAR_KEYS = [
   "tif",
 ] as const;
 
+export interface BuildSidecarOptions {
+  /** Vault root — links are written as full vault-relative paths. */
+  vaultRoot: string;
+  /** 现场询问得到的键值（profile 的 ask），例如 `{ sample: "…" }`。 */
+  ask?: Record<string, string>;
+  /** 覆盖 `tags`（默认取相对 vault 的第一段路径）。 */
+  tag?: string;
+}
+
+export interface SidecarBuild {
+  /** 完整文件内容（frontmatter + 正文），与落盘逐字节相同。 */
+  text: string;
+  detail?: string;
+  /** 主正则是否命中该文件名。 */
+  matched: boolean;
+  /** 实际使用的 profile id。 */
+  profileId: string;
+}
+
 export interface SingleSidecarOptions {
   /** Vault root — links are written as full vault-relative paths. */
   vaultRoot: string;
   /** Git repo the images live in (dirty-file guard). */
   repoRoot: string;
-  /** Sample name written into `sample`. */
-  sample: string;
-  /** Defaults to the first path component under the vault root (e.g. `TEM`). */
+  /** ask 里 `sample` 的值（便捷写法；等价于 `ask: { sample }`）。 */
+  sample?: string;
+  /** ask 的其他键值。 */
+  ask?: Record<string, string>;
+  /** 指定 profile；不给就按 match 选，再不行用第一条。 */
+  profile?: ParseProfile;
+  /** 候选 profile；不给就用 DEFAULT_PROFILES。 */
+  profiles?: ParseProfile[];
+  /** 覆盖 `tags`（默认取相对 vault 的第一段路径）。 */
   tag?: string;
   /** Write to disk. Default false = dry run. */
   apply?: boolean;
@@ -41,7 +78,7 @@ export interface SingleSidecarOptions {
 export interface SidecarEntry {
   image: string;
   sidecar: string;
-  action: "created" | "planned" | "skipped-dirty" | "skipped-existing" | "failed";
+  action: "created" | "planned" | "skipped-dirty" | "skipped-existing" | "skipped-mismatch" | "failed";
   detail?: string;
 }
 
@@ -51,18 +88,11 @@ export interface SidecarReport {
   entries: SidecarEntry[];
   /** `stem` → number of images sharing it (only entries with collisions). */
   duplicateStems: Record<string, number>;
+  /** 本次用到的 profile id（都相同给单值，混用给 "auto"）。 */
+  profileId: string;
+  /** 主正则没命中的份数。 */
+  mismatch: number;
 }
-
-/**
- * `<mag>X-<mid>-<index>`.
- *
- * Legacy stems put the 视野号 in `mid` (`12345X-3-0010` → lens 3). The 2026-10
- * batch reuses that slot for the session suffix (`12345X-5705-0015`,
- * `12345X-97df-0042`), so `mid` is only read as `lens` when it is the short
- * legacy numeric form; otherwise the key stays present but empty.
- */
-const STEM_PATTERN = /^(\d+)X-([0-9A-Za-z]+)-(\d+)$/;
-const YAML_EMPTY = '""';
 
 function toPosix(p: string): string {
   return p.split(path.sep).join("/");
@@ -106,101 +136,138 @@ function identifyGeometry(image: string): { width: string; height: string } {
   return { width: parts[0], height: parts[1] };
 }
 
-interface SidecarFields {
-  tag: string;
-  sample: string;
-  session: string;
-  date: string;
-  magnification: string;
-  lens: string;
-  index: string;
-  width: string;
-  height: string;
-  size: string;
-  btime: string;
-  relThumb: string;
-  relOrig: string;
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-/** Render the sidecar body byte-for-byte like the 218 existing files. */
-function renderSidecar(f: SidecarFields): string {
-  return (
-    [
-      "---",
-      "tags:",
-      `  - ${f.tag}`,
-      `sample: "${f.sample}"`,
-      `session: "${f.session}"`,
-      `date: ${f.date}`,
-      `magnification: ${f.magnification}`,
-      `lens: ${f.lens}`,
-      `index: ${f.index}`,
-      `width: ${f.width}`,
-      `height: ${f.height}`,
-      `size: ${f.size}`,
-      `eagleId: ""`,
-      `btime: ${f.btime}`,
-      `thumbnail: "[[${f.relThumb}]]"`,
-      `tif: "[[${f.relOrig}]]"`,
-      "---",
-      "",
-      `缩略图：[[${f.relThumb}]]`,
-      "",
-      `原图（用系统默认程序打开）：[[${f.relOrig}]]`,
-      "",
-    ].join("\n")
-  );
+type RenderKind = "bare" | "quoted" | "list";
+
+interface Resolved {
+  value: string;
+  kind: RenderKind;
 }
 
-function buildSidecar(image: string, opts: SingleSidecarOptions): { text: string; detail?: string } {
+/** Render one frontmatter key the way the pre-change generator did. */
+function renderLine(key: string, r: Resolved): string {
+  if (r.kind === "list") return `${key}:\n  - ${r.value}`;
+  if (r.kind === "quoted") return `${key}: "${r.value}"`;
+  return `${key}: ${r.value}`;
+}
+
+/**
+ * 纯函数：算出一张图将要写入的 sidecar 文本（不落盘、不碰 git）。
+ *
+ * frontmatter 的键集合与顺序 = `profile.keyOrder` 里能取到值的键（取不到的省略，
+ * 记进 detail）。取值优先级：解析/pathFields > constFields > ask > 派生 > 自动。
+ */
+export function buildSidecarText(image: string, profile: ParseProfile, opts: BuildSidecarOptions): SidecarBuild {
+  const vaultRoot = opts.vaultRoot;
   const stem = stemOf(image);
   const imageDir = path.dirname(image);
   const session = path.basename(imageDir);
-  const tag = opts.tag ?? firstSegment(vaultRelative(opts.vaultRoot, imageDir));
+  const relOrig = vaultRelative(vaultRoot, image);
+  const relThumb = vaultRelative(vaultRoot, path.join(imageDir, `${stem}.thumbnail.png`));
 
-  const match = STEM_PATTERN.exec(stem);
-  let magnification: string;
-  let lens: string;
-  let index: string;
-  let detail: string | undefined;
-  if (match !== null) {
-    magnification = String(Number.parseInt(match[1], 10));
-    index = String(Number.parseInt(match[3], 10));
-    const mid = match[2];
-    if (/^\d{1,2}$/.test(mid)) {
-      lens = String(Number.parseInt(mid, 10));
-    } else {
-      lens = YAML_EMPTY;
-      detail = `stem 中段 ${mid} 不是视野号（像是会话后缀），lens 留空`;
-    }
-  } else {
-    magnification = YAML_EMPTY;
-    lens = YAML_EMPTY;
-    index = YAML_EMPTY;
-    detail = "stem 不符合 <mag>X-<lens>-<index>";
-  }
+  const ctx: ParseContext = {
+    stem,
+    filename: path.basename(image),
+    relpath: relOrig,
+    folderName: session,
+  };
 
-  const { width, height } = identifyGeometry(image);
-  const stat = fs.statSync(image);
-  const relThumb = vaultRelative(opts.vaultRoot, path.join(imageDir, `${stem}.thumbnail.png`));
-  const relOrig = vaultRelative(opts.vaultRoot, image);
+  const parsed = parseWithProfile(profile, ctx);
+  const constFields = profile.constFields ?? {};
+  const ask: Record<string, string> = { ...(opts.ask ?? {}) };
 
-  const text = renderSidecar({
-    tag,
-    sample: opts.sample,
+  const derived: Record<string, string> = {
+    tags: opts.tag ?? firstSegment(vaultRelative(vaultRoot, imageDir)),
     session,
     date: dateFromSession(session),
-    magnification,
-    lens,
-    index,
-    width,
-    height,
-    size: String(stat.size),
-    btime: formatBtime(stat.birthtime),
-    relThumb,
-    relOrig,
-  });
-  return detail === undefined ? { text } : { text, detail };
+  };
+
+  // 自动值按需算（magick identify 只在 keyOrder 真要 width/height 时才跑）。
+  let geom: { width: string; height: string } | undefined;
+  let stat: fs.Stats | undefined;
+  const geometry = (): { width: string; height: string } => (geom ??= identifyGeometry(image));
+  const statOf = (): fs.Stats => (stat ??= fs.statSync(image));
+
+  // key → 声明类型（fields 与 pathFields 都可能带类型）。
+  const typeByKey = new Map<string, FieldType | undefined>();
+  for (const spec of profile.fields) typeByKey.set(spec.key ?? spec.group, spec.type);
+  for (const spec of profile.pathFields ?? []) typeByKey.set(spec.key ?? spec.group, spec.type);
+
+  const resolve = (key: string): Resolved | undefined => {
+    if (hasOwn(parsed.values, key)) {
+      const type = typeByKey.get(key);
+      return { value: parsed.values[key], kind: type === "number" ? "bare" : "quoted" };
+    }
+    if (hasOwn(constFields, key)) {
+      const value = constFields[key];
+      return { value: String(value), kind: typeof value === "number" ? "bare" : "quoted" };
+    }
+    if (hasOwn(ask, key)) return { value: ask[key], kind: "quoted" };
+    if (hasOwn(derived, key)) {
+      if (key === "tags") return { value: derived.tags, kind: "list" };
+      if (key === "date") return { value: derived.date, kind: "bare" };
+      return { value: derived[key], kind: "quoted" }; // session
+    }
+    switch (key) {
+      case "width":
+        return { value: geometry().width, kind: "bare" };
+      case "height":
+        return { value: geometry().height, kind: "bare" };
+      case "size":
+        return { value: String(statOf().size), kind: "bare" };
+      case "btime":
+        return { value: formatBtime(statOf().birthtime), kind: "bare" };
+      case "thumbnail":
+        return { value: `[[${relThumb}]]`, kind: "quoted" };
+      case "tif":
+        return { value: `[[${relOrig}]]`, kind: "quoted" };
+      default:
+        return undefined;
+    }
+  };
+
+  const fmLines: string[] = [];
+  const notes: string[] = [];
+  for (const key of profile.keyOrder) {
+    const resolved = resolve(key);
+    if (resolved === undefined) {
+      notes.push(`keyOrder 里的 "${key}" 取不到值，已省略`);
+      continue;
+    }
+    fmLines.push(renderLine(key, resolved));
+  }
+  if (!parsed.matched) notes.push(`stem "${stem}" 不符合 profile ${profile.id} 的正则`);
+  if (parsed.missingGroups.length > 0) notes.push(`组没参与匹配：${parsed.missingGroups.join(",")}`);
+
+  const text = [
+    "---",
+    fmLines.join("\n"),
+    "---",
+    "",
+    `缩略图：[[${relThumb}]]`,
+    "",
+    `原图（用系统默认程序打开）：[[${relOrig}]]`,
+    "",
+  ].join("\n");
+
+  const detail = notes.length > 0 ? notes.join("；") : undefined;
+  return detail === undefined
+    ? { text, matched: parsed.matched, profileId: profile.id }
+    : { text, detail, matched: parsed.matched, profileId: profile.id };
+}
+
+/** frontmatter 的 context（右键文件夹时用来 pickProfile）。 */
+function contextFor(image: string, vaultRoot: string): ParseContext {
+  const stem = stemOf(image);
+  return {
+    stem,
+    filename: path.basename(image),
+    relpath: vaultRelative(vaultRoot, image),
+    folderName: path.basename(path.dirname(image)),
+  };
 }
 
 /** Non-empty `git status --porcelain` for `target` ⇒ the file is dirty. */
@@ -219,21 +286,27 @@ function mergeDetail(base: string | undefined, extra: string | undefined): strin
 /**
  * 「使用 Annex Gallery 管理」— the *core* of command #3 (no Obsidian imports).
  *
- * Writes one `<stem>.md` per source image, with a frontmatter block whose key
- * set/order matches the 218 existing sidecars and full vault-path wikilinks.
- * Dry run by default; existing targets are only rewritten when git reports
- * them dirty *and* `force` is set.
+ * profile 驱动：值/顺序由所选 profile 的 fields/constFields/ask/keyOrder +
+ * 内置的派生与自动值决定。不给 profile 就按 match 自动选，再不行用第一条。
+ * Dry run by default; existing targets are only rewritten when git reports them
+ * dirty *and* `force` is set.
  */
 export async function generateSidecars(dir: string, opts: SingleSidecarOptions): Promise<SidecarReport> {
   const apply = opts.apply === true;
   const force = opts.force === true;
   const progress: Progress = opts.progress ?? ((): void => {});
 
+  const profiles = opts.profiles !== undefined && opts.profiles.length > 0 ? opts.profiles : DEFAULT_PROFILES;
+  const ask: Record<string, string> = { ...(opts.ask ?? {}) };
+  if (opts.sample !== undefined && opts.sample !== "" && !hasOwn(ask, "sample")) ask.sample = opts.sample;
+
   const images = collectImages(dir);
   progress(`开始生成 sidecar：${dir}（${images.length} 张，${apply ? "写入" : "dry-run"}）`);
 
   const entries: SidecarEntry[] = [];
   const stemCounts = new Map<string, number>();
+  const usedIds = new Set<string>();
+  let mismatch = 0;
 
   for (let i = 0; i < images.length; i += 1) {
     const image = images[i];
@@ -242,7 +315,23 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
     const sidecar = path.join(path.dirname(image), `${stem}.md`);
     const label = `[${i + 1}/${images.length}]`;
     try {
-      const built = buildSidecar(image, opts);
+      const profile = opts.profile ?? pickProfile(profiles, contextFor(image, opts.vaultRoot)) ?? profiles[0];
+      if (profile === undefined) throw new Error("没有可用 profile");
+      usedIds.add(profile.id);
+      const built = buildSidecarText(image, profile, { vaultRoot: opts.vaultRoot, ask, ...(opts.tag === undefined ? {} : { tag: opts.tag }) });
+      if (!built.matched) mismatch += 1;
+
+      if (!built.matched && (profile.onMismatch ?? "empty") === "skip") {
+        entries.push({
+          image,
+          sidecar,
+          action: "skipped-mismatch",
+          detail: built.detail ?? `stem 不符合 profile ${profile.id} 的正则（onMismatch=skip，跳过）`,
+        });
+        progress(`${label} 跳过（正则没命中） ${stem}.md`);
+        continue;
+      }
+
       if (fs.existsSync(sidecar)) {
         const dirty = isDirty(opts.repoRoot, sidecar);
         if (dirty && !force) {
@@ -298,5 +387,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
   for (const entry of entries) counts[entry.action] = (counts[entry.action] ?? 0) + 1;
   progress(`完成：${JSON.stringify(counts)}${Object.keys(duplicateStems).length > 0 ? ` 重名 stem=${JSON.stringify(duplicateStems)}` : ""}`);
 
-  return { dir, dryRun: !apply, entries, duplicateStems };
+  const ids = [...usedIds];
+  const profileId = ids.length === 1 ? ids[0] : ids.length === 0 ? profiles[0]?.id ?? "?" : "auto";
+  return { dir, dryRun: !apply, entries, duplicateStems, profileId, mismatch };
 }

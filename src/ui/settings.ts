@@ -1,4 +1,8 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
+import { DEFAULT_PROFILES, type ParseProfile } from "../core/profiles";
+import { ProfileEditor, cloneProfile, cloneProfiles } from "./profile-editor";
+
+export { cloneProfile, cloneProfiles };
 
 export interface PluginSettings {
   /** Thumbnail edge length in px — keep equal to `.base`'s `cardSize`. */
@@ -11,6 +15,10 @@ export interface PluginSettings {
   defaultSample: string;
   /** Remembered sample per image folder (absolute path). */
   folderSamples: Record<string, string>;
+  /** T-008: metadata 解析配置，一条 profile = 一条正则 + 具名捕获组到键的映射。 */
+  profiles: ParseProfile[];
+  /** 文件夹绝对路径 → 选中的 profile id（右键弹窗记住上次选择）。 */
+  folderProfiles: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -19,7 +27,29 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   gitignorePath: "",
   defaultSample: "",
   folderSamples: {},
+  // 深拷贝：DEFAULT_SETTINGS 是模块级常量，绝不能被编辑操作就地改到。
+  profiles: cloneProfiles(DEFAULT_PROFILES),
+  folderProfiles: {},
 };
+
+/**
+ * ask 值的落盘位置：`sample` 沿用 `folderSamples[目录]`（与旧 data.json 兼容），
+ * 其它 ask 键用 `<目录>\u0001<键>` 这个复合键，避免给 folderSamples 多加一层。
+ */
+export function askStorageKey(folderDir: string, key: string): string {
+  return key === "sample" ? folderDir : `${folderDir}\u0001${key}`;
+}
+
+export function readAsk(settings: PluginSettings, folderDir: string, key: string): string {
+  const stored = settings.folderSamples[askStorageKey(folderDir, key)];
+  if (stored !== undefined) return stored;
+  // 兼容：老 data.json 只写了 folderSamples[目录]，键就是 sample。
+  return key === "sample" ? settings.folderSamples[folderDir] ?? "" : "";
+}
+
+export function writeAsk(settings: PluginSettings, folderDir: string, key: string, value: string): void {
+  settings.folderSamples[askStorageKey(folderDir, key)] = value;
+}
 
 /** What the settings tab needs from the plugin (breaks the import cycle). */
 export interface SettingsHost {
@@ -87,5 +117,9 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
           await this.host.saveSettings();
         }),
       );
+
+    // 多配置（profile）编辑器：单独一块容器，编辑器重渲染不会碰到上面的设置项。
+    const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
+    new ProfileEditor(profilesSection, this.host).render();
   }
 }
