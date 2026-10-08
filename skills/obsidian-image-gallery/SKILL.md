@@ -16,7 +16,7 @@ One image = three files, same folder, same stem:
 
 ```
 <folder>/<stem>.tif              # original (may be an annex symlink — see pitfall 1)
-<folder>/<stem>.thumbnail.png    # 96x96 cover, generated from the original
+<folder>/<stem>.thumbnail.png    # 256x256 cover by default (plugin setting; keep == .base cardSize)
 <folder>/<stem>.md               # the metadata file ("the Eagle .info replacement")
 ```
 
@@ -28,8 +28,9 @@ One image = three files, same folder, same stem:
   (user directive, 2026-10-08): Obsidian cannot render `.tif` anyway, and the cards-view cover comes
   from the frontmatter `image: note.thumbnail` key, not from a body embed.
 - ImageMagick one-liner (macOS has `magick`; no PIL needed):
-  `magick in.tif -resize 96x96 -strip -define png:compression-level=9 out.thumbnail.png`
-  An sRGB 2048x2048 tif lands as an 8-bit Grayscale ~7 KB png. 218 of them = 1.3 MB total.
+  `magick in.tif -resize 256x256 -strip -define png:compression-level=9 out.thumbnail.png`
+  An sRGB 2048x2048 tif lands as an 8-bit Grayscale png — measured ~49 KB at 256x256 (~7 KB at 96x96).
+  Thumbnails stay in git (`.gitattributes` → `annex.largefiles=nothing`), so 218 of them ≈ 10 MB.
 
 ## Pitfall 1 — symlinked sources (git-annex, DVC, DataLad) are silently DROPPED
 

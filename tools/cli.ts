@@ -99,13 +99,22 @@ function profileById(profiles: ParseProfile[], id: string): ParseProfile {
   return found;
 }
 
-/** 用给定的名字（当 stem）造一个解析 context。 */
+/**
+ * 用给定的名字造一个解析 context。
+ *
+ * 名字带扩展名时按「文件名」处理（stem 去扩展名）；给了 `--path` 就以它的 basename 当文件名
+ * —— 与插件里 `filename: path.basename(image)` 对齐，否则 `match.filenameRegex`（带扩展名锚的）
+ * 在 CLI 上永远命中不了，自动选择就验不了。
+ */
 function contextFromName(name: string, relpath?: string): ParseContext {
   const rel = relpath ?? name;
+  const filename = relpath !== undefined ? path.basename(relpath) : name;
+  const dot = filename.lastIndexOf(".");
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
   const parts = rel.split("/");
   return {
-    stem: name,
-    filename: name,
+    stem,
+    filename,
     relpath: rel,
     folderName: parts.length >= 2 ? parts[parts.length - 2] : "",
   };

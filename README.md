@@ -234,7 +234,8 @@ Obsidian 社区市场。`obsidian-image-gallery` 目前仍以手拷副本存在�
 ## skills/obsidian-image-gallery
 
 一图三件套（`<stem>.tif` / `<stem>.thumbnail.png` / `<stem>.md`，同目录同 stem），`.base` 只读 sidecar 的
-frontmatter，正文 `![[…thumbnail.png]]` 给 Obsidian 一个能渲染的 cover（`.tif` 它渲染不了）。
+frontmatter；正文**不嵌图**，只放两条可点击链接（`缩略图：[[…thumbnail.png]]` + `原图（用系统默认程序打开）：[[…tif]]`）——
+cards 视图的封面来自 frontmatter 的 `thumbnail`（`image: note.thumbnail`），`.tif` 本身 Obsidian 渲染不了。
 
 已实测的两个坑：
 
