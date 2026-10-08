@@ -8,6 +8,31 @@
 
 **可见性**：远端尚未创建，本仓库是唯一 source of truth（2026-10-08 起）。
 
+## 开发计划（loomerto）
+
+本仓库的开发计划住在仓库里，就是本仓库的基石：
+
+```
+plans/annex-gallery-plugin/
+├── plan.json     唯一真相（任务图 + 块文档 + 事件日志）
+├── PLAN.md       人读摘要（自动生成）
+├── plan.html     离线看板（自动生成，file:// 打开即可）
+└── plan.canvas   Obsidian JSON Canvas（自动生成）
+```
+
+```bash
+# 看现在该谁动 / 图质量 / 手动重渲三视图（plan 库不在默认位置，所以要给 --plans-root）
+loomerto --plans-root plans current annex-gallery-plugin
+loomerto --plans-root plans check   annex-gallery-plugin
+loomerto --plans-root plans render  annex-gallery-plugin
+# 要动手改就开可编辑画布（只绑 127.0.0.1）
+loomerto --plans-root plans open annex-gallery-plugin
+```
+
+**别手改** `PLAN.md` / `plan.html` / `plan.canvas`（下一次落盘就覆盖）；状态与文档一律走 `loomerto`。
+当前 22 个块 / 7 条泳道，三个待你拍板的块已置「待批准」并指给你：`T-002#B-001`（初始化 gallery 作用于哪个目录）、
+`T-003#B-001`（缩略图边长）、`T-007#B-002`（GitHub 远端与可见性）。
+
 ## 插件规格（待实现 —— 用户 2026-10-08 口径）
 
 | # | 入口 | 行为 |
