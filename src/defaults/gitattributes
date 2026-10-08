@@ -1,0 +1,8 @@
+# 默认都进 annex
+*               annex.largefiles=anything
+# 缩略图不进 annex
+*.thumbnail.png annex.largefiles=nothing
+# .md 作为每个文件的 metadata, 进 git
+*.md            annex.largefiles=nothing
+# .base 作为文件展示的视图，进 git
+*.base          annex.largefiles=nothing

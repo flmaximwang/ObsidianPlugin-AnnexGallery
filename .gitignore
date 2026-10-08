@@ -1,2 +1,6 @@
 .DS_Store
 node_modules/
+main.js
+tools/annex-gallery.mjs
+data.json
+*.log
