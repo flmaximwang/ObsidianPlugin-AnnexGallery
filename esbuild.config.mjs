@@ -40,7 +40,10 @@ const pluginOptions = {
 };
 
 const cliOptions = {
-  banner: { js: `#!/usr/bin/env node\n${banner}` },
+  // No shebang here: tools/cli.ts carries its own first-line shebang, and
+  // esbuild hoists it to line 1 — emitting one here too produced a *double*
+  // shebang and `node tools/annex-gallery.mjs` died with SyntaxError on line 2.
+  banner: { js: banner },
   entryPoints: ["tools/cli.ts"],
   bundle: true,
   external: [...nodeBuiltins],

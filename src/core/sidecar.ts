@@ -53,8 +53,15 @@ export interface SidecarReport {
   duplicateStems: Record<string, number>;
 }
 
-/** `<mag>X-<lens>-<index>` — the legacy microscope stem shape. */
-const STEM_PATTERN = /^(\d+)X-(\d+)-(\d+)$/;
+/**
+ * `<mag>X-<mid>-<index>`.
+ *
+ * Legacy stems put the 视野号 in `mid` (`12345X-3-0010` → lens 3). The 2026-10
+ * batch reuses that slot for the session suffix (`12345X-5705-0015`,
+ * `12345X-97df-0042`), so `mid` is only read as `lens` when it is the short
+ * legacy numeric form; otherwise the key stays present but empty.
+ */
+const STEM_PATTERN = /^(\d+)X-([0-9A-Za-z]+)-(\d+)$/;
 const YAML_EMPTY = '""';
 
 function toPosix(p: string): string {
@@ -158,8 +165,14 @@ function buildSidecar(image: string, opts: SingleSidecarOptions): { text: string
   let detail: string | undefined;
   if (match !== null) {
     magnification = String(Number.parseInt(match[1], 10));
-    lens = String(Number.parseInt(match[2], 10));
     index = String(Number.parseInt(match[3], 10));
+    const mid = match[2];
+    if (/^\d{1,2}$/.test(mid)) {
+      lens = String(Number.parseInt(mid, 10));
+    } else {
+      lens = YAML_EMPTY;
+      detail = `stem 中段 ${mid} 不是视野号（像是会话后缀），lens 留空`;
+    }
   } else {
     magnification = YAML_EMPTY;
     lens = YAML_EMPTY;

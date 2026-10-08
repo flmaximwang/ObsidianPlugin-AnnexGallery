@@ -53,10 +53,20 @@ export function isInsideWorkTree(dir: string): boolean {
   return r.code === 0 && r.stdout.trim() === "true";
 }
 
+/** macOS /tmp is a symlink to /private/tmp, so a plain path.resolve() on both
+ *  sides makes the comparison fail; compare realpaths instead. */
+function realPath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 /** True when `dir` is the *root* of a git work tree (not a subdirectory of one). */
 export function isRepoRoot(dir: string): boolean {
   const r = git(["rev-parse", "--show-toplevel"], dir);
-  return r.code === 0 && path.resolve(r.stdout.trim()) === path.resolve(dir);
+  return r.code === 0 && realPath(r.stdout.trim()) === realPath(dir);
 }
 
 export function gitDirOf(dir: string): string | null {
