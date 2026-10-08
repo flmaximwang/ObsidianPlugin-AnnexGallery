@@ -144,7 +144,7 @@ function renderSidecar(f: SidecarFields): string {
       `tif: "[[${f.relOrig}]]"`,
       "---",
       "",
-      `![[${f.relThumb}]]`,
+      `缩略图：[[${f.relThumb}]]`,
       "",
       `原图（用系统默认程序打开）：[[${f.relOrig}]]`,
       "",
