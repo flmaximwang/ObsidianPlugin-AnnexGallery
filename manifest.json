@@ -2,7 +2,7 @@
   "id": "annex-gallery",
   "name": "Annex Gallery",
   "version": "0.1.0",
-  "minAppVersion": "1.6.7",
+  "minAppVersion": "1.14.4",
   "description": "把 git / git-annex 管的图片文件夹做成图库：初始化 gallery、批量生成缩略图、生成 sidecar .md 元数据、合并 .gitattributes 与 .gitignore。",
   "author": "flmaximwang",
   "authorUrl": "https://github.com/flmaximwang",

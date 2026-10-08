@@ -6,7 +6,9 @@
 本仓库同时收配套 skill [`obsidian-image-gallery`](skills/obsidian-image-gallery/SKILL.md) —— 它记录侧车模式
 的字段形状、两个必踩的坑（annex 软链被 Obsidian 静默丢弃、链接必须写全 vault 路径）与交付前验证。
 
-**可见性**：远端尚未创建，本仓库是唯一 source of truth（2026-10-08 起）。
+**可见性**：远端已创建 —— GitHub `flmaximwang/ObsidianPlugin-AnnexGallery`（**private**），remote 已是 SSH 形式
+`git@github.com:flmaximwang/ObsidianPlugin-AnnexGallery.git`，`main` 已推送（2026-10-08 起）。
+选 private 是因为仓库里带课题绝对路径与样品名；要公开只需 `gh repo edit --visibility public`。
 
 ## 开发计划（loomerto）
 
@@ -30,24 +32,33 @@ loomerto --plans-root plans open annex-gallery-plugin
 ```
 
 **别手改** `PLAN.md` / `plan.html` / `plan.canvas`（下一次落盘就覆盖）；状态与文档一律走 `loomerto`。
-当前 22 个块 / 7 条泳道，三个待你拍板的块已置「待批准」并指给你：`T-002#B-001`（初始化 gallery 作用于哪个目录）、
-`T-003#B-001`（缩略图边长）、`T-007#B-002`（GitHub 远端与可见性）。
+当前 22 个块 / 7 条泳道；三个原先待拍板的块已由用户 2026-10-08 拍板并落进下文规格：
+`T-002#B-001`（初始化 gallery 作用于哪个目录 = 当前打开的 vault 根）、`T-003#B-001`（缩略图边长 = 256×256）、
+`T-007#B-002`（GitHub 远端已建：private + SSH）。
 
 ## 插件规格（待实现 —— 用户 2026-10-08 口径）
 
 | # | 入口 | 行为 |
 |---|---|---|
-| 1 | 注册命令 | **初始化 gallery**：将当前仓库初始化为 1 个用 git + git-annex 管理的 repo |
-| 2 | 右键文件夹菜单 | **生成缩略图**：为该文件夹中所有的图片生成 `.thumbnail.png` 缩略图 |
+| 1 | 注册命令 | **初始化 gallery**：把**当前打开的 vault 根**（运行时取 `app.vault.adapter.getBasePath()`）初始化为 1 个用 git + git-annex 管理的 repo。目标目录**已经是 git 仓库**时**不重建、不覆盖**：跳过 `git init`，只补缺的那几步（必要时 `git annex init`，再合并两条规则文件）。 |
+| 2 | 右键文件夹菜单 | **生成缩略图**：为该文件夹中所有的图片生成 `.thumbnail.png` 缩略图。默认边长 **256×256**（可在插件设置页调整 `thumbnailEdge`；约定与 `.base` 的 `cardSize` 一致）。 |
 | 3 | 右键文件夹菜单 | **使用 Annex Gallery 管理**：为该文件夹中的图片生成 `.md` 元数据，供 `.base` 查找 |
 | 4 | 插件设置 | 可修改 `.gitattributes` 与 `.gitignore`（默认值见下） |
 
-设置项的默认值：
+### 插件设置页（字段与默认值）
 
-- `.gitattributes` 默认指向 `.../lab_10_lab-project-a_2026.06.25/Data_lab_10/.gitattributes`
-- `.gitignore` 默认只忽略 `.obsidian`
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
+| `.gitattributes` 路径（`gitattributesPath`） | 空 ⇒ `<vault>/.gitattributes` | 合并目标文件；留空即用当前 vault 根下的 `.gitattributes`。 |
+| `.gitignore` 路径（`gitignorePath`） | 空 ⇒ `<vault>/.gitignore` | 合并目标文件；默认内容只有一行 `.obsidian`。 |
+| 默认样品名（`defaultSample`） | 空 | 命令 3 写 sidecar `.md` 时填进 `sample` 字段的默认值；为空时命令 3 会先提示填写。按文件夹记住上一次用过的名字（`folderSamples`）。 |
 
-默认 `.gitattributes`（本机实况，逐字）：
+**写入语义是「合并」**：逐行比对规则（去首尾空白、把连续空白压成一个空格后比较），目标文件里**已有的行一字不改、
+不动顺序**，只把缺的规则追加到末尾；重复运行**幂等**（不多写一个字节）。两条规则文件的默认内容是插件内置模板
+（`src/defaults/gitattributes`、`src/defaults/gitignore`），与真实数据仓库那份**逐字一致**。
+
+内置默认 `.gitattributes`（与真实数据仓库 `Data_lab_10/.gitattributes` **逐字节一致**；文件结尾**无换行符**）：
 
 ```gitattributes
 # 默认都进 annex
@@ -74,8 +85,29 @@ hermes skills install "flmaximwang/ObsidianPlugin-AnnexGallery/skills/obsidian-i
 
 安装时会 pin 到当时的 commit，之后 `hermes skills check` / `hermes skills update <name>` 直接可用。
 
-**当前状态**：尚未发布（远端未创建）；`obsidian-image-gallery` 目前仍以手拷副本存在于 default 与
-`plasmid-engineer` 两个 profile，**迁移完成后会走 hub 安装并清掉手拷副本**（需用户发话，见下）。
+### 插件源码与 CLI
+
+| 入口 | 相对路径 |
+|---|---|
+| 插件主入口 | `main.ts`（四入口注册 + 设置页接线；`npm run build` 打成 `main.js`） |
+| 核心逻辑 | `src/core/init.ts` · `rules.ts` · `thumbnails.ts` · `sidecar.ts` · `stems.ts` · `git.ts`（不依赖 Obsidian，插件与 CLI 共用） |
+| 设置页 | `src/ui/settings.ts`（字段定义与 `DEFAULT_SETTINGS`） |
+| 内置默认模板 | `src/defaults/gitattributes` · `src/defaults/gitignore` |
+| CLI 源码 | `tools/cli.ts` |
+
+CLI 走同一套核心逻辑、脱离 Obsidian 跑。构建产物 `tools/annex-gallery.mjs` 由 `npm run build` 生成、**不入库**：
+
+```bash
+node tools/annex-gallery.mjs init    <dir> [--dry-run] [--json]
+node tools/annex-gallery.mjs thumbs  <dir> [--edge 256] [--dry-run] [--force] [--json]
+node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> [--repo <root>] [--apply] [--force] [--json]
+node tools/annex-gallery.mjs stems   <dir> [--json]
+node tools/annex-gallery.mjs defaults          # 打印插件内置的 .gitattributes 模板
+```
+
+**当前状态**：远端已创建（`flmaximwang/ObsidianPlugin-AnnexGallery`，private，`main` 已推送）；插件本体尚未发布到
+Obsidian 社区市场。`obsidian-image-gallery` 目前仍以手拷副本存在于 default 与 `plasmid-engineer` 两个 profile，
+**迁移完成后会走 hub 安装并清掉手拷副本**（profile 收敛是另一块，需用户发话）。
 
 ## skills/obsidian-image-gallery
 
