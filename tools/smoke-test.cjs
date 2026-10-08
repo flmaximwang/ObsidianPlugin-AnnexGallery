@@ -95,6 +95,35 @@ function assert(condition, message) {
     assert(resultEl.getAttr("data-state") === "ok", "预览结果状态 = ok");
   }
 
+  // ── 3b. 预览的三种状态：没填 / 不命中 / 命中（不许把「没填」渲染成假结果表）──
+  fnameInput.value = "";
+  fnameInput.dispatchEvent({ type: "input" });
+  assert(resultEl.getAttr("data-state") === "idle", "没填文件名时预览状态 = idle");
+  assert(byClass(resultEl, "annex-preview-hint").length === 1, "没填文件名时给提示");
+  assert(byClass(resultEl, "annex-preview-row").length === 0, "没填文件名时不渲染字段行（不假装解析过）");
+
+  fnameInput.value = "randomname.png";
+  fnameInput.dispatchEvent({ type: "input" });
+  assert(resultEl.getAttr("data-state") === "nomatch", "名字不命中正则时预览状态 = nomatch");
+  const nomatchEl = byClass(resultEl, "annex-preview-nomatch")[0];
+  assert(nomatchEl !== undefined && /正则不命中/.test(nomatchEl.textContent), "不命中时显式写明「正则不命中」");
+
+  fnameInput.value = "12345X-5705-0015.tif";
+  fnameInput.dispatchEvent({ type: "input" });
+  assert(resultEl.getAttr("data-state") === "ok", "名字命中时预览状态 = ok");
+
+  // ── 3c. 有 error 的配置不许写盘（坏正则写进 data.json 会让右键弹窗崩）─────
+  const jsonArea = byClass(tab.containerEl, "annex-profile-json")[0];
+  const goodJson = jsonArea.value;
+  jsonArea.value = JSON.stringify({ ...JSON.parse(goodJson), regex: "(" }, null, 2);
+  jsonArea.dispatchEvent({ type: "input" });
+  const savedBefore = JSON.stringify(stub.registry.savedData);
+  byClass(tab.containerEl, "annex-profile-apply")[0].click();
+  await tick();
+  assert(JSON.stringify(stub.registry.savedData) === savedBefore, "坏正则时点「应用」不写盘");
+  jsonArea.value = goodJson;
+  jsonArea.dispatchEvent({ type: "input" });
+
   // ── 4. 设置页：新增 / 复制 / 删除 都落盘 ───────────────────────────────────
   byClass(tab.containerEl, "annex-profile-add")[0].click();
   await tick();

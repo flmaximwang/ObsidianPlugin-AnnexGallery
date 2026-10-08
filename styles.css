@@ -1,0 +1,199 @@
+/* Annex Gallery — 设置页与弹窗的样式。
+ * Obsidian 会自动加载插件目录下的 styles.css，所以这个文件必须与 main.js / manifest.json
+ * 一起被复制进 <vault>/.obsidian/plugins/annex-gallery/。
+ */
+
+/* ── 多配置（profile）区 ─────────────────────────────────────────────────── */
+
+.annex-profiles-section {
+  margin-top: 1.5em;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 1em;
+}
+
+.annex-profiles-head h3 {
+  margin: 0 0 0.3em 0;
+}
+
+.annex-profiles-head p {
+  margin: 0 0 0.8em 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-profiles-toolbar {
+  margin-bottom: 0.8em;
+}
+
+.annex-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.annex-profiles-empty {
+  color: var(--text-muted);
+}
+
+/* ── 一张 profile 卡片 ──────────────────────────────────────────────────── */
+
+.annex-profile-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  padding: 0.8em 1em 1em 1em;
+}
+
+.annex-profile-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+}
+
+.annex-profile-name {
+  font-weight: var(--font-semibold);
+}
+
+.annex-profile-id {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.annex-profile-sep {
+  color: var(--text-faint);
+}
+
+.annex-profile-match {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.annex-profile-status {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  padding: 0.1em 0.5em;
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.annex-profile-status[data-level="ok"] {
+  color: var(--text-success);
+}
+
+.annex-profile-status[data-level="warn"] {
+  color: var(--text-warning);
+}
+
+.annex-profile-status[data-level="error"] {
+  color: var(--text-error);
+}
+
+/* JSON 编辑框：默认 rows=2 太矮，这里给足高度并等宽字体 */
+.annex-profile-json {
+  width: 100%;
+  min-height: 20em;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+  resize: vertical;
+}
+
+.annex-profile-messages {
+  margin: 0.4em 0 0 0;
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-profile-msg-error {
+  color: var(--text-error);
+}
+
+.annex-profile-msg-warn {
+  color: var(--text-warning);
+}
+
+/* ── 解析预览 ───────────────────────────────────────────────────────────── */
+
+.annex-preview {
+  margin-top: 0.8em;
+  border-top: 1px dashed var(--background-modifier-border);
+  padding-top: 0.6em;
+}
+
+.annex-preview-title {
+  font-weight: var(--font-semibold);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 0.4em;
+}
+
+.annex-preview-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.annex-preview-inputs input {
+  flex: 1 1 14em;
+  min-width: 10em;
+}
+
+.annex-preview-result {
+  margin-top: 0.5em;
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-preview-hint {
+  color: var(--text-muted);
+}
+
+.annex-preview-nomatch {
+  color: var(--text-warning);
+  margin-bottom: 0.3em;
+}
+
+.annex-preview-error {
+  color: var(--text-error);
+}
+
+.annex-preview-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+}
+
+.annex-preview-row {
+  font-family: var(--font-monospace);
+}
+
+.annex-preview-missing .annex-preview-key {
+  color: var(--text-faint);
+}
+
+.annex-preview-empty-value .annex-preview-value {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.annex-preview-missing-groups,
+.annex-preview-extra-groups {
+  margin-top: 0.35em;
+  color: var(--text-muted);
+}
+
+/* ── 卡片底部动作 ───────────────────────────────────────────────────────── */
+
+.annex-profile-actions {
+  display: flex;
+  gap: 0.5em;
+  margin-top: 0.8em;
+}
+
+.annex-profile-actions button {
+  cursor: pointer;
+}

@@ -23,8 +23,10 @@ One image = three files, same folder, same stem:
 - Thumbnail name MUST be `<stem>.thumbnail.png`, not `<stem>.png`: a later original may itself be a
   `.png`, and derived artifacts must stay distinguishable from source images.
 - Sidecar frontmatter carries every displayable/filterable value; the `.base` only reads them.
-- Body: `![[<path>.thumbnail.png]]` + a link line to the original. Obsidian cannot render `.tif`,
-  so the cover is the only thing the note can actually show.
+- Body: two *clickable links*, not image embeds — `缩略图：[[<full vault path>.thumbnail.png]]`
+  then `原图（用系统默认程序打开）：[[<full vault path>.tif]]`. Do **not** write `![[…]]` embeds
+  (user directive, 2026-10-08): Obsidian cannot render `.tif` anyway, and the cards-view cover comes
+  from the frontmatter `image: note.thumbnail` key, not from a body embed.
 - ImageMagick one-liner (macOS has `magick`; no PIL needed):
   `magick in.tif -resize 96x96 -strip -define png:compression-level=9 out.thumbnail.png`
   An sRGB 2048x2048 tif lands as an 8-bit Grayscale ~7 KB png. 218 of them = 1.3 MB total.
@@ -90,6 +92,38 @@ unquoted and camelCase. Mirroring an existing library's own field names (Eagle: 
 before naming it**: Eagle `btime` looked like acquisition time, yet within one session the 10-30
 images spanned 0.1-2 min in index order and sibling session folders interleaved — that is file-write
 / import time, not exposure time. Name it `btime`, don't name it `acquired`.
+
+## Config-driven metadata parsing（配置驱动的 metadata 解析）
+
+The generator ships a TECNAI profile but is **not** TECNAI-only: a *profile* is one regex with named
+groups → named/typed fields → the exact frontmatter key order. The schema of record is the types plus
+`DEFAULT_PROFILES` in `src/core/profiles.ts` (`ParseProfile`, `FieldSpec`, `DERIVED_KEYS`,
+`COMPUTED_KEYS`, `DEFAULT_ASK`). Adding a second, unrelated naming convention means editing
+settings/JSON only — no code change. The settings tab edits multiple profiles (persisted in
+`data.json`'s `profiles` array); the right-click prompt pre-selects by `match` and remembers the
+choice per folder.
+
+Five value sources per profile, precedence `parsed/pathFields > constFields > ask > derived > computed`:
+
+1. **parsed** — `regex` named groups → `fields` (`type: "number"` renders bare, default `text` renders double-quoted);
+2. **derived** — `tags` (first vault-relative path segment), `session` (folder name), `date` (first 8 chars of `session` → `YYYY-MM-DD`, else empty);
+3. **computed** — `width`/`height` (`magick identify`), `size` (bytes), `btime` (file birthtime, *not* exposure), `thumbnail`/`tif` (both `"[[full vault path]]"`);
+4. **constant** — `constFields`;
+5. **asked** — `ask` (default `["sample"]`), filled in the right-click prompt, remembered per folder.
+
+`keyOrder` **is** the final frontmatter key order: keys not listed are never written (add a field only
+if you also add it to `keyOrder`); a listed key with no value from any source is **omitted** and noted
+in that sidecar's detail. Three hard rules: (1) named groups absent from `fields` are **discarded** —
+this lets you write branch regexes such as `(?:(?<lens>\d{1,2})|(?<lensToken>[0-9A-Za-z]+))` where the
+long token only balances the alternation; (2) a group that did not participate in the match writes its
+field's `whenMissing` (default empty string, key kept); (3) a fully non-matching name follows
+`onMismatch` — `empty` (blank fields, counted in `mismatch`, default) or `skip`. `pathRegex` +
+`pathFields` run on the vault-relative path and override same-named derived values.
+
+CLI surface: `node tools/annex-gallery.mjs profiles --list | --check | --parse "<name>" [--path <rel>]
+[--profile <id>]`, and `sidecar <dir> --vault <root> --profiles-file <json> [--profile <id>]
+[--apply|--verify]`. A worked example with a `plate/well/magnification/index` convention completely
+unlike TECNAI — plus a rerun script — lives in `tools/example-profiles/`.
 
 ## A live Obsidian session rewrites your .base
 

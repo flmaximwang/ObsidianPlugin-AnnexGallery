@@ -127,14 +127,20 @@ export class ProfileEditor {
 
     const head = card.createDiv({ cls: "annex-profile-card-head" });
     const nameEl = head.createSpan({ cls: "annex-profile-name", text: profile.name || "（未命名）" });
-    const idEl = head.createSpan({ cls: "annex-profile-id", text: profile.id });
+    head.createSpan({ cls: "annex-profile-sep", text: "·" });
+    const idEl = head.createSpan({ cls: "annex-profile-id", text: `id: ${profile.id}` });
+    head.createSpan({ cls: "annex-profile-sep", text: "·" });
     const matchEl = head.createSpan({
       cls: "annex-profile-match",
-      text: profile.match ? `match: ${JSON.stringify(profile.match)}` : "match: 无（不会自动命中）",
+      text: profile.match ? `match: ${JSON.stringify(profile.match)}` : "match: 无（右键时要手选）",
     });
+    head.createSpan({ cls: "annex-profile-sep", text: "·" });
     const statusEl = head.createSpan({ cls: "annex-profile-status" });
 
     const textarea = card.createEl("textarea", { cls: "annex-profile-json" });
+    // Obsidian 的 textarea 默认只有 2 行高，JSON 配置根本看不全
+    textarea.rows = 20;
+    textarea.spellcheck = false;
     textarea.value = JSON.stringify(profile, null, 2);
 
     const messages = card.createDiv({ cls: "annex-profile-messages" });
@@ -143,9 +149,9 @@ export class ProfileEditor {
     preview.createDiv({ cls: "annex-preview-title", text: "解析预览" });
     const inputs = preview.createDiv({ cls: "annex-preview-inputs" });
     const filenameInput = inputs.createEl("input", { cls: "annex-preview-filename", type: "text" });
-    filenameInput.setAttr("placeholder", "文件名，例如 12345X-5705-0015");
+    filenameInput.setAttr("placeholder", "例：12345X-5705-0015.tif");
     const relpathInput = inputs.createEl("input", { cls: "annex-preview-relpath", type: "text" });
-    relpathInput.setAttr("placeholder", "可选：相对 vault 路径，例如 TEM/20261008-1495dd26-5705");
+    relpathInput.setAttr("placeholder", "可选：相对 vault 路径（留空 = 用文件名当路径）");
     const runButton = inputs.createEl("button", { cls: "annex-preview-run", text: "解析" });
     const resultEl = preview.createDiv({ cls: "annex-preview-result" });
 
@@ -163,11 +169,20 @@ export class ProfileEditor {
 
     const renderPreview = (): void => {
       resultEl.empty();
-      const context = buildContext(filenameInput.value, relpathInput.value);
+      const filename = filenameInput.value.trim();
+      if (filename === "") {
+        resultEl.setAttr("data-state", "idle");
+        resultEl.createDiv({
+          cls: "annex-preview-hint",
+          text: "在上面填一个真实文件名再看结果；正则不命中时这里会写明「正则不命中」。预览只显示正则拆出来的字段（tags / session / date / width 等是生成时另算的）。",
+        });
+        return;
+      }
+      const context = buildContext(filename, relpathInput.value);
       try {
         const parsed = parseWithProfile(draft, context);
-        resultEl.setAttr("data-state", "ok");
-        renderParsed(resultEl, draft, parsed);
+        resultEl.setAttr("data-state", parsed.matched ? "ok" : "nomatch");
+        renderParsed(resultEl, draft, parsed, filename);
       } catch (error) {
         resultEl.setAttr("data-state", "error");
         resultEl.createDiv({ cls: "annex-preview-error", text: `解析暂不可用：${errText(error)}` });
@@ -189,8 +204,8 @@ export class ProfileEditor {
       draft = parsed;
       card.setAttr("data-profile-id", draft.id ?? "");
       nameEl.setText(draft.name || "（未命名）");
-      idEl.setText(draft.id ?? "");
-      matchEl.setText(draft.match ? `match: ${JSON.stringify(draft.match)}` : "match: 无（不会自动命中）");
+      idEl.setText(`id: ${draft.id ?? ""}`);
+      matchEl.setText(draft.match ? `match: ${JSON.stringify(draft.match)}` : "match: 无（右键时要手选）");
 
       try {
         const issues: ProfileIssue[] = validateProfile(draft);
@@ -217,11 +232,29 @@ export class ProfileEditor {
       let parsed: ParseProfile;
       try {
         parsed = JSON.parse(textarea.value) as ParseProfile;
+      } catch (error) {
+        messages.empty();
+        messages.createDiv({
+          cls: "annex-profile-msg annex-profile-msg-error",
+          text: `JSON 解析失败，未写盘：${errText(error)}`,
+        });
+        setStatus("JSON 错误（未写盘）", "error");
+        return;
+      }
+      // 有 error 级问题就不写盘：坏正则写进 data.json 会让右键弹窗直接崩。
+      let issues: ProfileIssue[] = [];
+      try {
+        issues = validateProfile(parsed);
       } catch {
-        return; // JSON 没解析通过就不落盘，避免把坏配置写进 data.json
+        issues = [];
+      }
+      if (issues.some((issue) => issue.level === "error")) {
+        setStatus(`校验：${issues.length} 条问题，未写盘`, "error");
+        return;
       }
       this.host.settings.profiles[index] = parsed;
       await this.host.saveSettings();
+      setStatus("已写盘", "ok");
     };
 
     textarea.addEventListener("input", refresh); // 实时校验/预览，不落盘
@@ -237,7 +270,18 @@ export class ProfileEditor {
   }
 }
 
-function renderParsed(resultEl: HTMLElement, profile: ParseProfile, parsed: ParsedFields): void {
+function renderParsed(
+  resultEl: HTMLElement,
+  profile: ParseProfile,
+  parsed: ParsedFields,
+  filename: string,
+): void {
+  if (!parsed.matched) {
+    resultEl.createDiv({
+      cls: "annex-preview-nomatch",
+      text: `正则不命中：「${filename}」不符合这条 profile 的 regex（onMismatch=${profile.onMismatch ?? "empty"}）。下面每行是把 fields 按 whenMissing 填出来的值，不是从文件名解析出来的。`,
+    });
+  }
   const rows = resultEl.createDiv({ cls: "annex-preview-rows" });
   const fieldSpecs = Array.isArray(profile.fields) ? profile.fields : [];
   if (fieldSpecs.length === 0) {

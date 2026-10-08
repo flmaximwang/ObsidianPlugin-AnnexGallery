@@ -87,7 +87,7 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
       .setDesc(`留空 = <vault>/.gitattributes（当前 ${this.host.vaultRoot()}/.gitattributes）。写入是合并：只补缺失的规则。`)
       .addText((text) =>
         text
-          .setPlaceholder(`${this.host.vaultRoot()}/.gitattributes`)
+          .setPlaceholder("<vault>/.gitattributes")
           .setValue(this.host.settings.gitattributesPath)
           .onChange(async (value) => {
             this.host.settings.gitattributesPath = value.trim();
@@ -100,7 +100,7 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
       .setDesc("留空 = <vault>/.gitignore。默认只忽略 .obsidian。")
       .addText((text) =>
         text
-          .setPlaceholder(`${this.host.vaultRoot()}/.gitignore`)
+          .setPlaceholder("<vault>/.gitignore")
           .setValue(this.host.settings.gitignorePath)
           .onChange(async (value) => {
             this.host.settings.gitignorePath = value.trim();
