@@ -16,15 +16,19 @@
  * ── 硬规则 ──────────────────────────────────────────────────────────────────
  *   - `keyOrder` 是**最终 frontmatter 的键顺序**；不在表里的键一律不写。想加字段就同时
  *     加进 keyOrder，否则它只是被算出来、不会落进文件。
- *   - `fields` 里没列出的具名组 = 丢弃。这是为了能写分支，例如 TECNAI 的新命名：
+ *   - `fields` 里没列出的具名组 = 丢弃。这是为了能写分支：把两条路写进同一条正则、
  *     `(?:(?<lens>\d{1,2})|(?<lensToken>[0-9A-Za-z]+))` —— 短的走 lens，长的那个 token
  *     只用来把正则配平，不落进任何键。
  *   - `pathRegex` + `pathFields` 跑在相对 vault 的路径上，**同名的键覆盖派生值**。
  *   - 正则不命中时按 `onMismatch`：`empty`（字段写空值，报告里标出来，默认）/ `skip`（跳过这张图）。
  */
 
-/** 一个具名捕获组 → frontmatter 的一个键。 */
-export type FieldType = "number" | "text";
+/**
+ * 字段写进 YAML 的形态：`number` → 裸数字；`text` → 双引号字符串。
+ * `string` 是 `text` 的**等价历史拼写**（用户既有 `data.json` 里在用，例如 TECNAI 的 marker 字段），
+ * 渲染时和 `text` 走同一条路（sidecar 里只有 `number` 是特判）。
+ */
+export type FieldType = "number" | "text" | "string";
 
 export interface FieldSpec {
   /** 正则里的具名捕获组名。 */
@@ -71,17 +75,21 @@ export const COMPUTED_KEYS = ["width", "height", "size", "btime", "thumbnail", "
 export const DEFAULT_ASK = ["sample"];
 
 /**
- * 内置 profile：TECNAI 电镜。必须**逐字节复现**改造前生成器的行为
- * （218 份存量 + 已生成的 46 份 sidecar 都不许变）。
+ * 内置 profile：TECNAI 电镜 —— **以用户 2026-10-17 给的原文 JSON 为准**
+ * （原话「这才是 TECNAI 的正确预设」；随后把 marker 从 `.*` 收紧成 `.+`，
+ * 并要求中间段带下划线/小数点的名字能命中，例：`12345X-5_1.4-0001`）。
+ *
+ * 注意 `constFields` 里有 `eagleId`、而 `keyOrder` 里没有 —— 按上面的硬规则「不在 keyOrder 里的键一律不写」，
+ * 它当前**不会**落进 frontmatter（保留声明只为沿用用户配置原文）。
  */
 export const TECNAI_TEM_PROFILE: ParseProfile = {
   id: "tecnaitem",
-  name: "TECNAI 电镜（<放大倍数>X-<视野号|会话后缀>-<序号>）",
+  name: "TECNAI 电镜（<放大倍数>X-<标记>-<序号>）",
   source: "stem",
-  regex: "^(?<magnification>\\d+)X-(?:(?<lens>\\d{1,2})|(?<lensToken>[0-9A-Za-z]+))-(?<index>\\d+)$",
+  regex: "^(?<magnification>\\d+)X-(?<marker>.+)-(?<index>\\d+)$",
   fields: [
     { group: "magnification", type: "number" },
-    { group: "lens", type: "number", whenMissing: '""' },
+    { group: "marker", type: "string" },
     { group: "index", type: "number" },
   ],
   constFields: { eagleId: "" },
@@ -92,12 +100,10 @@ export const TECNAI_TEM_PROFILE: ParseProfile = {
     "session",
     "date",
     "magnification",
-    "lens",
     "index",
     "width",
     "height",
     "size",
-    "eagleId",
     "btime",
     "thumbnail",
     "tif",

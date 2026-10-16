@@ -86,6 +86,28 @@ Heading 全部没有 padding，目视检查与左侧对齐
 | 位置 | `hr` 插在 **remote 区与模版区之间**（顶层第 3 个元素），模版区下面原来那条分割线保留 | `containerEl.createEl("hr", { cls: "annex-remotes-divider annex-settings-divider" })`（共用外观类 + 一个自己的类，判据好写） |
 | 上下留白 | 实测**上下各 18.75px**（对称） | `.annex-remotes-divider { margin: 1.25em 0 }`；上面那半留白会被 `.annex-remotes-section` 的 `1em` 底边距**折叠**（取大者），所以写 `1.25em` 才对称 —— 写 `0.5em` 实测仍是 15px |
 
+### 追加口径（2026-10-17 六次修正）：TECNAI 的正确预设
+
+> 原文（连发两条）：**「这才是 TECNAI 的正确预设」**（给了完整 JSON）→
+> **「这个更好一些，但是 12345X-5_1.4-0001 匹配失败」**（把 marker 从 `.*` 收紧成 `.+`）。
+
+| 问题 | 口径 | 落地 |
+|---|---|---|
+| 内置 `TECNAI_TEM_PROFILE` | 以用户给的原文 JSON 为准：`name` 里写 `<标记>`；`X-` 之间只有一个具名组 `marker`（`(?<marker>.+)`）；`fields` 三项（magnification number / **marker string** / index number）；`keyOrder` **12 键**（去掉 `lens` 与 `eagleId`） | `src/core/profiles.ts`；同步 `tools/example-profiles/two-profiles.json`、`tools/example-profiles/verify-plugin-load.cjs`（14→12 键断言）、README 示例 1 |
+| 中间段带下划线 / 小数点要能命中 | `12345X-5_1.4-0001` ⇒ `marker=5_1.4`、`index=0001`（number 类型会规整成 `1`，与 `0015 → 15` 同一口径） | 真机 `npm run gui`：在设置页预览框里实敲这条名字，`state=ok` |
+| `type: "string"` | 插件 schema 原来只有 `number` / `text`；现在 `FieldType` 加 `"string"` 作为 **`text` 的等价拼写**（渲染都走带引号那条 —— sidecar 里只有 `number` 是特判），这样用户配置原文能不改编就落进 schema | `src/core/profiles.ts` 的 `FieldType` |
+
+**「匹配失败」有两层原因，都不是正则在数据上不行**（拿两个 vault 的 **2177** 个真实图片名实测）：
+
+1. **预览的 stem 算错**（真 bug，已修）：`src/ui/profile-editor.ts` 里有一份**自己抄的** `stemOf`，把最后一个 `.` 之后整段当扩展名 —— 而用户给的名字是**不带扩展名**的 `12345X-5_1.4-0001`，于是被削成 stem `12345X-5_1` ⇒ 明明该命中，预览却写「正则不命中」。
+   修法：改用 `core/stems` 那份 `stemOf`（同一实现，别抄第二份），并在**不带图片扩展名时把这个串本身也当 stem 试一次**（候选两条都试，命中即用；都不命中时按引擎口径那条报错）。
+   判据：`npm run gui` 新增 3 条真机断言（state=ok / marker=5_1.4 / index=1），`npm run smoke` 新增 3 条同义断言（136 条）。
+2. **老正则本来就窄**：旧版 `X-` 之间是 `\d{1,2}` 或 `[0-9A-Za-z]+` 两条分支，`5_1.4` 里带 `_` 和 `.` ⇒ 不命中。同一批 2177 个真实名字：**老正则命中 725，新正则命中 1078**；`.*` 与 `.+` 在这批数据上**零差异**（没有 marker 为空的真实文件名），所以采 `.+` 不丢任何现有文件，且比 `.*` 严。
+
+`constFields.eagleId` 仍在声明里，但 `keyOrder` 里没有 `eagleId` —— 按硬规则「不在 keyOrder 里的键一律不写」，它**不会**落进 frontmatter。这是用户配置原文的写法，原样保留；要写就把 `eagleId` 加回 `keyOrder`。
+
+下面的实测数字与断言条数已按这一轮更新（`smoke` 136 / `layout` 41 / `gui` 17 / `remotes` 21）。
+
 ## 落地后的实况（2026-10-17）
 
 ```
@@ -108,7 +130,7 @@ Heading 全部没有 padding，目视检查与左侧对齐
 │ [示例文件名（全宽，输入即解析）]                                    │
 │ ┌ .annex-preview-result（1px 边框）─────────────────────┐        │
 │ │ magnification = 12345                               │        │  ← 每行一条解析
-│ │ lens = （空）                                        │        │
+│ │ marker = 5705                                      │        │
 │ │ index = 15                                          │        │
 │ └──────────────────────────────────────────────────────┘        │
 │                                     [删除] [打开] [复制] [保存]   │  ← 整排贴右下角
@@ -128,7 +150,7 @@ Heading 全部没有 padding，目视检查与左侧对齐
 |---|---|---|
 | 标题 `<h1>`「Annex Gallery Settings」，下方无说明 | `<h1 class="annex-settings-title">` 是内容区第一个元素，紧接着就是 remote 区（原来的 h3 + 说明段已删） | `npm run layout`：顶层顺序 = 标题 → remote 区 → 分割线 → 模版区 → 分割线 → 缩略图边长 |
 | Heading 全部没有 padding，与左侧对齐 | `.vertical-tab-content h1.annex-settings-title { display: block; padding: 0; margin: 0 0 16px }` | 实测：标题 left = 519 = 卡片 left = 内容左边缘 |
-| 从左往右的按钮：新模版、导入模版（+ 追问补的「添加预设」） | 两个 `<button>` **贴左边缘** + 一个 `<select class="dropdown annex-profile-preset">`（占位项「添加预设…」，之后是内置预设 TECNAI 电镜）**贴右边缘**；下拉收窄到 14em | `npm run layout`（离屏 41 条：不换行 / flex-start / 新模版贴左 / 下拉贴右 / 两控件间隙 >40px / top 一致）+ `npm run gui`（真机 14 条：新模版 257 = 内容左，下拉右 868 = 内容右） |
+| 从左往右的按钮：新模版、导入模版（+ 追问补的「添加预设」） | 两个 `<button>` **贴左边缘** + 一个 `<select class="dropdown annex-profile-preset">`（占位项「添加预设…」，之后是内置预设 TECNAI 电镜）**贴右边缘**；下拉收窄到 14em | `npm run layout`（离屏 41 条：不换行 / flex-start / 新模版贴左 / 下拉贴右 / 两控件间隙 >40px / top 一致）+ `npm run gui`（真机 17 条：新模版 257 = 内容左，下拉右 868 = 内容右） |
 | **（四次修正）**两个按钮靠左、下拉靠右 | `.annex-profiles-toolbar { justify-content: flex-start }` + 下拉 `margin-left: auto`；实测按钮组与下拉之间留白 282.5px | 真机：新模版 257..320、导入模版 327.5..403.5、添加预设… 686..868 |
 | 不要 TECNAI 电镜作 template，用 default template 显示基本写法 | 「新模版」插入 `TEMPLATE_PROFILE`（示例 `<放大倍数>x_<序号>`，演示 regex / fields / keyOrder / ask / onMismatch）；TECNAI 改从「添加预设」下拉里加 | `npm run smoke`：「新模版来自通用模板（不是 TECNAI 电镜）」 |
 | 导入模版 | 工具条里挂隐藏的 `<input type="file" accept=".json,application/json">` → 系统文件选择器；认单条 / 数组 / `{ profiles: [...] }` | `npm run smoke`：读 `.json` 后卡片数 +1 且落盘 |
@@ -136,7 +158,7 @@ Heading 全部没有 padding，目视检查与左侧对齐
 | 解析预览 / 第一行：示例文件名（全宽） | `input.annex-preview-filename { width: 100% }`；实测宽 620px = 卡片内宽 | `npm run layout` |
 | 避免可选：相对 vault 路径，解析与路径无关 | 那一格删了；`buildContext(filename)` 只用文件名，relpath 就取文件名 | `npm run smoke`：`annex-preview-relpath` 数 = 0 |
 | 无解析按钮，输入示例文件名自动解析 | 只监听 `input`，没有「解析」按钮 | `npm run smoke`：`annex-preview-run` 数 = 0 |
-| 带边框的解析结果 / 每行一条解析 | `.annex-preview-result { border: 1px solid var(--background-modifier-border) }`，行 = `key = value`；三态不变：没填 → 提示、不命中 → 写明「正则不命中」、命中 → 结果行 | `npm run layout`：border 1px solid，3 行 `magnification = 12345 / lens = （空） / index = 15` |
+| 带边框的解析结果 / 每行一条解析 | `.annex-preview-result { border: 1px solid var(--background-modifier-border) }`，行 = `key = value`；三态不变：没填 → 提示、不命中 → 写明「正则不命中」、命中 → 结果行 | `npm run layout`：border 1px solid，3 行 `magnification = 12345 / marker = 5705 / index = 15` |
 | 一排按钮：保存、复制、打开、删除，从右往左排，右下角 | DOM 顺序 删除→打开→复制→保存，`justify-content: flex-end`；最右的「保存」右边缘 = 卡片内容右边缘 | `npm run layout`：两条断言 |
 | 打开 = 系统默认外部应用打开编辑，自动同步外部应用更改 | 卡片 JSON 写进 `<os.tmpdir()>/annex-gallery-profiles/<id>.json` → **`electron.shell.openPath(绝对路径)`**（拿不到才退回 vault 相对路径的 `app.openWithDefaultApp`）→ 每 700ms 轮询 mtime+size，外部一改就回灌文本框、重跑校验，合法就顺手落盘 | 真机：`lsof` 见 VS Code helper 持有该文件；外部原子改名后面板同步成 `Saved` + 「已从外部应用同步并写盘。」+ `data.json` 同步改 |
 | 分割线 | **两条** `hr`：`annex-remotes-divider`（remote 区 ↔ 模版区）+ `annex-settings-divider`（模版区 ↔ 普通设置项），都 1px、撑满内容宽 | `npm run layout`：顶层顺序 + 「两条分割线都可见/撑宽/1px」+「上面那条真的夹在卡片与工具条之间」 |
@@ -175,7 +197,7 @@ h1: display=block  paddingLeft=0px  left=257（= 内容左边缘）  height=18
 分割线①(annex-remotes-divider): 卡片底 310.7 → 线顶 329.4 = 18.7px；线底 330.4 → 模版区顶 349.2 = 18.8px（margin 18.75/18.75）
 remote 行: lab(273..852) · tailscale(273..852)   ← 与 `git -C <vault> remote` 的输出一致（自动扫出来的）
 动作按钮: 删除(629.5) 打开(687) 复制(744.5) 保存(802..852)  justify=flex-end
-REAL-GUI PASS=14 FAIL=0
+REAL-GUI PASS=17 FAIL=0
 ```
 
 「打开」与自动同步的真机证据（都是可复算的）：
@@ -206,7 +228,7 @@ h1: display=block  paddingLeft=0px  marginTop=0px  fontSize=15px
 工具条: 519..1171（justify=flex-start, wrap=nowrap, top=397.1）
         新模版 519..582(63px) · 导入模版 589.5..665.5(76px) · 添加预设… 989..1171(182px)
 示例文件名: left=535 width=620（= 卡片内宽）
-解析结果: border=1px solid，3 行 magnification = 12345 / lens = （空） / index = 15
+解析结果: border=1px solid，3 行 magnification = 12345 / marker = 5705 / index = 15
 动作按钮 L→R: 删除(932.5) 打开(990) 复制(1047.5) 保存(1105)   ← 保存贴住卡片内容右边缘
 LAYOUT PASS=41 FAIL=0
 ```
@@ -258,7 +280,7 @@ LAYOUT PASS=41 FAIL=0
 
 ```bash
 npm run build     # 出 main.js / styles.css
-npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置 + 两条分割线）+ 右键菜单 + 弹窗 + 落盘 + 状态栏（133 条断言）
+npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置 + 两条分割线）+ 右键菜单 + 弹窗 + 落盘 + 状态栏（136 条断言）
 npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并（21 条断言）
 npm run layout    # 离屏布局几何：41 条断言（真实 app.css + 真实 DOM + headless Chromium）
 node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来
@@ -271,7 +293,7 @@ node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来
 osascript -e 'quit app "Obsidian"'
 open -na /Applications/Obsidian.app --args --remote-debugging-port=9333 "--remote-allow-origins=*"
 # 部署产物到 vault 后直接跑；脚本自己会 disable→enable 插件（不用手动重载、不用重启）
-ANNEX_SHOT=/tmp/annex-settings.png npm run gui     # 14 条真机判据 + 截图
+ANNEX_SHOT=/tmp/annex-settings.png npm run gui     # 17 条真机判据 + 截图
 ```
 
 `npm run layout` 会从 `~/Library/Application Support/obsidian/obsidian-*.asar` 抽 `app.css`（缓存在 `TMPDIR`），

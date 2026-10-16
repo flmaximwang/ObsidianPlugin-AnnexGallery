@@ -236,10 +236,23 @@ function assert(condition, message) {
     assert(byClass(resultEl, "annex-preview-rows").length === 1, "命中时解析结果是一行一条解析（每行 key = value）");
     assert(rows.magnification && rows.magnification.getAttr("data-value") === "12345", "预览 magnification=12345");
     assert(rows.index && rows.index.getAttr("data-value") === "15", "预览 index=15");
-    const lensValue = rows.lens ? rows.lens.getAttr("data-value") : undefined;
-    assert(rows.lens && (lensValue === "" || lensValue === '""' || rows.lens.hasClass("annex-preview-empty-value")), "预览 lens 为空（该可选组未参与匹配）");
+    const markerValue = rows.marker ? rows.marker.getAttr("data-value") : undefined;
+    assert(rows.marker && markerValue === "5705", `预览 marker=5705（正则 (?<marker>.+) 吃中间那段）：${JSON.stringify(markerValue)}`);
     assert(resultEl.getAttr("data-state") === "ok", "预览结果状态 = ok");
   }
+
+  // ── 预览：用户报的样例（中间段带下划线 + 小数点，无扩展名）──────────────
+  fnameInput.value = "12345X-5_1.4-0001";
+  fnameInput.dispatchEvent({ type: "input" });
+  let userRows = {};
+  for (const row of byClass(resultEl, "annex-preview-row")) userRows[row.getAttr("data-key")] = row;
+  console.log(`  用户样例 12345X-5_1.4-0001 → state=${resultEl.getAttr("data-state")} ` +
+    Object.keys(userRows).map((k) => `${k}=${JSON.stringify(userRows[k].getAttr("data-value"))}`).join(", "));
+  assert(resultEl.getAttr("data-state") === "ok",
+    "带小数点/下划线的中间段能命中（12345X-5_1.4-0001，旧正则 + 把 `.4-0001` 当扩展名都会失败）");
+  assert(userRows.marker && userRows.marker.getAttr("data-value") === "5_1.4", "该样例 marker=5_1.4");
+  assert(userRows.index && userRows.index.getAttr("data-value") === "1",
+    `该样例 index 被按 number 规整（0001 → 1，与 0015 → 15 同一口径）：${userRows.index ? userRows.index.getAttr("data-value") : "?"}`);
 
   fnameInput.value = "";
   fnameInput.dispatchEvent({ type: "input" });
@@ -319,7 +332,8 @@ function assert(condition, message) {
   assert(byClass(tab.containerEl, "annex-profile-card").length === 3, "从「添加预设」下拉里选 TECNAI 后 3 张卡片");
   const presetAdded = plugin.settings.profiles[2];
   console.log(`  添加预设 → id=${presetAdded.id}`);
-  assert(presetAdded.id === "tecnaitem-2" && presetAdded.keyOrder.includes("eagleId"), "添加预设插入的是内置 TECNAI 预设（id 去重）");
+  assert(presetAdded.id === "tecnaitem-2" && presetAdded.regex.includes("(?<marker>") && presetAdded.keyOrder.length === 12,
+    "添加预设插入的是内置 TECNAI 预设（id 去重；正则取 marker 组、keyOrder 12 键）");
   assert(presetSelect.value === "", "选完预设后下拉回到占位项");
 
   const importInputEl = one(tab.containerEl, "annex-profile-import-file");

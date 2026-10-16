@@ -1,18 +1,17 @@
 [
   {
     "id": "tecnaitem",
-    "name": "TECNAI 电镜（<放大倍数>X-<视野号|会话后缀>-<序号>）",
+    "name": "TECNAI 电镜（<放大倍数>X-<标记>-<序号>）",
     "source": "stem",
-    "regex": "^(?<magnification>\\d+)X-(?:(?<lens>\\d{1,2})|(?<lensToken>[0-9A-Za-z]+))-(?<index>\\d+)$",
+    "regex": "^(?<magnification>\\d+)X-(?<marker>.+)-(?<index>\\d+)$",
     "fields": [
       {
         "group": "magnification",
         "type": "number"
       },
       {
-        "group": "lens",
-        "type": "number",
-        "whenMissing": "\"\""
+        "group": "marker",
+        "type": "string"
       },
       {
         "group": "index",
@@ -31,12 +30,10 @@
       "session",
       "date",
       "magnification",
-      "lens",
       "index",
       "width",
       "height",
       "size",
-      "eagleId",
       "btime",
       "thumbnail",
       "tif"

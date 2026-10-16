@@ -201,31 +201,32 @@ profile 选择与 ask 值都按文件夹记住。
 
 ### 三条硬规则
 
-1. `fields` 里**没列出的具名组 = 丢弃**。这是为了能把正则写成分支，例如内置 TECNAI 的
-   `(?:(?<lens>\d{1,2})|(?<lensToken>[0-9A-Za-z]+))` —— 短的走 `lens`，长的那个 `lensToken` 只为把正则配平、不落进任何键。
+1. `fields` 里**没列出的具名组 = 丢弃**。这是为了能把正则写成分支：两条路写进同一条正则，短的那条落进一个键、长的那条 token 只用来把正则配平、不落进任何键。
 2. 组**没参与匹配**（可选组未命中）⇒ 写该字段的 `whenMissing`（默认空串，键位保留）。例如孔位段缺省时 `well: ""`。
 3. 正则**完全不命中**时按 `onMismatch`：`empty`（字段写空值，报告里计入 `mismatch`，默认）/ `skip`（跳过这张图）。
    另有 `pathRegex` + `pathFields` 跑在相对 vault 的路径上，**同名的键覆盖派生值**。
 
-### 示例 1 —— 内置 TECNAI 电镜（`DEFAULT_PROFILES[0]`，逐字节复现改造前行为）
+### 示例 1 —— 内置 TECNAI 电镜（`DEFAULT_PROFILES[0]`；口径 = 用户 2026-10-17 给的原文 JSON）
 
 ```jsonc
 {
   "id": "tecnaitem",
-  "name": "TECNAI 电镜（<放大倍数>X-<视野号|会话后缀>-<序号>）",
+  "name": "TECNAI 电镜（<放大倍数>X-<标记>-<序号>）",
   "source": "stem",
-  "regex": "^(?<magnification>\\d+)X-(?:(?<lens>\\d{1,2})|(?<lensToken>[0-9A-Za-z]+))-(?<index>\\d+)$",
+  "regex": "^(?<magnification>\\d+)X-(?<marker>.+)-(?<index>\\d+)$",
   "fields": [
     { "group": "magnification", "type": "number" },
-    { "group": "lens", "type": "number", "whenMissing": "\"\"" },
+    { "group": "marker", "type": "string" },
     { "group": "index", "type": "number" }
   ],
   "constFields": { "eagleId": "" },
   "ask": ["sample"],
-  "keyOrder": ["tags","sample","session","date","magnification","lens","index","width","height","size","eagleId","btime","thumbnail","tif"],
+  "keyOrder": ["tags","sample","session","date","magnification","index","width","height","size","btime","thumbnail","tif"],
   "onMismatch": "empty"
 }
 ```
+
+`constFields.eagleId` 有声明、但 `keyOrder` 里没有它 —— 按硬规则它**不会**落进 frontmatter（要写就把 `eagleId` 加回 `keyOrder`）。
 
 ### 示例 2 —— 多孔板成像（与 TECNAI 完全不同的约定；`tools/example-profiles/plate-profile.json`）
 
@@ -451,7 +452,7 @@ cardSize 500) is one command.
 ## Frontmatter fields that earn their place
 
 `tags: [<gallery tag>]` (the base filter), plus per-image: source id, sample/group, session/folder,
-date, magnification, lens, index, width, height, size, and the two link fields. Keep numeric fields
+date, magnification, marker, index, width, height, size, and the two link fields. Keep numeric fields
 unquoted and camelCase. Mirroring an existing library's own field names (Eagle: `btime`, `eagleId`,
 `size`) is the cheapest way to make the sidecars credible — but **verify what a timestamp means
 before naming it**: Eagle `btime` looked like acquisition time, yet within one session the 10-30
@@ -479,7 +480,7 @@ Five value sources per profile, precedence `parsed/pathFields > constFields > as
 `keyOrder` **is** the final frontmatter key order: keys not listed are never written (add a field only
 if you also add it to `keyOrder`); a listed key with no value from any source is **omitted** and noted
 in that sidecar's detail. Three hard rules: (1) named groups absent from `fields` are **discarded** —
-this lets you write branch regexes such as `(?:(?<lens>\d{1,2})|(?<lensToken>[0-9A-Za-z]+))` where the
+this lets you write a branch regex whose long token only balances the alternation, where the
 long token only balances the alternation; (2) a group that did not participate in the match writes its
 field's `whenMissing` (default empty string, key kept); (3) a fully non-matching name follows
 `onMismatch` — `empty` (blank fields, counted in `mismatch`, default) or `skip`. `pathRegex` +

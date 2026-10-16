@@ -56,7 +56,7 @@ const check = (cond, msg) => {
   console.log(`  场景 A 读回的 profile id：${ids.join(", ")}`);
   check(ids.length === 2 && ids[0] === "tecnaitem" && ids[1] === "platewell", "两条 profile 都读回、顺序不变");
   check(JSON.stringify(plugin.settings.profiles[0]) === JSON.stringify(tec), "内置 TECNAI profile 逐字节没丢");
-  check(plugin.settings.profiles[0].keyOrder.length === 14, "内置 TECNAI 仍是 14 键 keyOrder");
+  check(plugin.settings.profiles[0].keyOrder.length === 12, "内置 TECNAI 是 12 键 keyOrder（用户 2026-10-17 给的正确预设）");
   check(JSON.stringify(plugin.settings.profiles[1]) === JSON.stringify(plate), "新 plate profile 原样读回（regex / fields / keyOrder 未变）");
   check(
     plugin.settings.profiles[1].fields.some((f) => f.group === "well" && f.type === "text"),

@@ -200,6 +200,24 @@ def main():
           f"卡片动作 DOM 顺序 删除→打开→复制→保存 且靠右下角：{acts} justify={rep['actionsJustify']}")
     check(rep["plainSettings"] == ["缩略图边长"], f"只有「缩略图边长」一个普通设置项：{rep['plainSettings']}")
 
+    # 解析预览的真机行为：用户报的样例（中间段带下划线 + 小数点、且不带扩展名）。
+    # 老实现会把 `.4-0001` 当扩展名吃掉（stem 削成 `12345X-5_1`）⇒ 明明该命中却显示「正则不命中」。
+    prev = ui.js(r"""JSON.stringify((() => {
+      const inp = document.querySelector('.annex-preview-filename');
+      if (!inp) return { error: '没有预览输入框' };
+      inp.value = '12345X-5_1.4-0001';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      const box = document.querySelector('.annex-preview-result');
+      const rows = [...document.querySelectorAll('.annex-preview-row')]
+        .map((r) => [r.getAttribute('data-key'), r.getAttribute('data-value')]);
+      return { state: box ? box.getAttribute('data-state') : null, rows: Object.fromEntries(rows) };
+    })())""")
+    prev_rows = prev.get("rows") or {}
+    check(prev.get("state") == "ok",
+          f"真机预览：12345X-5_1.4-0001 命中（state={prev.get('state')}）{prev}")
+    check(prev_rows.get("marker") == "5_1.4", f"真机预览 marker=5_1.4：{prev_rows}")
+    check(prev_rows.get("index") == "1", f"真机预览 index 按 number 规整（0001 → 1）：{prev_rows}")
+
     # 截图前先把设置窗口提到前台：窗口被遮挡/最小化时 Chromium 会推迟渲染，
     # Page.captureScreenshot 会一直等到 websocket 超时（实测 60s 挂死，判据全过但 exit=1）。
     subprocess.run(["osascript", "-e", 'tell application "Obsidian" to activate'], check=False)

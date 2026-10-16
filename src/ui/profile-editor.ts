@@ -15,6 +15,7 @@
  * 有 error 级问题的配置**绝不写盘**（坏正则写进 data.json 会让右键弹窗直接崩）。
  */
 import { Notice } from "obsidian";
+import { IMAGE_EXTENSIONS, stemOf } from "../core/stems";
 import {
   DEFAULT_PROFILES,
   TEMPLATE_PROFILE,
@@ -57,18 +58,33 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 文件名去掉最后一个扩展名（与 core 的 stem 定义一致）。 */
-function stemOf(filename: string): string {
-  const dot = filename.lastIndexOf(".");
-  return dot > 0 ? filename.slice(0, dot) : filename;
+/** 这个串是不是以「引擎认识的图片扩展名」结尾。 */
+function hasImageExtension(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return (IMAGE_EXTENSIONS as readonly string[]).includes(name.slice(dot).toLowerCase());
+}
+
+/**
+ * 预览要给正则试的 stem 候选（按优先级）：用户填的是**示例文件名**。
+ *   ① 带图片扩展名（`x.tif`）⇒ 按引擎口径去掉扩展名（`stemOf`，与 `core/stems` 同一份实现）；
+ *   ② 不带（`12345X-5_1.4-0001` 这种中间段自带小数点的名字）⇒ **它本身就是 stem**，
+ *      不能把 `.4-0001` 当扩展名吃掉 —— 用户实测就栽在这里：旧实现把 stem 削成 `12345X-5_1`，
+ *      于是明明该命中的名字显示成「正则不命中」。
+ * 两条都试，哪条命中用哪条；都不命中时用引擎口径那条报错（与真跑一遍的行为一致）。
+ */
+function previewStems(text: string): string[] {
+  const engineStem = stemOf(text);
+  if (hasImageExtension(text) || engineStem === text) return [engineStem];
+  return [text, engineStem];
 }
 
 /**
  * 预览用的 ParseContext：解析与路径无关，所以只用文件名（相对路径那一格按 spec 去掉了），
  * 路径就取文件名本身。
  */
-function buildContext(filename: string): ParseContext {
-  return { stem: stemOf(filename), filename, relpath: filename, folderName: "" };
+function buildContext(filename: string, stem: string): ParseContext {
+  return { stem, filename, relpath: filename, folderName: "" };
 }
 
 /**
@@ -302,12 +318,18 @@ export class ProfileEditor {
         resultEl.setAttr("data-state", "idle");
         resultEl.createDiv({
           cls: "annex-preview-hint",
-          text: "在上面填一个真实文件名再看结果；正则不命中时这里会写明「正则不命中」。预览只显示正则拆出来的字段（tags / session / date / width 等是生成时另算的）。",
+          text: "在上面填一个真实文件名再看结果（不带扩展名也行：`12345X-5_1.4-0001` 里的小数点不会被当成扩展名）；正则不命中时这里会写明「正则不命中」。预览只显示正则拆出来的字段（tags / session / date / width 等是生成时另算的）。",
         });
         return;
       }
       try {
-        const parsed = parseWithProfile(draft, buildContext(filename));
+        const [primary, ...fallbacks] = previewStems(filename);
+        let parsed = parseWithProfile(draft, buildContext(filename, primary));
+        for (const stem of fallbacks) {
+          if (parsed.matched) break;
+          const alt = parseWithProfile(draft, buildContext(filename, stem));
+          if (alt.matched) parsed = alt;
+        }
         resultEl.setAttr("data-state", parsed.matched ? "ok" : "nomatch");
         renderParsed(resultEl, draft, parsed, filename);
       } catch (error) {
