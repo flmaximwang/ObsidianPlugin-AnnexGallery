@@ -113,7 +113,7 @@ PASS=31 FAIL=0
    `git.ts` 的 `cleanEnv()`（这台机器上 `HTTP(S)_PROXY` 指向常不在线的 Clash，带代理时 git/annex 会**静默失败**）；
    同一时刻只跑一趟 git 子进程，期间的请求只登记一个标记，当前这趟跑完再补一趟。
 4. **未初始化那一档也是入口**：点一下就真跑「初始化 gallery」（`git init -b main` + `git annex init` +
-   `git annex config --set annex.addunlocked true` + 合并 `.gitattributes` / `.gitignore`）。verify:status 在盘上复核了 `.git/annex` 出现，不是只看 Notice 文案。
+   `git-annex 分支 annex.addunlocked=true`（并按标准状态修本机覆盖 / `thin`）+ 合并 `.gitattributes` / `.gitignore`）。verify:status 在盘上复核了 `.git/annex` 出现，不是只看 Notice 文案。
 
 ## 怎么复跑
 

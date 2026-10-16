@@ -40,7 +40,7 @@ loomerto --plans-root plans open annex-gallery-plugin
 
 | # | 入口 | 行为 |
 |---|---|---|
-| 1 | 注册命令 | **初始化 gallery**：把**当前打开的 vault 根**（运行时取 `app.vault.adapter.getBasePath()`）初始化为 1 个用 git + git-annex 管理的 repo。目标目录**已经是 git 仓库**时**不重建、不覆盖**：跳过 `git init`，只补缺的那几步（必要时 `git annex init` + `git annex config --set annex.addunlocked true`，再合并两条规则文件）—— 所以一条命令里跑 **2 条 annex 命令**，形态口径（新文件以 unlocked 入库）见 [`docs/commands.md`](docs/commands.md)。最后按设置页的「remote 设置」逐个写 remote（`git remote add`，同名已存在则 `set-url`；只写配置，不 fetch/push）。 |
+| 1 | 注册命令 | **初始化 gallery**：把**当前打开的 vault 根**（运行时取 `app.vault.adapter.getBasePath()`）初始化为 1 个用 git + git-annex 管理的 repo。目标目录**已经是 git 仓库**时**不重建、不覆盖**：跳过 `git init`，只补缺的那几步（必要时 `git annex init`；再把 annex 的「设置」核对并修复到标准状态：git-annex 分支 `annex.addunlocked=true`、本机无会压偏它的覆盖、本机不 `thin` —— 只在偏离时动手，重复运行零写入零报错；再合并两条规则文件）—— 所以一条命令里跑 **2 条 annex 命令**，形态口径（新文件以 unlocked 入库）见 [`docs/commands.md`](docs/commands.md)。最后按设置页的「remote 设置」逐个写 remote（`git remote add`，同名已存在则 `set-url`；只写配置，不 fetch/push）。 |
 | 2 | 右键文件夹菜单 → **Annex Gallery** 子菜单 | **生成元数据**：为该文件夹中的图片生成 `.md` 元数据，供 `.base` 查找。**可以重跑** —— 改动模版（profile）后重算元数据时，若已有 sidecar，会先弹窗问「覆盖重算 / 只补缺失」（见下）。 |
 | 3 | 右键文件夹菜单 → **Annex Gallery** 子菜单 | **生成缩略图**：为该文件夹中所有的图片生成 `.thumbnail.png` 缩略图。默认边长 **256×256**（可在插件设置页调整 `thumbnailEdge`；约定与 `.base` 的 `cardSize` 一致）。 |
 | 4 | 右键文件夹菜单 → **Annex Gallery** 子菜单 | **Add largefiles to Annex**：把这个文件夹里的图片 `git annex add` 进 annex（按 `.gitattributes` 的 `annex.largefiles` 决定谁进 annex、谁进 git）。 |

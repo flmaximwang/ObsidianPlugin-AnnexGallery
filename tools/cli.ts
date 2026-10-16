@@ -287,11 +287,17 @@ async function main(): Promise<void> {
       say(json, result, [
         `root=${result.root}`,
         `createdRepo=${result.createdRepo} initedAnnex=${result.initedAnnex}`,
-        `annex.addunlocked=${result.addUnlocked.value}（${result.addUnlocked.action}${
-          result.addUnlocked.action === "set" && result.addUnlocked.previous !== null
-            ? `，原值 ${result.addUnlocked.previous}`
+        `annex.addunlocked（分支）=${result.shape.addUnlocked.action}${
+          result.shape.addUnlocked.action === "set" || result.shape.addUnlocked.action === "planned"
+            ? `，原值 ${result.shape.addUnlocked.previous ?? "(无)"}`
             : ""
-        }）`,
+        } → 生效值 ${result.shape.effectiveAddUnlocked ?? "(无)"}`,
+        ...(result.shape.localRepairs.length === 0
+          ? ["本机设置：无偏离"]
+          : result.shape.localRepairs.map(
+              (entry) => `本机 ${entry.key}：${entry.previous ?? "(无)"} → ${entry.action}${entry.detail === undefined ? "" : `（${entry.detail}）`}`,
+            )),
+        `annex.thin 生效值 ${result.shape.effectiveThin ?? "(无)"}`,
         `.gitattributes +${result.gitattributes.added.length} (${result.gitattributes.added.join(" | ")})`,
         `.gitignore +${result.gitignore.added.length} (${result.gitignore.added.join(" | ")})`,
         ...result.notes,

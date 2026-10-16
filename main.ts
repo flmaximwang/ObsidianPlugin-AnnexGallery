@@ -617,10 +617,17 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         `git init：${result.createdRepo ? "已新建" : "已存在，跳过"}`,
         `git annex init：${result.initedAnnex ? "已执行" : "已是 annex 仓库，跳过"}`,
         `annex.addunlocked：${
-          result.addUnlocked.action === "unchanged"
-            ? "已是 true，未改动"
-            : "已设为 true（此后 add 的文件以 unlocked 入库）"
+          result.shape.addUnlocked.action === "unchanged"
+            ? "分支已是 true，未改动"
+            : "分支已设为 true（此后 add 的文件以 unlocked 入库）"
         }`,
+        ...(result.shape.localRepairs.length === 0
+          ? []
+          : [
+              `本机设置：修 ${result.shape.localRepairs.length} 项（${result.shape.localRepairs
+                .map((entry) => `${entry.key}=${entry.previous ?? "(无)"}→${entry.action === "unset" ? "删" : String(entry.standard)}`)
+                .join(" · ")}）`,
+            ]),
         `.gitattributes：补 ${result.gitattributes.added.length} 条规则`,
         `.gitignore：补 ${result.gitignore.added.length} 条规则`,
         ...(remotes.length === 0
