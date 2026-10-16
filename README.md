@@ -65,7 +65,7 @@ loomerto --plans-root plans open annex-gallery-plugin
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
-| remote 设置（`remotes`） | `[]` | 一条 = 名称 + 地址，可多条；**「初始化 gallery」时逐个 `git remote add`**（同名已存在就 `git remote set-url`，地址相同则一个字节都不碰）。 |
+| remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；**插件加载时自动扫当前仓库的 `git remote`**，把设置里没有的补进来（同名不覆盖你改过的地址）；**「初始化 gallery」时逐个 `git remote add`**（同名已存在就 `git remote set-url`，地址相同则一个字节都不碰）。 |
 | `profiles` | 内置 TECNAI 电镜 | metadata 解析配置：工具条「新模版 / 导入模版 / 添加预设」增，卡片上「保存 / 复制 / 打开 / 删除」改。 |
 | `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（内置默认只有 `sample`）。**没有**「默认样品名」这种全局设置：每次生成 metadata 都要在弹窗里填。 |
 | `folderProfiles` | `{}` | 按文件夹记住上次选的 profile id。 |

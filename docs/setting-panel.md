@@ -211,13 +211,22 @@ LAYOUT PASS=32 FAIL=0
 
 ```bash
 npm run build     # 出 main.js / styles.css
-npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置）+ 右键菜单 + 弹窗 + 落盘 + 状态栏结构（当前 131 条断言）
-npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run（14 条断言）
-npm run layout    # 布局几何：32 条断言（真实 app.css + 真实 DOM + headless Chromium）
+npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置）+ 右键菜单 + 弹窗 + 落盘 + 状态栏（当前 131 条断言）
+npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并（21 条断言）
+npm run layout    # 离屏布局几何：36 条断言（真实 app.css + 真实 DOM + headless Chromium）
 node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来
 ```
 
+真机复核（离屏量不出来的那些：原生 select 宽度、`openWithDefaultApp` 的路径语义、观感）：
+
+```bash
+# 端口只在启动时生效，所以要重启一次 Obsidian
+osascript -e 'quit app "Obsidian"'
+open -na /Applications/Obsidian.app --args --remote-debugging-port=9333 "--remote-allow-origins=*"
+ANNEX_SHOT=/tmp/annex-settings.png npm run gui     # 12 条真机判据 + 截图
+```
+
 `npm run layout` 会从 `~/Library/Application Support/obsidian/obsidian-*.asar` 抽 `app.css`（缓存在 `TMPDIR`），
-本机需要 Chrome / Chromium / Edge 之一。它只保证**结构**不塌（可见性、对齐、边框、方向、溢出）；配色与间距好不好看
-仍要真机看一眼 —— 真机复核需要以 `--remote-debugging-port=9222` 启动 Obsidian 再用 CDP 读 DOM / 截图
-（见 skill `inspect-obsidian-gui-with-maxim`）：那个端口只在启动时生效，所以要重启一次 Obsidian。
+本机需要 Chrome / Chromium / Edge 之一；`npm run gui` 需要 `python3` + `websocket-client`。
+`layout` 只保证**结构**不塌（可见性、对齐、边框、方向、溢出），`gui` 补上真机的控件宽度/运行时行为，
+**配色与观感**最后仍要人眼看那张截图（见 skill `inspect-obsidian-gui-with-maxim`）。
