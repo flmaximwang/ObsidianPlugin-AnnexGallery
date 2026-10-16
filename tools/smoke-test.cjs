@@ -119,6 +119,7 @@ function assert(condition, message) {
   const remotesSection = one(tab.containerEl, "annex-remotes-section");
   assert(remotesSection !== undefined, "设置页有「remote 设置」这一项");
   assert(tab.containerEl.children[1] === remotesSection, "它在 h1 之后、profile 卡片之前（列表最上方）");
+  assert(tab.containerEl.children[2].hasClass("annex-remotes-divider"), "紧接着一条分割线（remote 设置与模版设置之间）");
   assert(one(tab.containerEl, "annex-remotes-title").textContent === "remote 设置", "这一项的标题 = 「remote 设置」");
   assert(byClass(tab.containerEl, "annex-remote-row").length === 0, "默认 0 条 remote");
   assert(byClass(tab.containerEl, "annex-remotes-empty").length === 1, "空列表给一句提示");
@@ -171,7 +172,8 @@ function assert(condition, message) {
   const names = settingNames(tab.containerEl);
   console.log(`普通设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
   assert(names.join(",") === "缩略图边长", "分割线以下只剩「缩略图边长」一个设置项（.gitattributes / .gitignore / 默认样品名 已删）");
-  assert(byClass(tab.containerEl, "annex-settings-divider").length === 1, "卡片区与普通设置项之间有分割线");
+  assert(byClass(tab.containerEl, "annex-settings-divider").length === 2, "两条分割线（remote/模版 之间 + 模版/普通设置项 之间）");
+  assert(byClass(tab.containerEl, "annex-remotes-divider").length === 1, "上面那条标成 annex-remotes-divider");
 
   const toolbar = one(tab.containerEl, "annex-profiles-toolbar");
   const toolLabels = toolbar.children.map((el) => el.textContent || `<${el.tagName}>`);

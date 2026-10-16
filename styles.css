@@ -114,21 +114,26 @@
 .annex-profiles-toolbar {
   display: flex;
   align-items: center;
-  /* 三个控件（新模版 / 导入模版 / 添加预设）要在同一行、整排靠右。
+  /* 三个控件（新模版 / 导入模版 / 添加预设）要在同一行，但**不是**整排靠右：
+     两个按钮贴左边缘，下拉选框贴右边缘（用户 2026-10-17 修正：整排靠右很丑）。
      真机里「添加预设」下拉会按最长选项撑开（TECNAI 那条约 464px）把排挤到第二行，
-     所以：不换行 + 允许下拉收缩（min-width: 0）+ 宽度上限 + 整排 right 对齐。 */
+     所以：不换行 + 允许下拉收缩（min-width: 0）+ 宽度上限 + 下拉 margin-left: auto 顶到右边。 */
   flex-wrap: nowrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.5em;
   margin-bottom: 1em;
 }
 
-.annex-profile-preset {
+/* 选择器写到 (0,2,1)：要压掉 app.css 里 `.dropdown { max-width: 100% }`（同权重时靠插件
+   styles.css 在后才生效，太脆；写明更具体更稳），也要压掉 `.theme-dark .dropdown`。 */
+.annex-profiles-toolbar select.annex-profile-preset {
   min-width: 0;
   flex: 0 1 auto;
   /* 原生 select 会按**最长选项**定宽（TECNAI 那条 464px），但那只是打开后的列表；
      收起时只会显示占位项「添加预设…」（选完立刻回到占位项），所以宽度收窄即可。 */
   max-width: 14em;
+  /* 两个按钮靠左、这个下拉靠右：左侧 auto 外边距吃掉所有富余空间，把下拉顶到右边缘。 */
+  margin-left: auto;
 }
 
 .annex-profiles-toolbar button,
@@ -155,6 +160,14 @@
   margin: 1.5em 0 1em 0;
   border: none;
   border-top: 1px solid var(--background-modifier-border);
+}
+
+/* remote 区与模版区之间的那条分割线（用户 2026-10-17 追加）：
+   写在 .annex-settings-divider 之后，同权重时由它接管 margin。
+   上面那半留白会被 .annex-remotes-section 的 1em 底边距折叠（取大者），所以写 1.25em
+   才能让实测上下都是 18.75px（对称）。 */
+.annex-remotes-divider {
+  margin: 1.25em 0;
 }
 
 /* ── 一张 profile 卡片 ──────────────────────────────────────────────────── */

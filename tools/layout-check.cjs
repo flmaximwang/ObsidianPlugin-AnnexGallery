@@ -144,7 +144,7 @@ const MEASURE = String.raw`(function () {
     h1: { box: box(h1), display: h1 ? getComputedStyle(h1).display : null, text: text(h1), pad: cs(h1, ["paddingLeft", "paddingRight"]), marginTop: h1 ? getComputedStyle(h1).marginTop : null, fontSize: h1 ? getComputedStyle(h1).fontSize : null },
     card: box(card),
     settingRow: { box: box(row), innerPadLeft: row ? getComputedStyle(row).paddingLeft : null },
-    topLevel: [...pane.children].map((c) => ({ tag: c.tagName, cls: c.className, display: getComputedStyle(c).display })),
+    topLevel: [...pane.children].map((c) => ({ tag: c.tagName, cls: c.className, display: getComputedStyle(c).display, box: box(c), borderTopWidth: getComputedStyle(c).borderTopWidth })),
     toolbar: (() => { const t = document.querySelector(".annex-profiles-toolbar"); return t ? [...t.children].filter((c) => getComputedStyle(c).display !== "none").map((c) => ({ tag: c.tagName, label: c.tagName === "SELECT" ? (c.options[0] ? c.options[0].text.trim() : "") : text(c), cls: c.className, box: box(c) })) : null; })(),
     toolbarBox: (() => { const t = document.querySelector(".annex-profiles-toolbar"); return t ? { box: box(t), justify: getComputedStyle(t).justifyContent, wrap: getComputedStyle(t).flexWrap } : null; })(),
     filename: (() => { const i = document.querySelector(".annex-preview-filename"); return i ? { box: box(i), width: getComputedStyle(i).width } : null; })(),
@@ -229,8 +229,14 @@ ${fragment}
   check(h1Left !== null && Math.abs(h1Left - contentLeft) < 0.5, "标题与左侧内容左对齐（padding 0，不是 app 的 16px）", `标题 left=${h1Left} vs 内容左=${contentLeft}`);
   check(rep.h1.pad.paddingLeft === "0px" && rep.h1.pad.paddingRight === "0px", "标题左右 padding 都是 0");
   check(rep.h1.marginTop === "0px", "标题没有上边距（贴住内容区顶部的 padding）");
-  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-profiles-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → profile 区 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
-  check(rep.topLevel[4].display === "flex", "最后一项是 app 的 .setting-item（缩略图边长）");
+  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
+  check(rep.topLevel[5].display === "flex", "最后一项是 app 的 .setting-item（缩略图边长）");
+  const dividers = rep.topLevel.filter((t) => t.tag === "HR");
+  check(dividers.length === 2, `两条分割线（remote/模版 之间 + 模版/普通设置项 之间）：${dividers.length} 条`);
+  check(dividers.every((d) => d.display !== "none" && d.box.width > 100 && d.box.height > 0 && d.borderTopWidth === "1px"),
+    "两条分割线都可见、撑满内容宽、1px 上边框", JSON.stringify(dividers.map((d) => ({ w: d.box.width, h: d.box.height, bt: d.borderTopWidth }))));
+  check(rep.remotes.card.top + rep.remotes.card.height <= dividers[0].box.top && dividers[0].box.top + dividers[0].box.height <= rep.toolbarBox.box.top,
+    "上面那条分割线真的夹在 remote 卡片与工具条之间", `card 底=${rep.remotes.card.top + rep.remotes.card.height} 线=${dividers[0].box.top} 工具条=${rep.toolbarBox.box.top}`);
 
   // 「remote 设置」：一个 item 装多条，逐条量行内布局
   const remotes = rep.remotes;
@@ -257,11 +263,12 @@ ${fragment}
   check(rep.toolbar[2].tag === "SELECT", "第三个控件是下拉选框（select）");
   check(rep.toolbar[0].box.left < rep.toolbar[1].box.left && rep.toolbar[1].box.left < rep.toolbar[2].box.left, "三个控件真的从左往右排");
   check(rep.toolbarBox.wrap === "nowrap", "工具条不换行（flex-wrap: nowrap）");
-  check(rep.toolbarBox.justify === "flex-end", "工具条整排靠右（justify-content: flex-end）");
+  check(rep.toolbarBox.justify === "flex-start", "工具条左对齐（justify-content: flex-start）");
   const toolTops = rep.toolbar.map((c) => c.box.top);
   check(Math.max(...toolTops) - Math.min(...toolTops) < 1, "三个控件在同一行（top 一致）", toolTops.join(" / "));
-  const lastToolRight = Math.max(...rep.toolbar.map((c) => c.box.right));
-  check(Math.abs(lastToolRight - rep.toolbarBox.box.right) < 1, "最右的控件贴住工具条右边缘（真的靠右）", `${lastToolRight} vs ${rep.toolbarBox.box.right}`);
+  check(Math.abs(rep.toolbar[0].box.left - rep.toolbarBox.box.left) < 1, "「新模版」贴住工具条左边缘（按钮靠左）", `${rep.toolbar[0].box.left} vs ${rep.toolbarBox.box.left}`);
+  check(Math.abs(rep.toolbar[2].box.right - rep.toolbarBox.box.right) < 1, "「添加预设」下拉贴住工具条右边缘（下拉靠右）", `${rep.toolbar[2].box.right} vs ${rep.toolbarBox.box.right}`);
+  check(rep.toolbar[1].box.right < rep.toolbar[2].box.left - 40, "按钮组与下拉之间留出空隙（左一组、右一个）", `${rep.toolbar[1].box.right} → ${rep.toolbar[2].box.left}`);
   check(Math.abs(rep.filename.width.replace("px", "") - (rep.card.right - rep.card.left - 2 * parseFloat(rep.result.border.paddingLeft) - 2)) < 40, "示例文件名占满卡片内宽", `输入框 ${rep.filename.width} vs 卡片内容宽`);
   check(rep.result.border.borderTopWidth === "1px" && rep.result.border.borderTopStyle === "solid", "解析结果是带边框的一块");
   check(rep.result.rows.length > 0, `解析结果每行一条解析：${rep.result.rows.join(" / ")}`);

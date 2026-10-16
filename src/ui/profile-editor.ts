@@ -147,7 +147,7 @@ export class ProfileEditor {
       if (file !== undefined && file !== null) void this.importFile(file);
     });
 
-    const presetSelect = toolbar.createEl("select", { cls: "annex-profile-preset" });
+    const presetSelect = toolbar.createEl("select", { cls: "dropdown annex-profile-preset" });
     presetSelect.createEl("option", { text: "添加预设…", value: "" });
     for (const preset of DEFAULT_PROFILES) {
       presetSelect.createEl("option", { text: `${preset.name}（${preset.id}）`, value: preset.id });

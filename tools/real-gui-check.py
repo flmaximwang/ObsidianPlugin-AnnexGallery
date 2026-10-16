@@ -136,6 +136,12 @@ def main():
     print(f"主窗口：{main_t['title']}\nvault：{env.get('vaultPath')}  插件 0.1.0 loaded={env.get('loaded')}")
     print(f"settings 键：{env.get('settingsKeys')}")
 
+    # 先从盘上重载插件：styles.css 是插件加载时才注入 <style> 的，
+    # 不重载就会量到内存里的旧 CSS（部署了却看不出变化，最容易自欺）。
+    reloaded = app.js("(() => { const id = 'annex-gallery'; app.plugins.disablePlugin(id); app.plugins.enablePlugin(id); return JSON.stringify({loaded: Boolean(app.plugins.plugins[id])}); })()")
+    print(f"插件已从盘上重载（styles.css 重新注入）：{reloaded}")
+    time.sleep(1.5)
+
     app.js("(() => { app.setting.open(); app.setting.openTabById('annex-gallery'); return '\"ok\"'; })()")
     time.sleep(2.5)
     set_t = pick("设置")
@@ -156,18 +162,29 @@ def main():
           f"标题可见（app.css 有 .vertical-tab-content h1{{display:none}}，必须被压掉）：{rep['h1']}")
     check(rep["h1"] is not None and abs(rep["h1"]["left"] - rep["contentLeft"]) < 0.5,
           f"标题与内容左边缘对齐：{rep['h1']['left'] if rep['h1'] else '?'} vs {rep['contentLeft']}")
-    check("annex-remotes-section" in " ".join(rep["topLevel"]) and rep["topLevel"].index(next(c for c in rep["topLevel"] if "annex-remotes-section" in c)) == 1,
-          f"顶层顺序 = 标题 → remote 设置 → profile 区 → 分割线 → 缩略图边长：{rep['topLevel']}")
+    expected_order = ["annex-settings-title", "annex-remotes-section", "annex-remotes-divider",
+                      "annex-profiles-section", "annex-settings-divider", "setting-item"]
+    got = [c.split(".", 1)[1].split(" ")[0] for c in rep["topLevel"]]
+    check(got == expected_order,
+          f"顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 分割线 → 缩略图边长：{rep['topLevel']}")
 
     bar = rep["toolbar"] or {}
     controls = bar.get("controls", [])
-    check(bar.get("wrap") == "nowrap" and bar.get("justify") == "flex-end",
-          f"工具条不换行且靠右：wrap={bar.get('wrap')} justify={bar.get('justify')}")
+    check(bar.get("wrap") == "nowrap" and bar.get("justify") == "flex-start",
+          f"工具条不换行且两端分开（按钮靠左、下拉靠右）：wrap={bar.get('wrap')} justify={bar.get('justify')}")
     check(len(controls) == 3 and len({c["box"]["top"] for c in controls}) == 1,
           f"三个控件在同一行（新模版 / 导入模版 / 添加预设）：{[c['label'] for c in controls]}")
     if controls:
-        right_most = max(c["box"]["right"] for c in controls)
-        check(abs(right_most - bar["box"]["right"]) < 1, f"最右控件贴住右边缘：{right_most} vs {bar['box']['right']}")
+        left_most = min(c["box"]["left"] for c in controls)
+        check(abs(left_most - bar["box"]["left"]) < 1,
+              f"最左的「新模版」贴住左边缘：{left_most} vs {bar['box']['left']}")
+        sel = [c for c in controls if c["tag"] == "SELECT"]
+        check(bool(sel) and abs(sel[-1]["box"]["right"] - bar["box"]["right"]) < 1,
+              f"「添加预设」下拉贴住右边缘：{sel[-1]['box']['right'] if sel else '?'} vs {bar['box']['right']}")
+        btns = [c for c in controls if c["tag"] == "BUTTON"]
+        if btns and sel:
+            gap = sel[-1]["box"]["left"] - max(b["box"]["right"] for b in btns)
+            check(gap > 40, f"按钮组与下拉之间留出空隙（左一组、右一个）：{round(gap, 1)}px")
         select_width = [c["box"]["width"] for c in controls if c["tag"] == "SELECT"]
         check(bool(select_width) and select_width[0] < 260, f"「添加预设」下拉宽度已收窄：{select_width}")
 
@@ -183,14 +200,25 @@ def main():
           f"卡片动作 DOM 顺序 删除→打开→复制→保存 且靠右下角：{acts} justify={rep['actionsJustify']}")
     check(rep["plainSettings"] == ["缩略图边长"], f"只有「缩略图边长」一个普通设置项：{rep['plainSettings']}")
 
-    size = ui.js("(() => { const p = document.querySelector('.vertical-tab-content'); return JSON.stringify({h: Math.min(2400, Math.ceil(p.scrollHeight)+60), w: window.innerWidth}); })()")
-    ui.call("Emulation.setDeviceMetricsOverride", width=size["w"], height=size["h"], deviceScaleFactor=2, mobile=False)
-    time.sleep(0.4)
-    shot = ui.call("Page.captureScreenshot", format="png", captureBeyondViewport=True)
-    with open(SHOT, "wb") as f:
-        f.write(base64.b64decode(shot["data"]))
-    ui.call("Emulation.clearDeviceMetricsOverride")
-    print(f"\n截图：{SHOT}（{size['w']}x{size['h']} css px @2x）—— 观感要人眼看这一张")
+    # 截图前先把设置窗口提到前台：窗口被遮挡/最小化时 Chromium 会推迟渲染，
+    # Page.captureScreenshot 会一直等到 websocket 超时（实测 60s 挂死，判据全过但 exit=1）。
+    subprocess.run(["osascript", "-e", 'tell application "Obsidian" to activate'], check=False)
+    subprocess.run(["osascript", "-e",
+                    'tell application "System Events" to tell process "Obsidian" '
+                    'to perform action "AXRaise" of (first window whose name contains "设置")'], check=False)
+    time.sleep(1.0)
+    try:
+        size = ui.js("(() => { const p = document.querySelector('.vertical-tab-content'); return JSON.stringify({h: Math.min(2400, Math.ceil(p.scrollHeight)+60), w: window.innerWidth}); })()")
+        ui.call("Emulation.setDeviceMetricsOverride", width=size["w"], height=size["h"], deviceScaleFactor=2, mobile=False)
+        time.sleep(0.4)
+        shot = ui.call("Page.captureScreenshot", format="png", captureBeyondViewport=True)
+        with open(SHOT, "wb") as f:
+            f.write(base64.b64decode(shot["data"]))
+        ui.call("Emulation.clearDeviceMetricsOverride")
+        print(f"\n截图：{SHOT}（{size['w']}x{size['h']} css px @2x）—— 观感要人眼看这一张")
+    except Exception as exc:  # 截图不是判据：抓不到不影响 PASS/FAIL，但要明说，别假装有图
+        print(f"\n⚠ 截图没抓到（{type(exc).__name__}: {exc}）—— 判据结果不受影响。"
+              "窗口被遮挡时 Chromium 会卡住 capture；把设置窗口点到最前再重跑。")
     print(f"\nREAL-GUI PASS={pass_count} FAIL={fail_count}")
     return 1 if fail_count else 0
 

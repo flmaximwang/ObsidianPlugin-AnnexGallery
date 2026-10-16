@@ -84,6 +84,9 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     const remotesSection = containerEl.createDiv({ cls: "annex-remotes-section" });
     new RemotesEditor(remotesSection, this.host).render();
 
+    // remote 设置与模版设置之间也来一条分割线（用户 2026-10-17 追加）。
+    containerEl.createEl("hr", { cls: "annex-remotes-divider annex-settings-divider" });
+
     // 多配置编辑器：工具条（新模版 / 导入模版 / 添加预设）+ 每张卡片。
     const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
     this.editor = new ProfileEditor(profilesSection, this.host);
