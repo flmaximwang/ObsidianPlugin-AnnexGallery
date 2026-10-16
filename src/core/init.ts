@@ -10,6 +10,7 @@ import {
   templateLines,
 } from "./rules";
 import { MergeResult, Progress } from "./types";
+import { applyRemotes, type RemoteEntry, type RemoteResult } from "./remotes";
 
 export interface InitOptions {
   progress?: Progress;
@@ -17,7 +18,25 @@ export interface InitOptions {
   gitattributesPath?: string;
   /** Defaults to `<root>/.gitignore`. */
   gitignorePath?: string;
+  /** 设置页「remote 设置」：逐个 git remote add / set-url（只写配置，不 fetch/push）。 */
+  remotes?: RemoteEntry[];
   dryRun?: boolean;
+}
+
+/** `annex.addunlocked`：git-annex 的**仓库级**配置，写在 git-annex 分支的 `config.log` 里。 */
+export const ADD_UNLOCKED_KEY = "annex.addunlocked";
+/** 插件要求的值：新增的 annex 文件一律 unlocked（真实文件，index mode `100644`）。 */
+export const ADD_UNLOCKED_VALUE = "true";
+
+export interface AddUnlockedResult {
+  key: string;
+  /** 插件要求的值（恒为 `"true"`）。 */
+  value: string;
+  /** 本次跑之前的取值；`null` = 没设过（`git annex config --get` 输出为空行）。 */
+  previous: string | null;
+  /** 这次真的写了配置（`dryRun` 下恒 false —— 那时看 `action`）。 */
+  changed: boolean;
+  action: "set" | "unchanged" | "planned";
 }
 
 export interface InitResult {
@@ -26,6 +45,10 @@ export interface InitResult {
   initedAnnex: boolean;
   gitattributes: MergeResult;
   gitignore: MergeResult;
+  /** 形态口径：新文件以 unlocked 入库（`annex.addunlocked`）。 */
+  addUnlocked: AddUnlockedResult;
+  /** 每条 remote 的结果（added / updated / unchanged / skipped / failed）。 */
+  remotes: RemoteResult[];
   notes: string[];
 }
 
@@ -51,6 +74,48 @@ function applyRulesFile(
   const result = ensureRulesFile(file, required);
   progress(`${label}：补 ${result.added.length} 行`);
   return result;
+}
+
+/**
+ * 读一个 git-annex 仓库级配置的当前值（`git annex config --get`）。
+ *
+ * 实测：键没设过时**退出码仍是 0**、stdout 只有一行空行（不是非零退出），所以
+ * 「没设过」的判据是「空输出」，不是退出码。
+ */
+function readAnnexConfig(root: string, key: string): string | null {
+  const r = git(["annex", "config", "--get", key], root);
+  if (r.code !== 0) return null;
+  const value = (r.stdout.split(/\r?\n/)[0] ?? "").trim();
+  return value === "" ? null : value;
+}
+
+/**
+ * 形态口径：`annex.addunlocked true` —— 让**以后 add 的** annex 文件以 unlocked
+ * （真实文件、index mode `100644`）入库，而不是 locked 符号链接（`120000`）。
+ *
+ * 为什么必须先读再写：`git annex config --set` 每次都会往 git-annex 分支写一个提交
+ * （`config.log`），已是 true 还再写一遍就是「幂等的初始化为分支加了噪声提交」。
+ * 所以只有当前值不是 `true` 才写；`false` / 任何别的值都会被改成 `true`（这是本命令的口径）。
+ */
+function applyAddUnlocked(root: string, dryRun: boolean, progress: Progress): AddUnlockedResult {
+  const previous = readAnnexConfig(root, ADD_UNLOCKED_KEY);
+  const base = { key: ADD_UNLOCKED_KEY, value: ADD_UNLOCKED_VALUE, previous };
+  if (previous === ADD_UNLOCKED_VALUE) {
+    progress(`${ADD_UNLOCKED_KEY} 已是 ${ADD_UNLOCKED_VALUE}，跳过（新文件本来就会以 unlocked 形态 add）`);
+    return { ...base, changed: false, action: "unchanged" };
+  }
+  if (dryRun) {
+    progress(`git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE}（dry-run：未执行）`);
+    return { ...base, changed: false, action: "planned" };
+  }
+  progress(`git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE}`);
+  const r = git(["annex", "config", "--set", ADD_UNLOCKED_KEY, ADD_UNLOCKED_VALUE], root);
+  if (r.code !== 0) {
+    throw new Error(
+      `git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE} 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`,
+    );
+  }
+  return { ...base, changed: true, action: "set" };
 }
 
 /**
@@ -81,14 +146,22 @@ function isRepoRoot(dir: string): boolean {
  *   2. `git init -b main` only when it is not already a work tree (and refuse
  *      to re-init a subdirectory of an existing repo);
  *   3. `git annex init "<basename>"` only when it is not already an annex repo;
- *   4. merge the four `.gitattributes` rules (append the missing ones);
- *   5. merge `.gitignore` (only `.obsidian`);
- *   6. never `git add` / `git commit` / `git annex add` — the work tree is left
+ *   4. `git annex config --set annex.addunlocked true` unless it is already true
+ *      —— **形态口径**：此后 `git annex add` 进来的文件一律 unlocked（真实文件、
+ *      index mode `100644`），而不是锁定态的符号链接（`120000`）；已有 annexed 的
+ *      locked 老文件不受影响（那要另跑 `git annex unlock`）；
+ *   5. merge the four `.gitattributes` rules (append the missing ones);
+ *   6. merge `.gitignore` (only `.obsidian`);
+ *   7. never `git add` / `git commit` / `git annex add` — the work tree is left
  *      to the user.
  *
- * Idempotent: a second run changes no byte on disk. With `dryRun` nothing is
- * written and `createdRepo` / `initedAnnex` / `added` describe what *would*
- * happen.
+ * 所以一条「初始化 gallery」跑 **2 条 annex 命令**：`git annex init` +
+ * `git annex config --set annex.addunlocked true`（后者已是 true 就跳过）。
+ *
+ * Idempotent: a second run changes no byte on disk —— **包括 git-annex 分支**：
+ * `annex.addunlocked` 已是 true 时不再 `--set`（每写一次都会在 git-annex 分支上留一个提交）。
+ * With `dryRun` nothing is written and `createdRepo` / `initedAnnex` / `addUnlocked`
+ * describe what *would* happen.
  */
 export async function initGallery(root: string, opts: InitOptions = {}): Promise<InitResult> {
   const dryRun = opts.dryRun === true;
@@ -149,7 +222,10 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
     }
   }
 
-  // 4. `.gitattributes` — merge, never overwrite.
+  // 4. `annex.addunlocked` —— 形态口径：新文件以 unlocked 入库（不是 locked 符号链接）。
+  const addUnlocked = applyAddUnlocked(absRoot, dryRun, progress);
+
+  // 5. `.gitattributes` — merge, never overwrite.
   const gitattributesPath = opts.gitattributesPath ?? path.join(absRoot, ".gitattributes");
   const gitattributes = applyRulesFile(
     gitattributesPath,
@@ -159,7 +235,7 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
     ".gitattributes",
   );
 
-  // 5. `.gitignore` — merge, never overwrite.
+  // 6. `.gitignore` — merge, never overwrite.
   const gitignorePath = opts.gitignorePath ?? path.join(absRoot, ".gitignore");
   const gitignore = applyRulesFile(
     gitignorePath,
@@ -169,9 +245,14 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
     ".gitignore",
   );
 
+  // 7. remotes（设置页「remote 设置」）—— 只写 remote 配置，不 fetch、不 push。
+  const remotes = applyRemotes(absRoot, opts.remotes ?? [], { dryRun, progress });
+
   if (dryRun) {
-    notes.push("dry-run：只计算不写盘，createdRepo / initedAnnex / added 表示「将会怎样」");
+    notes.push("dry-run：只计算不写盘，createdRepo / initedAnnex / addUnlocked / added 表示「将会怎样」");
+  } else if (addUnlocked.changed) {
+    notes.push(`${ADD_UNLOCKED_KEY}=${ADD_UNLOCKED_VALUE} 已写进 git-annex 分支（此后 add 的文件以 unlocked 入库）`);
   }
 
-  return { root: absRoot, createdRepo, initedAnnex, gitattributes, gitignore, notes };
+  return { root: absRoot, createdRepo, initedAnnex, gitattributes, gitignore, addUnlocked, remotes, notes };
 }

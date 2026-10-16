@@ -105,6 +105,41 @@ export const TECNAI_TEM_PROFILE: ParseProfile = {
   onMismatch: "empty",
 };
 
+/**
+ * 「新模版」按钮插入的那条 profile —— 只演示 schema 的基本写法：
+ * 具名捕获组 → fields（含 type: number）、keyOrder 决定最终写哪些键、ask 现场填 sample、
+ * onMismatch 决定正则不命中时怎么处理。照它改成自己的命名规则即可。
+ *
+ * 注意 `sample` 走 ask（现场填），不放进正则的具名组：解析出来的值优先级高于 ask，
+ * 两处都给会让用户填的样品名被文件名里的那一份盖掉。
+ */
+export const TEMPLATE_PROFILE: ParseProfile = {
+  id: "template",
+  name: "新模板（示例：<放大倍数>x_<序号>）",
+  source: "stem",
+  regex: "^(?<magnification>\\d+)x_(?<index>\\d+)$",
+  fields: [
+    { group: "magnification", type: "number" },
+    { group: "index", type: "number" },
+  ],
+  ask: ["sample"],
+  keyOrder: [
+    "tags",
+    "sample",
+    "session",
+    "date",
+    "magnification",
+    "index",
+    "width",
+    "height",
+    "size",
+    "btime",
+    "thumbnail",
+    "tif",
+  ],
+  onMismatch: "empty",
+};
+
 export const DEFAULT_PROFILES: ParseProfile[] = [TECNAI_TEM_PROFILE];
 
 export interface ParseContext {

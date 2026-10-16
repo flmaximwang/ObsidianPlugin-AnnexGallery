@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Progress } from "./types";
-import { git, magickBinary, run } from "./git";
+import { git, magickBinary, run, statusPorcelain } from "./git";
 import { collectImages, stemOf } from "./stems";
 import {
   DEFAULT_PROFILES,
@@ -72,14 +72,51 @@ export interface SingleSidecarOptions {
   apply?: boolean;
   /** Overwrite / touch files that git reports as dirty. */
   force?: boolean;
+  /**
+   * 「覆盖重算」：已存在的 sidecar（干净的、被改过的都算）按当前 profile 重写。
+   *
+   * 用户 2026-10-17 口径：改动模版（profile）后要能重跑并重算元数据，所以这条必须比 `force`
+   * 更进一步 —— `force` 只覆盖「被 git 报脏」的那些，干净的一律 `skipped-existing`。
+   */
+  overwrite?: boolean;
   progress?: Progress;
 }
 
 export interface SidecarEntry {
   image: string;
   sidecar: string;
-  action: "created" | "planned" | "skipped-dirty" | "skipped-existing" | "skipped-mismatch" | "failed";
+  action: "created" | "overwritten" | "planned" | "skipped-dirty" | "skipped-existing" | "skipped-mismatch" | "failed";
   detail?: string;
+}
+
+/** 「生成元数据」重跑前的只读预览（不写盘）。 */
+export interface SidecarPlan {
+  /** 这个目录里的图片数。 */
+  images: number;
+  /** 已经有 sidecar 的份数。 */
+  existing: number;
+  /** 其中被 git 报脏的份数（未跟踪的 sidecar 也算脏）。 */
+  dirty: number;
+}
+
+/**
+ * 数一下重跑会碰到什么：图片数 / 已存在的 sidecar 数 / 其中被改过的份数。
+ *
+ * 只读：`git status` 一次问完所有已存在的 sidecar（不逐个跑 git）。
+ */
+export function planSidecarTargets(dir: string, repoRoot?: string): SidecarPlan {
+  const images = collectImages(dir);
+  const targets: string[] = [];
+  for (const image of images) {
+    const sidecar = path.join(path.dirname(image), `${stemOf(image)}.md`);
+    if (fs.existsSync(sidecar)) targets.push(sidecar);
+  }
+  let dirty = 0;
+  if (repoRoot !== undefined && targets.length > 0) {
+    const status = statusPorcelain(repoRoot, targets);
+    dirty = status.split(/\r?\n/).filter((line) => line.trim() !== "").length;
+  }
+  return { images: images.length, existing: targets.length, dirty };
 }
 
 export interface SidecarReport {
@@ -272,8 +309,11 @@ function contextFor(image: string, vaultRoot: string): ParseContext {
 
 /** Non-empty `git status --porcelain` for `target` ⇒ the file is dirty. */
 function isDirty(repoRoot: string, target: string): boolean {
-  const rel = toPosix(path.relative(repoRoot, target));
-  const result = git(["status", "--porcelain", "--", rel], repoRoot);
+  // 直接把**绝对路径**当 pathspec 交给 git —— 实测 git 对 `/var/…` 与 `/private/var/…` 两种写法都认。
+  // 别用 `path.relative(repoRoot, target)`：macOS 上仓库根若是 `/private/var/…` 而目录来自
+  // `/var/…`，它会算出 `../../../../var/…`，git 直接 `fatal: … is outside repository`，
+  // stdout 为空 ⇒ 这个「脏文件保护」会**静默失效**（同一类坑在 drop 里也踩过）。
+  const result = git(["status", "--porcelain", "--", target], repoRoot);
   return result.stdout.trim().length > 0;
 }
 
@@ -294,6 +334,7 @@ function mergeDetail(base: string | undefined, extra: string | undefined): strin
 export async function generateSidecars(dir: string, opts: SingleSidecarOptions): Promise<SidecarReport> {
   const apply = opts.apply === true;
   const force = opts.force === true;
+  const overwrite = opts.overwrite === true;
   const progress: Progress = opts.progress ?? ((): void => {});
 
   const profiles = opts.profiles !== undefined && opts.profiles.length > 0 ? opts.profiles : DEFAULT_PROFILES;
@@ -334,6 +375,28 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
 
       if (fs.existsSync(sidecar)) {
         const dirty = isDirty(opts.repoRoot, sidecar);
+        if (overwrite) {
+          // 「覆盖重算」：干净的和被改过的都按当前 profile 重写（改动模版后重跑的正是这条路）。
+          if (!apply) {
+            entries.push({
+              image,
+              sidecar,
+              action: "planned",
+              detail: mergeDetail("overwrite：将覆盖已存在的 .md", built.detail),
+            });
+            progress(`${label} 计划覆盖 ${stem}.md`);
+            continue;
+          }
+          fs.writeFileSync(sidecar, built.text, "utf8");
+          entries.push({
+            image,
+            sidecar,
+            action: "overwritten",
+            detail: mergeDetail(dirty ? "覆盖已存在的 .md（git 报脏）" : "覆盖已存在的 .md", built.detail),
+          });
+          progress(`${label} 覆盖 ${stem}.md`);
+          continue;
+        }
         if (dirty && !force) {
           entries.push({
             image,

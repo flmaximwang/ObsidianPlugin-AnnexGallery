@@ -1,0 +1,1 @@
+- All context menu options in file explorer should be wrapped in the `Annex Gallery` option

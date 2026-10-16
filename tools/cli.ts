@@ -11,13 +11,16 @@
  *                                        [--profile <id>] [--profiles-file <json>] [--verify] [--repo <root>] [--apply] [--force] [--json]
  *   node tools/annex-gallery.mjs profiles --list | --check | --parse <name> [--path <relpath>] [--profile <id>] [--profiles-file <json>]
  *   node tools/annex-gallery.mjs stems   <dir> [--json]
+ *   node tools/annex-gallery.mjs drop    <dir> [--dry-run] [--force] [--json]   # 丢本地 annex 内容
+ *   node tools/annex-gallery.mjs annex   <add|unlock|lock|get|unannex|drop> <dir> [--json]
  *   node tools/annex-gallery.mjs defaults            # print the bundled .gitattributes
  */
 import * as fs from "fs";
 import * as path from "path";
 import { initGallery } from "../src/core/init";
+import { ANNEX_OP_TITLE, AnnexOp, dropLargefiles, runAnnexOp } from "../src/core/annex";
 import { GITATTRIBUTES_TEMPLATE, GITIGNORE_TEMPLATE } from "../src/core/rules";
-import { buildSidecarText, generateSidecars } from "../src/core/sidecar";
+import { buildSidecarText, generateSidecars, planSidecarTargets } from "../src/core/sidecar";
 import { collectImages, duplicateStems, stemOf } from "../src/core/stems";
 import { generateThumbnails } from "../src/core/thumbnails";
 import { progressPrefix } from "../src/core/types";
@@ -252,7 +255,7 @@ function runSidecarVerify(dir: string, opts: VerifyOptions): void {
 const HELP = `annex-gallery <command> [options]
 
 commands
-  init     <dir>                                       初始化 gallery（git init + git annex init + 合并 .gitattributes/.gitignore）
+  init     <dir>                                       初始化 gallery（git init + git annex init + annex.addunlocked=true + 合并 .gitattributes/.gitignore）
   thumbs   <dir> [--edge 256] [--dry-run] [--force]     为目录内所有图片生成 .thumbnail.png
   sidecar  <dir> --vault <root> [--sample <name>]       为目录内所有图片生成 <stem>.md（默认 dry-run，--apply 才写）
            [--profile <id>] [--profiles-file <json>] [--verify] [--repo <root>] [--apply] [--force]
@@ -260,6 +263,8 @@ commands
   profiles --check                                     对全部 profile 跑 validateProfile（有 error 退 1）
   profiles --parse <名字> [--path <相对路径>] [--profile <id>]   打印解析出的键值、标出没命中的组
   stems    <dir>                                        统计重名 basename（跨会话重名）
+  drop     <dir> [--dry-run] [--force]                  丢掉目录内 annex 内容的本地副本（默认只丢别处有足够副本的）
+  annex    <op> <dir>                                   largefiles 操作（插件右键菜单同款）：add | unlock | lock | get | unannex | drop
   defaults                                              打印插件内置的 .gitattributes 模板
 
 common flags: --json   --dry-run   --force   --profile <id>   --profiles-file <json>`;
@@ -282,6 +287,11 @@ async function main(): Promise<void> {
       say(json, result, [
         `root=${result.root}`,
         `createdRepo=${result.createdRepo} initedAnnex=${result.initedAnnex}`,
+        `annex.addunlocked=${result.addUnlocked.value}（${result.addUnlocked.action}${
+          result.addUnlocked.action === "set" && result.addUnlocked.previous !== null
+            ? `，原值 ${result.addUnlocked.previous}`
+            : ""
+        }）`,
         `.gitattributes +${result.gitattributes.added.length} (${result.gitattributes.added.join(" | ")})`,
         `.gitignore +${result.gitignore.added.length} (${result.gitignore.added.join(" | ")})`,
         ...result.notes,
@@ -333,6 +343,19 @@ async function main(): Promise<void> {
         return;
       }
 
+      if (flag(flags, "plan")) {
+        // 重跑前的只读预览：「生成元数据」里那个「是否覆盖」弹窗数出来的东西。
+        const planned = planSidecarTargets(dir, resolvedVault);
+        say(json, planned, [
+          `dir=${dir}`,
+          `images=${planned.images} existing=${planned.existing} dirty=${planned.dirty}`,
+          planned.existing === 0
+            ? "没有已存在的 sidecar（重跑不会覆盖任何东西）"
+            : `已有 ${planned.existing} 份 sidecar${planned.dirty > 0 ? `（其中 ${planned.dirty} 份被改过）` : ""} —— 加 --overwrite 覆盖重算，不加就只补缺失`,
+        ]);
+        return;
+      }
+
       const report = await generateSidecars(dir, {
         vaultRoot: resolvedVault,
         repoRoot: path.resolve(opt(flags, "repo") ?? vaultRoot),
@@ -343,6 +366,7 @@ async function main(): Promise<void> {
         tag: opt(flags, "tag"),
         apply: flag(flags, "apply"),
         force: flag(flags, "force"),
+        overwrite: flag(flags, "overwrite"),
         progress,
       });
       const counts = report.entries.reduce<Record<string, number>>((acc, entry) => {
@@ -370,6 +394,42 @@ async function main(): Promise<void> {
         didSomething = true;
       }
       if (flag(flags, "list") || !didSomething) runProfilesList(profiles);
+      return;
+    }
+    case "annex": {
+      const ops: AnnexOp[] = ["add", "unlock", "lock", "get", "unannex", "drop"];
+      const op = positional[1];
+      const dirArg = positional[2];
+      if (op === undefined) throw new Error(`annex 需要 <op>：${ops.join(" | ")}`);
+      if (!(ops as string[]).includes(op)) throw new Error(`不认识的 annex 操作：${op}（可用：${ops.join(" | ")}）`);
+      if (dirArg === undefined) throw new Error(`annex ${op} 需要 <dir>`);
+      const report = await runAnnexOp(op as AnnexOp, path.resolve(dirArg), { progress });
+      say(json, report, [
+        `op=${report.op}（${ANNEX_OP_TITLE[report.op]}）dir=${report.dir}`,
+        `repo=${report.repoRoot} subpath=${report.relpath === "" ? "." : report.relpath}`,
+        `ok=${report.ok} skipped=${report.skipped} failed=${report.failed}${
+          report.candidates === undefined ? "" : ` candidates=${report.candidates}`
+        }${report.staged === undefined ? "" : ` staged=${report.staged}`}${
+          report.bytesFreed === undefined ? "" : ` bytesFreed=${report.bytesFreed}`
+        }`,
+        ...report.entries.map((entry) => `  ${entry.action} ${entry.file}${entry.detail === undefined ? "" : ` (${entry.detail})`}`),
+      ]);
+      return;
+    }
+    case "drop": {
+      if (positional[1] === undefined) throw new Error("drop 需要 <dir>");
+      const report = await dropLargefiles(path.resolve(positional[1]), {
+        dryRun,
+        force: flag(flags, "force"),
+        progress,
+      });
+      say(json, report, [
+        `dir=${report.dir} repo=${report.repoRoot} subpath=${report.relpath === "" ? "." : report.relpath}`,
+        `present=${report.present} (${report.bytesPresent} B) dropped=${report.dropped} freed=${report.bytesFreed} B skipped=${report.skipped} failed=${report.failed}`,
+        ...report.entries
+          .filter((entry) => entry.action !== "planned")
+          .map((entry) => `  ${entry.action} ${entry.file}${entry.detail === undefined ? "" : ` (${entry.detail})`}`),
+      ]);
       return;
     }
     case "stems": {

@@ -39,6 +39,11 @@ export function stemOf(file: string): string {
 /**
  * Recursively collect every source image under `dir`, sorted by path.
  * A missing / unreadable directory yields an empty list (never throws).
+ *
+ * **软链也算图片**：git-annex 的 locked 文件在工作树里就是软链，`Dirent.isFile()` 对它们是 false。
+ * 早先只认 `isFile()`，于是仓库一切到 locked 模式，「生成缩略图 / 生成元数据 / Add largefiles」
+ * 就会**静默什么都不做**（实测：4 张图只数出 1 张）。断链（内容已 drop）也照样算 —— 元数据仍该生成，
+ * 缩略图那一步会以 failed 记进报告。
  */
 export function collectImages(dir: string): string[] {
   const out: string[] = [];
@@ -51,7 +56,8 @@ export function collectImages(dir: string): string[] {
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...collectImages(full));
-    else if (entry.isFile() && isSourceImage(entry.name)) out.push(full);
+    // 软链（= annex locked 文件）也要算进来，见上面的说明。
+    else if ((entry.isFile() || entry.isSymbolicLink()) && isSourceImage(entry.name)) out.push(full);
   }
   return out.sort();
 }

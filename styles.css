@@ -1,28 +1,143 @@
 /* Annex Gallery — 设置页与弹窗的样式。
  * Obsidian 会自动加载插件目录下的 styles.css，所以这个文件必须与 main.js / manifest.json
  * 一起被复制进 <vault>/.obsidian/plugins/annex-gallery/。
+ *
+ * 布局口径见 docs/setting-panel.md：标题 h1「Annex Gallery Settings」（下方无说明，标题本身
+ * 不带 padding、与下面的设置项左对齐）→ 工具条（新模版 / 导入模版 / 添加预设）→ profile 卡片
+ * → 分割线 → 缩略图边长。
  */
 
-/* ── 多配置（profile）区 ─────────────────────────────────────────────────── */
+/* ── 标题 ──────────────────────────────────────────────────────────────────── */
 
-.annex-profiles-section {
-  margin-top: 1.5em;
-  border-top: 1px solid var(--background-modifier-border);
-  padding-top: 1em;
+/*
+ * Obsidian 1.14.4 的 app.css 里有两条会套在插件设置页标题上的规则：
+ *   .vertical-tab-content h1 { display: none; }                  ← 内容区 h1 被隐藏
+ *   .vertical-tab-content h1…{ padding: 0 var(--size-4-4); }      ← 并带 16px 左右内边距
+ * （核心设置页的标题由 app 自己的 `.setting-page-titlebar` 提供，所以内容里的 h1 被隐掉；
+ *  插件设置页走的是旧 API，containerEl 就是一个 `.vertical-tab-content`，没有 titlebar。）
+ *
+ * 所以这里两件事都得压在 app 之上：显式打开标题、并把那 16px padding 抹平。选择器写成
+ * `.vertical-tab-content h1.annex-settings-title`（0,2,1）才盖得住 app 的 (0,1,1)。
+ */
+.vertical-tab-content h1.annex-settings-title {
+  display: block;
+  padding: 0;
+  margin: 0 0 var(--size-4-4) 0;
+  line-height: 1.2;
 }
 
-.annex-profiles-head h3 {
-  margin: 0 0 0.3em 0;
+/* 工具条里的 h3 与卡片里的标题一律去 padding，与设置项左对齐。 */
+.annex-profiles h3,
+.annex-preview-title {
+  margin: 0;
+  padding: 0;
 }
 
-.annex-profiles-head p {
+/* ── remote 设置（最上方的一项，可装多条）────────────────────────────────── */
+
+.annex-remotes-section {
+  margin: 0 0 1em 0;
+}
+
+.annex-remotes-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  padding: 0.8em 1em 1em 1em;
+}
+
+/* 与 h1 同口径：抹掉 app 给 h3 的 16px 内边距（`.vertical-tab-content h3 { padding: 0 16px }`）。 */
+.vertical-tab-content h3.annex-remotes-title {
+  margin: 0 0 0.2em 0;
+  padding: 0;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.annex-remotes-hint {
   margin: 0 0 0.8em 0;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
+.annex-remote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.annex-remote-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.annex-remote-name {
+  flex: 0 0 12em;
+  min-width: 8em;
+}
+
+.annex-remote-url {
+  flex: 1 1 auto;
+  min-width: 12em;
+}
+
+.annex-remote-note {
+  flex: 0 0 auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.annex-remote-note-warn {
+  color: var(--text-error);
+}
+
+.annex-remotes-empty {
+  color: var(--text-muted);
+}
+
+.annex-remote-add {
+  margin-top: 0.8em;
+  cursor: pointer;
+}
+
+.annex-remote-row button {
+  cursor: pointer;
+}
+
+/* ── 多配置（profile）区 ─────────────────────────────────────────────────── */
+
+.annex-profiles-section {
+  margin: 0 0 1em 0;
+}
+
 .annex-profiles-toolbar {
-  margin-bottom: 0.8em;
+  display: flex;
+  align-items: center;
+  /* 三个控件（新模版 / 导入模版 / 添加预设）要在同一行、整排靠右。
+     真机里「添加预设」下拉会按最长选项撑开（TECNAI 那条约 464px）把排挤到第二行，
+     所以：不换行 + 允许下拉收缩（min-width: 0）+ 宽度上限 + 整排 right 对齐。 */
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 0.5em;
+  margin-bottom: 1em;
+}
+
+.annex-profile-preset {
+  min-width: 0;
+  flex: 0 1 auto;
+  /* 原生 select 会按**最长选项**定宽（TECNAI 那条 464px），但那只是打开后的列表；
+     收起时只会显示占位项「添加预设…」（选完立刻回到占位项），所以宽度收窄即可。 */
+  max-width: 14em;
+}
+
+.annex-profiles-toolbar button,
+.annex-profiles-toolbar select {
+  cursor: pointer;
+}
+
+.annex-hidden {
+  display: none;
 }
 
 .annex-profile-list {
@@ -33,6 +148,13 @@
 
 .annex-profiles-empty {
   color: var(--text-muted);
+}
+
+/* 卡片与下面普通设置项之间的分割线。 */
+.annex-settings-divider {
+  margin: 1.5em 0 1em 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
 /* ── 一张 profile 卡片 ──────────────────────────────────────────────────── */
@@ -66,11 +188,7 @@
   color: var(--text-faint);
 }
 
-.annex-profile-match {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
-
+/* 状态胶囊：Saved / Unsaved changes / Syntax Error */
 .annex-profile-status {
   margin-left: auto;
   font-size: var(--font-ui-smaller);
@@ -118,6 +236,10 @@
   color: var(--text-warning);
 }
 
+.annex-profile-msg-ok {
+  color: var(--text-success);
+}
+
 /* ── 解析预览 ───────────────────────────────────────────────────────────── */
 
 .annex-preview {
@@ -132,20 +254,20 @@
   margin-bottom: 0.4em;
 }
 
-.annex-preview-inputs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4em;
+/* 第一行就是示例文件名，占满整宽（没有「相对 vault 路径」，也没有解析按钮）。 */
+.annex-preview-filename {
+  width: 100%;
 }
 
-.annex-preview-inputs input {
-  flex: 1 1 14em;
-  min-width: 10em;
-}
-
+/* 解析结果：带边框的一块，每行一条解析（`key = value`）。 */
 .annex-preview-result {
   margin-top: 0.5em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0.5em 0.6em;
+  background-color: var(--background-primary);
   font-size: var(--font-ui-smaller);
+  min-height: 2.4em;
 }
 
 .annex-preview-hint {
@@ -186,14 +308,70 @@
   color: var(--text-muted);
 }
 
-/* ── 卡片底部动作 ───────────────────────────────────────────────────────── */
+/* ── 卡片底部动作：右下角，从右往左读 = 保存、复制、打开、删除 ─────────────── */
 
 .annex-profile-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 0.5em;
   margin-top: 0.8em;
 }
 
 .annex-profile-actions button {
   cursor: pointer;
+}
+
+/* ── 状态栏：未提交 / 未跟踪 / 未入库 largefiles（spec: docs/status-bar.md）───
+ *
+ * 那一行由 main.ts 的 setupStatusBar() 建：`.annex-status-counts`（文字）+
+ * `.annex-status-refresh`（`refresh-cw` 图标）。整行可点（未初始化时点一下 = 初始化
+ * gallery，其余 = 立即刷新），所以给 pointer + hover 时图标提亮，让「能点」看得见。
+ *
+ * `data-level` 只管配色，不做布局：zero（三项全 0）灰、dirty 正常、uninitialized /
+ * unavailable 用 warning 色（这两档的文字本身就是原因说明）。
+ * `data-busy="true"` 表示这一趟统计还没跑完（vault 大时约 4 秒）。
+ */
+.annex-status-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  cursor: pointer;
+}
+
+/* 数字等宽：30 秒一刷新时数字变化不会把整行挤得左右抖。 */
+.annex-status-bar .annex-status-counts {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.annex-status-bar[data-level="zero"] .annex-status-counts {
+  color: var(--text-faint);
+}
+
+.annex-status-bar[data-level="dirty"] .annex-status-counts {
+  color: var(--text-normal);
+}
+
+.annex-status-bar[data-level="uninitialized"] .annex-status-counts,
+.annex-status-bar[data-level="unavailable"] .annex-status-counts {
+  color: var(--text-warning);
+}
+
+.annex-status-bar .annex-status-refresh {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.annex-status-bar .annex-status-refresh svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.annex-status-bar:hover .annex-status-refresh {
+  color: var(--text-normal);
+}
+
+.annex-status-bar[data-busy="true"] .annex-status-refresh {
+  opacity: 0.45;
 }

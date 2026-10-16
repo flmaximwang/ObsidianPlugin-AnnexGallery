@@ -8,7 +8,7 @@
  * tiny DOM (`FakeEl`) good enough to build and inspect the settings tab and the
  * right-click modal headlessly.
  */
-const registry = { commands: [], menus: [], tabs: [], notices: [], modals: [], savedData: null };
+const registry = { commands: [], menus: [], tabs: [], notices: [], modals: [], savedData: null, statusBarItems: [], intervals: [], domEvents: [], windowIntervals: [] };
 
 /** Minimal element: enough of the Obsidian HTMLElement API for the UI code. */
 class FakeEl {
@@ -174,6 +174,7 @@ class MenuItem {
   constructor() {
     this.title = "";
     this.icon = "";
+    this.submenu = null;
   }
   setTitle(title) {
     this.title = title;
@@ -186,6 +187,19 @@ class MenuItem {
   onClick(callback) {
     this.callback = callback;
     return this;
+  }
+  /**
+   * 镜像 app 里 `MenuItem.prototype.setSubmenu()` 的真实实现（见 obsidian.asar）：
+   * 只建一次子菜单、给父项打 `has-submenu`、并把父项的 click 变成 preventDefault
+   * —— 也就是说点父项本身不执行任何动作。
+   */
+  setSubmenu() {
+    if (this.submenu === null) {
+      this.submenu = new Menu();
+      this.hasSubmenu = true;
+      this.callback = (evt) => evt.preventDefault();
+    }
+    return this.submenu;
   }
 }
 class Menu {
@@ -259,6 +273,10 @@ function makeButtonComponent(buttonEl) {
     },
     setCta() {
       buttonEl.addClass("mod-cta");
+      return component;
+    },
+    setWarning() {
+      buttonEl.addClass("mod-warning");
       return component;
     },
     setIcon() {
@@ -382,9 +400,34 @@ class Plugin {
   addSettingTab(tab) {
     registry.tabs.push(tab);
   }
+  /** 状态栏那一行：真实 API 无参、返回一个空 `<div class="status-bar-item">`。 */
+  addStatusBarItem() {
+    const el = new FakeEl("div");
+    el.addClass("status-bar-item");
+    registry.statusBarItems.push(el);
+    return el;
+  }
   registerEvent() {}
-  registerDomEvent() {}
-  registerInterval() {}
+  registerDomEvent(el, type, callback) {
+    // 真实 API 会把 handler 挂到元素上并在卸载时摘掉；桩里照挂，好让测试能 click()。
+    registry.domEvents.push({ el, type });
+    if (el && typeof el.addEventListener === "function") el.addEventListener(type, callback);
+  }
+  /**
+   * 真实 API 收的是 `setInterval` 的 id（卸载时 clearInterval）。桩里记下这个 id，
+   * 测试可以读 `_idleTimeout` 复核间隔毫秒（见 smoke-test 的状态栏一节）。
+   */
+  registerInterval(id) {
+    registry.intervals.push(id);
+  }
+}
+
+/** `setIcon(el, iconId)`：真实实现在元素里塞一个 `<svg>`；桩里只记 `data-icon`。 */
+function setIcon(el, iconId) {
+  if (el === undefined || el === null) return;
+  el.addClass("svg-icon");
+  el.setAttr("data-icon", String(iconId));
+  if (el.children.length === 0) el.createEl("svg", { cls: `lucide-${String(iconId)}` });
 }
 
 function makeApp(vaultPath) {
@@ -396,6 +439,33 @@ function makeApp(vaultPath) {
         return { name };
       },
     },
+  };
+}
+
+/**
+ * 最小 `window`：Obsidian 插件跑在 Electron 的渲染进程里，用 `window.setInterval` 是正常写法
+ * （`this.registerInterval(window.setInterval(...))`）。桩里**不能**真挂 interval —— 那会把测试进程
+ * 吊住 —— 所以只发一个 id；`setTimeout` / `clearTimeout` 直接转发给 Node（debounce 照常工作）。
+ *
+ * 发的 id 连同**间隔毫秒**记进 `registry.windowIntervals`：测试要能断言「插件真的按 30 秒轮询」，
+ * 而不是只看插件自己字段里写的数字。
+ */
+if (globalThis.window === undefined) {
+  const liveIntervals = new Set();
+  let nextIntervalId = 1;
+  globalThis.window = {
+    setInterval(_fn, ms) {
+      const id = nextIntervalId;
+      nextIntervalId += 1;
+      liveIntervals.add(id);
+      registry.windowIntervals.push({ id, ms });
+      return id;
+    },
+    clearInterval(id) {
+      liveIntervals.delete(id);
+    },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
   };
 }
 
@@ -411,6 +481,7 @@ module.exports = {
   PluginSettingTab,
   Modal,
   Plugin,
+  setIcon,
   FakeEl,
   walk,
   registry,

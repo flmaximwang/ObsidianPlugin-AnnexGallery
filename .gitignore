@@ -4,3 +4,4 @@ main.js
 tools/annex-gallery.mjs
 data.json
 *.log
+.worktrees/

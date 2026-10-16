@@ -1,4 +1,4 @@
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -46,6 +46,78 @@ export function run(cmd: string, args: string[], cwd?: string): RunResult {
 /** `git -C <dir> …` — always anchored, never depends on the caller's cwd. */
 export function git(args: string[], dir: string): RunResult {
   return run("git", ["-C", dir, ...args]);
+}
+
+/**
+ * 流式跑一条命令：每读到一个完整行回调一次（stdout）。
+ *
+ * 长命令必须走这条：`git annex get` 从远端取 GB 级内容要几分钟，而 `run()` 是
+ * `spawnSync` —— 在插件里会把 Obsidian 的整个 UI 冻住。stderr 只累积到结果里
+ * （annex 的进度/结果都在 stdout 的 JSON 行里）。
+ */
+export function runStream(
+  cmd: string,
+  args: string[],
+  dir: string | undefined,
+  onLine?: (line: string) => void,
+): Promise<RunResult> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd: dir, env: cleanEnv(), encoding: "utf8" } as never);
+    let stdout = "";
+    let stderr = "";
+    let pending = "";
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) if (onLine !== undefined && line.trim() !== "") onLine(line);
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error: Error) => {
+      resolve({ code: -1, stdout, stderr: `${stderr}${error.message}` });
+    });
+    child.on("close", (code: number | null) => {
+      for (const line of pending.split("\n")) {
+        if (onLine !== undefined && line.trim() !== "") onLine(line);
+      }
+      resolve({ code: code === null ? 1 : code, stdout, stderr });
+    });
+  });
+}
+
+/** 流式的 `git -C <dir> …`。 */
+export function gitStream(
+  args: string[],
+  dir: string,
+  onLine?: (line: string) => void,
+): Promise<RunResult> {
+  return runStream("git", ["-C", dir, ...args], undefined, onLine);
+}
+
+/**
+ * 目录所属仓库的根 + 该目录相对根的路径（`""` = 仓库根）。
+ *
+ * 子路径**交给 git 自己算**（`rev-parse --show-prefix`），绝不用 `path.relative(repoRoot, dir)`：
+ * macOS 上 `/var` 与 `/private/var` 是同一目录的两种写法，`path.relative` 会把二者当成毫不相干，
+ * 算出 `../../../../var/…` —— 传给 git/annex 就是 `fatal: … is outside repository`（实测踩过）。
+ */
+export function repoScope(dir: string): { repoRoot: string; relpath: string } {
+  const top = git(["rev-parse", "--show-toplevel"], dir);
+  const repoRoot = top.code === 0 ? top.stdout.trim() : dir;
+  const prefix = git(["rev-parse", "--show-prefix"], dir);
+  const relpath = prefix.code === 0 ? prefix.stdout.trim().replace(/\/+$/, "") : "";
+  return { repoRoot, relpath };
+}
+
+/** 目录里某文件相对仓库根的 posix 路径（用于把本地绝对路径翻译给 annex）。 */
+export function repoRelativePath(repoRelpath: string, dir: string, file: string): string {
+  const rel = path.relative(dir, file).split(path.sep).join("/");
+  return repoRelpath === "" ? rel : `${repoRelpath}/${rel}`;
 }
 
 export function isInsideWorkTree(dir: string): boolean {

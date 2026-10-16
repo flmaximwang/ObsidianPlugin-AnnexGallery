@@ -1,19 +1,23 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_PROFILES, type ParseProfile } from "../core/profiles";
-import { ProfileEditor, cloneProfile, cloneProfiles } from "./profile-editor";
+import type { RemoteEntry } from "../core/remotes";
+import { ProfileEditor, cloneProfile, cloneProfiles, type ProfileEditorHost } from "./profile-editor";
+import { RemotesEditor } from "./remotes-editor";
 
 export { cloneProfile, cloneProfiles };
 
+/**
+ * 落进 data.json 的设置。
+ *
+ * 按 docs/setting-panel.md：`.gitattributes` / `.gitignore` 用内置默认即可（不再暴露路径），
+ * 也没有「默认样品名」这种东西 —— 每次生成 metadata 都在弹窗里填样品名（按文件夹记住上次的值）。
+ */
 export interface PluginSettings {
   /** Thumbnail edge length in px — keep equal to `.base`'s `cardSize`. */
   thumbnailEdge: number;
-  /** `.gitattributes` to merge into; empty = `<vault>/.gitattributes`. */
-  gitattributesPath: string;
-  /** `.gitignore` to merge into; empty = `<vault>/.gitignore`. */
-  gitignorePath: string;
-  /** Last used sample name for command #3 («使用 Annex Gallery 管理»). */
-  defaultSample: string;
-  /** Remembered sample per image folder (absolute path). */
+  /** 「remote 设置」：可以有多条，一条 = 名称 + 地址；「初始化 gallery」时逐个 git remote add/set-url。 */
+  remotes: RemoteEntry[];
+  /** 按文件夹记住的现场填写值（`sample` 用目录本身当键，兼容旧 data.json）。 */
   folderSamples: Record<string, string>;
   /** T-008: metadata 解析配置，一条 profile = 一条正则 + 具名捕获组到键的映射。 */
   profiles: ParseProfile[];
@@ -23,9 +27,7 @@ export interface PluginSettings {
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   thumbnailEdge: 256,
-  gitattributesPath: "",
-  gitignorePath: "",
-  defaultSample: "",
+  remotes: [],
   folderSamples: {},
   // 深拷贝：DEFAULT_SETTINGS 是模块级常量，绝不能被编辑操作就地改到。
   profiles: cloneProfiles(DEFAULT_PROFILES),
@@ -52,14 +54,17 @@ export function writeAsk(settings: PluginSettings, folderDir: string, key: strin
 }
 
 /** What the settings tab needs from the plugin (breaks the import cycle). */
-export interface SettingsHost {
+export interface SettingsHost extends ProfileEditorHost {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
   vaultRoot(): string;
+  /** 扫当前仓库的 remote，把设置里没有的补进来；返回补了几条。 */
+  scanVaultRemotes(): Promise<number>;
 }
 
 export class AnnexGallerySettingTab extends PluginSettingTab {
   private readonly host: SettingsHost;
+  private editor: ProfileEditor | null = null;
 
   constructor(app: App, host: SettingsHost) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,7 +74,23 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   display(): void {
     const { containerEl } = this;
+    this.editor?.destroy();
     containerEl.empty();
+
+    // 标题：没有说明文字（spec「标题下方无说明」）。
+    containerEl.createEl("h1", { cls: "annex-settings-title", text: "Annex Gallery Settings" });
+
+    // 最上方、profile 卡片之前：remote 设置（一个 item 装多条 remote）。
+    const remotesSection = containerEl.createDiv({ cls: "annex-remotes-section" });
+    new RemotesEditor(remotesSection, this.host).render();
+
+    // 多配置编辑器：工具条（新模版 / 导入模版 / 添加预设）+ 每张卡片。
+    const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
+    this.editor = new ProfileEditor(profilesSection, this.host);
+    this.editor.render();
+
+    // 分割线以下才是剩下的普通设置项（spec 只留「缩略图边长」）。
+    containerEl.createEl("hr", { cls: "annex-settings-divider" });
 
     new Setting(containerEl)
       .setName("缩略图边长")
@@ -82,44 +103,19 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
         }),
       );
 
-    new Setting(containerEl)
-      .setName(".gitattributes 路径")
-      .setDesc(`留空 = <vault>/.gitattributes（当前 ${this.host.vaultRoot()}/.gitattributes）。写入是合并：只补缺失的规则。`)
-      .addText((text) =>
-        text
-          .setPlaceholder("<vault>/.gitattributes")
-          .setValue(this.host.settings.gitattributesPath)
-          .onChange(async (value) => {
-            this.host.settings.gitattributesPath = value.trim();
-            await this.host.saveSettings();
-          }),
-      );
+    // 每次打开设置页也扫一遍仓库里的 remote（在 Obsidian 外面加过 remote 时能立刻看到）；
+    // 只有真的补进了新条目才重渲染，避免无限循环。
+    void this.host
+      .scanVaultRemotes()
+      .then((added) => {
+        if (added > 0) this.display();
+      })
+      .catch((error) => console.error(error));
+  }
 
-    new Setting(containerEl)
-      .setName(".gitignore 路径")
-      .setDesc("留空 = <vault>/.gitignore。默认只忽略 .obsidian。")
-      .addText((text) =>
-        text
-          .setPlaceholder("<vault>/.gitignore")
-          .setValue(this.host.settings.gitignorePath)
-          .onChange(async (value) => {
-            this.host.settings.gitignorePath = value.trim();
-            await this.host.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("默认样品名")
-      .setDesc("生成 sidecar .md 时写入 sample 字段的默认值；按文件夹记住上一次用过的名字。")
-      .addText((text) =>
-        text.setValue(this.host.settings.defaultSample).onChange(async (value) => {
-          this.host.settings.defaultSample = value.trim();
-          await this.host.saveSettings();
-        }),
-      );
-
-    // 多配置（profile）编辑器：单独一块容器，编辑器重渲染不会碰到上面的设置项。
-    const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
-    new ProfileEditor(profilesSection, this.host).render();
+  /** 设置页关掉/切走时收摊（外部编辑的轮询定时器）。 */
+  hide(): void {
+    this.editor?.destroy();
+    this.editor = null;
   }
 }
