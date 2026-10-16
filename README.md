@@ -169,7 +169,8 @@ annex 对不需要动的文件**不输出任何行**（例如 unlock 一个已�
 - **还没初始化**：那一行写「未初始化 · 点击初始化 gallery」，点一下就跑「初始化 gallery」；悬停提示写明原因
   （不是 git 仓库 / 不是 git-annex 仓库 / 找不到 git-annex 命令）。
 - **端到端校验可复跑**：`npm run verify:status`（`tools/status-check.cjs`，临时 annex 仓库 + 构建产物，
-  31 条断言）；结构部分在 `npm run smoke` 里（16 条）。
+  31 条断言）；结构部分在 `npm run smoke` 里（16 条）；真机那一行（文字 / 几何 / 配色 / 点击刷新）在
+  `npm run gui:status` 里（`tools/status-gui-check.py`，16 条/窗口，需要带 `--remote-debugging-port` 的 Obsidian）。
 
 ## 配置驱动的 metadata 解析
 

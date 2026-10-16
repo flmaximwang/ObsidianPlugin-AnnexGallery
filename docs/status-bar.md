@@ -121,11 +121,16 @@ PASS=31 FAIL=0
 npm run build          # 出 main.js / styles.css（状态栏代码在 main.js 里）
 npm run smoke          # 无头加载构建产物：设置页 + 右键菜单 + 弹窗 + 落盘 + 状态栏结构（当前 131 条断言，其中状态栏 16 条）
 npm run verify:status  # 真 annex 仓库 + 逐场景数字（31 条断言）
+npm run gui:status     # 真机那一行：文字 / 几何 / 配色 / 悬停提示（16 条断言/窗口，只读）
+npm run gui:status -- --click   # 再点一下那一行，验证「点了会刷新」
+npm run gui:status -- --reload  # 先把插件关/开一次（会改运行中的 app 状态）再量
 ```
 
 `npm run smoke` 只保证**结构**（文字 span / 图标 / `data-level` / 30 秒注册 / styles.css 规则），因为它跑在
 非仓库目录上；三项数字的逐场景核验在 `npm run verify:status`（临时 annex 仓库，跑完删掉，需要本机有
-`git` 与 `git annex`）。
+`git` 与 `git annex`）；配色、几何与「点了真的会刷新」只有 `npm run gui:status` 能在跑着的 Obsidian 里量
+（需要 `python3` + `websocket-client`，且 Obsidian 要带 `--remote-debugging-port=9333` 启动 —— 那个开关
+只在启动时生效，所以要先真退出再带参数打开，见 skill `inspect-obsidian-gui-with-maxim`）。
 
 ## 真机复核（Obsidian 1.14.4 桌面版，CDP over `--remote-debugging-port=9333`）
 
@@ -158,6 +163,15 @@ npm run verify:status  # 真 annex 仓库 + 逐场景数字（31 条断言）
 
 截图（状态栏局部，3× 放大）确认：文字完整未截断、图标与文字垂直居中、间距自然，没有跑版。
 
-**还没做到的一档**：`Data_lab_08` 窗口里的插件实例仍是**旧构建**（那个窗口没有 `.annex-status-bar`；
-它的状态栏项当时还全是 `display: none`），勾选/重载插件后再看一次才算齐。两个 vault 的
-`.obsidian/plugins/annex-gallery/` 里 `main.js` / `styles.css` 都已换成当前构建（与仓库内文件 sha256 相同）。
+`Data_lab_08` 那个窗口另外实测了**重载插件**与**点击那一行**（都在同一个 CDP 会话里，用户明确授权）：
+
+| 步骤（08 窗口） | 实测结果 |
+|---|---|
+| `app.plugins.disablePlugin('annex-gallery')` → `enablePlugin('annex-gallery')` | 重载成功；重载**前**那个窗口没有 `.annex-status-bar`（插件实例还是旧构建），重载后出现 |
+| 重载后第一趟还没跑完时 | 文字 `统计中…`、`data-level=loading`、`data-busy=true`，盒子 74 × 22 px |
+| `el.click()`（= 点那一行） | 150 ms 后 `data-busy` 已经是 `true` —— 点击**真的**触发了一趟刷新 |
+| 那趟跑完 | `未提交 1519 · 未跟踪 2 · 未入库 largefiles 1520`、`data-level=dirty`、`data-busy=false`，盒子 290 × 22 px —— 与**独立用命令行**量 `Data_lab_08` 的三个数逐个相同 |
+
+两个窗口的 16 条/窗口真机判据都过（`npm run gui:status` → `PASS=29 FAIL=0`，含 08 的 `--click` 那一趟）。
+两个 vault 的 `.obsidian/plugins/annex-gallery/` 里 `main.js` / `styles.css` 都已是当前构建（与仓库内文件
+sha256 相同）。
