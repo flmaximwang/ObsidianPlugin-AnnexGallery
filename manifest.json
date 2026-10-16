@@ -1,9 +1,9 @@
 {
   "id": "annex-gallery",
   "name": "Annex Gallery",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "minAppVersion": "1.14.4",
-  "description": "把 git / git-annex 管的图片文件夹做成图库：初始化 gallery、批量生成缩略图、生成 sidecar .md 元数据、合并 .gitattributes 与 .gitignore。",
+  "description": "Turn git-annex managed image folders into a gallery: initialize a gallery, generate thumbnails and sidecar Markdown metadata, run git-annex largefile operations, and track uncommitted or annex-missing files in the status bar.",
   "author": "flmaximwang",
   "authorUrl": "https://github.com/flmaximwang",
   "isDesktopOnly": true
