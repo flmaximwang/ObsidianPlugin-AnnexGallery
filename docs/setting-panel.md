@@ -226,7 +226,21 @@
    抓图前先 `osascript` activate + `AXRaise` 把设置窗口提到前台。截图**不是判据**：抓不到要打印警告并继续，
    不能让它把一轮全绿的复核拖成失败。
 
-## 6. 判据
+## 6. 字段与默认值（`data.json`）
+
+落进 `data.json` 的只有五项：
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
+| remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；加载时扫当前仓库的 `git remote`，把设置里没有的补进来（同名不覆盖手改过的地址）；初始化时逐个 `git remote add`（同名已存在就 `set-url`，地址相同则一个字节都不碰）。 |
+| `profiles` | 内置 TECNAI 电镜 | metadata 解析配置；工具条的「新模版 / 导入模版 / 添加预设」增，卡片上的「保存 / 复制 / 打开 / 删除」改。 |
+| `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（内置默认只有 `sample`）。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
+| `folderProfiles` | `{}` | 按文件夹记住上次选的 profile id。 |
+
+两条规则文件（`.gitattributes` / `.gitignore`）不在设置里，见 [`commands.md`](commands.md)。
+
+## 7. 判据
 
 | 命令 | 钉住什么 | 钉不住什么 |
 |---|---|---|

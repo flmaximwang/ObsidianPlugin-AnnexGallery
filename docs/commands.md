@@ -120,6 +120,33 @@ annex.addunlocked=true 已写进 git-annex 分支（此后 add 的文件以 unlo
 三行的共同点是判据只看**生效值**：形态 1 的盘上配置与形态 3 完全相反，但前者已经是对的行为，命令要做的
 只是把「共享」补齐；后者行为是错的，命令要做的是删那一行。凭「配置里有没有这一行」判断会两种都判错。
 
+## 两条规则文件（`.gitattributes` / `.gitignore`）
+
+初始化时把两条规则文件补到齐，**写入语义是「合并」**：逐行比对（去首尾空白、把连续空白压成一个
+空格后比较），目标文件里已有的行一字不改、不动顺序，只把缺的规则追加到末尾；重复运行幂等
+（不多写一个字节）。默认内容是插件内置模板（`src/defaults/gitattributes`、`src/defaults/gitignore`），
+插件与 CLI 共用同一份。
+
+合并目标固定是 `<vault>/.gitattributes` / `<vault>/.gitignore`（桌面版取 vault 根），**不提供路径设置**；
+旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample` 三个键在加载时会被删掉。
+
+内置默认 `.gitattributes`（文件结尾**无换行符**）：
+
+```gitattributes
+# 默认都进 annex
+*               annex.largefiles=anything
+# 缩略图不进 annex
+*.thumbnail.png annex.largefiles=nothing
+# .md 作为每个文件的 metadata, 进 git
+*.md            annex.largefiles=nothing
+# .base 作为文件展示的视图，进 git
+*.base          annex.largefiles=nothing
+```
+
+写成「默认全进 annex、再逐个排除派生文件」是有意的：数据仓库里绝大多数内容是图像/原始数据，
+适合走 annex；而 `.md` / 缩略图 / `.base` 必须留在 git 里，否则会被 annex 变成软链、画廊静默失效
+（见 [`design.md`](design.md) 第 2 条原则）。
+
 ## 失败与观测口径
 
 判据的**形状**是退出码与输出形状，因为这些决定了代码怎么写；具体键名、路径、时间戳一律用占位符。
