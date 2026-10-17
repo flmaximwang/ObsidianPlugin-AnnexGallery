@@ -1,302 +1,348 @@
-# Settings panel 布局
+# Settings panel 设计说明
 
-> 这份文档是 Annex Gallery 设置页布局的**唯一口径**：先放 spec（用户 2026-10-17 原文），再放落地实况与实测数字。
-> 可复跑的判据：`npm run layout`（离屏几何，`tools/layout-check.cjs`）+ `npm run gui`（真机结构，`tools/real-gui-check.py`）。
+## 1. 定位
 
-## 布局（spec 原文）
+**管什么**
 
-Heading 全部没有 padding，目视检查与左侧对齐
+- 设置页的**顶层顺序**：从标题到最后一条普通设置项，各区块的落点与前后关系；
+- 区块内部的几何**关系式**：左边缘对齐、上下间隙相等、跨行同列、同一行不换行、撑满内容宽；
+- 控件的行为契约：工具条三个入口、卡片的编辑/保存/复制/打开/删除与状态胶囊、remote 行的增删与落盘、
+  「初始化 gallery」对 remote 的写入语义；
+- 每条契约由哪条命令钉住、钉到什么程度。
 
-<h1>: Annex Gallery Settings
+**不管什么**
 
-(标题下方无说明)
+- 解析引擎本身（正则怎么匹配、字段怎么进 frontmatter）的算法；
+- 主题配色、字体、截图观感 —— 这部分没有自动判据，只能人眼看；
+- git 远端的网络行为：remote 只写配置，不 fetch、不 push。
 
-从左往右的按钮：新模版、导入模版
+本文件**不含任何随环境变化的具体数值**。像素、耗时、坐标随主题与窗口尺寸变化，写进来既会过期也会误导；
+判据一律是「相等 / 对齐 / 同序 / 不换行 / 撑满」这类关系式，命令与配置里的路径一律是占位符
+（`/Users/<user>`、`<vault>`、`<ms>`）。
 
-(设计说明：不要 TECNAI 电镜作为 template，就用一个 default template 显示基本写法就行)
+## 2. 设计原则
 
-<Item n>
-    <Name> <id> <状态：Saved/Unsaved changes/Syntax Error>
-    解析预览
-    第一行：示例文件名（全宽）
-    避免可选：相对 vault 路径，解析与路径无关
-    无解析按钮，输入示例文件名自动解析
-    带边框的解析结果
-    - 解析 1
-    一排按钮：保存、复制、打开、删除，从右往左排
-    （设计说明：打开为使用默认外部应用打开编辑，自动同步外部应用更改）
-    右下角
+1. **版式只写关系，不写绝对值。** 任何「某元素该多宽」都表述成它与容器或相邻元素的关系；绝对值只出现在
+   一次性防护上（如宽度上限），且要能说清上限防的是什么。
+2. **app 的默认值必须显式压掉。** `.vertical-tab-content` 里的 h1/h3 被隐藏、带行内边距，是核心设置页的
+   假设，不是本页的意图；每一处都要在本页样式里显式写回，并且写在能赢过它的特异度上。
+3. **一行控件靠自身伸缩规则分配空间。** 富余空间交给 auto 外边距吸收，收窄交给 `min-width: 0` +
+   宽度上限；不写死像素宽度，也不靠容器宽度算术。
+4. **特异度写在选择器里，不靠加载顺序。** 与 app.css 同权重时谁在样式表后面谁赢 —— 那是构建产物与
+   app 版本的偶然，不作为设计依据。
+5. **状态由数据推导，不由操作历史推导。** 「Saved」是内容与盘上那份语义相同，不是「上次点了保存」。
+6. **写盘保守。** 有 error 级问题的配置任何时候都不落盘；批量写（扫描、初始化）只做幂等的最小改动。
 
-</Item n>
+## 3. 设想的运行状态
 
-分割线
-
-<item> 缩略图边长
-.gitattributes 用默认即可，无需设置
-.gitignore 用默认即可，无需设置
-没有所谓默认样品名，每次 Annex 添加 metadata 都要填入
-
-### spec 里没写死、由追问确认的五处（2026-10-17）
-
-| 问题 | 口径 |
-|---|---|
-| 「导入模版」的模板从哪来 | **用系统文件选择器选一个 `.json`**（不是粘贴 JSON、也不是从内置列表挑） |
-| 卡片里的 JSON 文本框留不留 | **保留**：文本框继续就地编辑，状态胶囊显示 Saved / Unsaved changes / Syntax Error |
-| 「带边框的解析结果 / - 解析 1」 | **每行一条解析**，例如 `magnification = 12345` 就是一条 |
-| 新装插件的内置 profile | **仍然内置 TECNAI 电镜**；因此工具条再加一个 **「添加预设（下拉选框）」**（从左往右：新模版 → 导入模版 → 添加预设） |
-| 「复制」按钮 | **复制这条 profile 成一张新卡片**（副本），不是复制 JSON 到剪贴板 |
-
-### 追加口径（2026-10-17 二次）：最上方再加一个 item —— remote 设置
-
-> 原文：**「然后在 setting 的最上方在添加一个可以包含多项的item：remote 设置，设置remote的名称与地址」**
-
-| 问题 | 口径 |
-|---|---|
-| 放在哪 | **h1 标题下方、profile 卡片之上**（= 设置列表的最上方；不是标题之上） |
-| 拿来做什么 | 存进 `data.json`（`remotes`），并在**「初始化 gallery」时逐个执行** `git remote add`（同名已存在就 `git remote set-url`），幂等，只写配置、不 fetch/push |
-| 一条长什么样 | 一行 = `[名称] [地址] [删除]`；列表下方一个「添加 remote」。名称或地址缺一半时行尾给红字提示（缺名称 / 缺地址 / 名称里有空白字符） |
-
-### 追加口径（2026-10-17 三次修正）：真机跑出来的三条
-
-> 原文（连发三条）：**「添加预设和其他 2 个按钮需要放在同一行，靠右显示」** / **「打开现在并不会自动唤起外部编辑器」** /
-> **「加载插件时，应该自动扫描 git remote 配置，某些仓库其实存在 remote，却会被识别为没有 remote」**
-
-| 问题 | 口径 | 根因 |
-|---|---|---|
-| 工具条三个控件 | ~~同一行 + 整排靠右~~（**已被四次修正取代**：见下 —— 现在是两个按钮靠左、下拉靠右） | 原生 `<select>` 按**最长选项文字**定宽：TECNAI 那条 464px，把排挤到第二行（离屏桩里 option 没文字，量不出来） |
-| 「打开」要真的唤起外部应用 | 绝对路径走 **`electron.shell.openPath`**（绝对路径 API，返回空串才算成功）；只有路径确实在 vault 内时才退回 Obsidian 的 `app.openWithDefaultApp` | `app.openWithDefaultApp(p)` 吃的是 **vault 相对路径**（bundle 里 `getFilePath(p)` + `window.open(abs,"_external")`）；传 `TMPDIR` 绝对路径会被拼成 `<vault>/var/folders/…` ⇒ **静默失败** |
-| 加载时自动扫 remote | `onload`（+ 每次打开设置页）跑 `scanRemotes()`：仓库里有、设置里没有的**补进** `data.json`（同名**不覆盖**用户改的），并给一条 Notice | 设置页原来只看 `data.json`，仓库里已有的 remote（`lab` / `tailscale`）显示成「没有 remote」 |
-
-### 追加口径（2026-10-17 四次修正）：工具条两端分开
-
-> 原文：**「添加模版和导入模版按钮现在靠右了，很丑，我的要求是：添加模版和导入模版按钮靠左，但是添加预设下拉选框靠右」**
-
-| 问题 | 口径 | 落地 |
-|---|---|---|
-| 工具条两个按钮 | **贴内容区左边缘** | `.annex-profiles-toolbar { justify-content: flex-start }` |
-| 「添加预设」下拉 | **贴内容区右边缘**（中间留白） | `.annex-profiles-toolbar select.annex-profile-preset { margin-left: auto }`（auto 外边距吃掉富余空间，把下拉顶到右边） |
-| 下拉的外观（**原话没提，落地时顺手补的**） | 挂 Obsidian 的 `dropdown` 类 —— 真机里裸 `<select>` 没有边框/箭头，看着像一段浅色文字 | `toolbar.createEl("select", { cls: "dropdown annex-profile-preset" })`；选择器要写到 `.annex-profiles-toolbar select.annex-profile-preset`（0,2,1）才压得住 app.css 的 `.dropdown { max-width: 100% }` |
-
-### 追加口径（2026-10-17 五次修正）：两条分割线
-
-> 原文：**「模版设置与remote设置之间添加分割线」**
-
-| 问题 | 口径 | 落地 |
-|---|---|---|
-| 位置 | `hr` 插在 **remote 区与模版区之间**（顶层第 3 个元素），模版区下面原来那条分割线保留 | `containerEl.createEl("hr", { cls: "annex-remotes-divider annex-settings-divider" })`（共用外观类 + 一个自己的类，判据好写） |
-| 上下留白 | 实测**上下各 18.75px**（对称） | `.annex-remotes-divider { margin: 1.25em 0 }`；上面那半留白会被 `.annex-remotes-section` 的 `1em` 底边距**折叠**（取大者），所以写 `1.25em` 才对称 —— 写 `0.5em` 实测仍是 15px |
-
-### 追加口径（2026-10-17 六次修正）：TECNAI 的正确预设
-
-> 原文（连发两条）：**「这才是 TECNAI 的正确预设」**（给了完整 JSON）→
-> **「这个更好一些，但是 12345X-5_1.4-0001 匹配失败」**（把 marker 从 `.*` 收紧成 `.+`）。
-
-| 问题 | 口径 | 落地 |
-|---|---|---|
-| 内置 `TECNAI_TEM_PROFILE` | 以用户给的原文 JSON 为准：`name` 里写 `<标记>`；`X-` 之间只有一个具名组 `marker`（`(?<marker>.+)`）；`fields` 三项（magnification number / **marker string** / index number）；`keyOrder` **12 键**（去掉 `lens` 与 `eagleId`） | `src/core/profiles.ts`；同步 `tools/example-profiles/two-profiles.json`、`tools/example-profiles/verify-plugin-load.cjs`（14→12 键断言）、README 示例 1 |
-| 中间段带下划线 / 小数点要能命中 | `12345X-5_1.4-0001` ⇒ `marker=5_1.4`、`index=0001`（number 类型会规整成 `1`，与 `0015 → 15` 同一口径） | 真机 `npm run gui`：在设置页预览框里实敲这条名字，`state=ok` |
-| `type: "string"` | 插件 schema 原来只有 `number` / `text`；现在 `FieldType` 加 `"string"` 作为 **`text` 的等价拼写**（渲染都走带引号那条 —— sidecar 里只有 `number` 是特判），这样用户配置原文能不改编就落进 schema | `src/core/profiles.ts` 的 `FieldType` |
-
-**「匹配失败」有两层原因，都不是正则在数据上不行**（拿两个 vault 的 **2177** 个真实图片名实测）：
-
-1. **预览的 stem 算错**（真 bug，已修）：`src/ui/profile-editor.ts` 里有一份**自己抄的** `stemOf`，把最后一个 `.` 之后整段当扩展名 —— 而用户给的名字是**不带扩展名**的 `12345X-5_1.4-0001`，于是被削成 stem `12345X-5_1` ⇒ 明明该命中，预览却写「正则不命中」。
-   修法：改用 `core/stems` 那份 `stemOf`（同一实现，别抄第二份），并在**不带图片扩展名时把这个串本身也当 stem 试一次**（候选两条都试，命中即用；都不命中时按引擎口径那条报错）。
-   判据：`npm run gui` 新增 3 条真机断言（state=ok / marker=5_1.4 / index=1），`npm run smoke` 新增 3 条同义断言（136 条）。
-2. **老正则本来就窄**：旧版 `X-` 之间是 `\d{1,2}` 或 `[0-9A-Za-z]+` 两条分支，`5_1.4` 里带 `_` 和 `.` ⇒ 不命中。同一批 2177 个真实名字：**老正则命中 725，新正则命中 1078**；`.*` 与 `.+` 在这批数据上**零差异**（没有 marker 为空的真实文件名），所以采 `.+` 不丢任何现有文件，且比 `.*` 严。
-
-`constFields.eagleId` 仍在声明里，但 `keyOrder` 里没有 `eagleId` —— 按硬规则「不在 keyOrder 里的键一律不写」，它**不会**落进 frontmatter。这是用户配置原文的写法，原样保留；要写就把 `eagleId` 加回 `keyOrder`。
-
-下面的实测数字与断言条数已按这一轮更新（`smoke` 136 / `layout` 41 / `gui` 17 / `remotes` 21）。
-
-## 落地后的实况（2026-10-17）
+打开设置页（`AnnexGallerySettingTab.display()`），内容区自上而下恰好是这一段：
 
 ```
 <h1 class="annex-settings-title">Annex Gallery Settings</h1>        ← 内容区第一个元素，下方无说明
 ┌ .annex-remotes-card ────────────────────────────────────────────┐
-│ remote 设置                                                      │  ← 最上方这一项
+│ remote 设置                                                      │
 │ 「初始化 gallery」会逐个 git remote add / set-url…                 │
-│ [名称: origin] [地址: ssh://nas.example/…] [删除]                   │  ← 一行一条，可多条
-│ [名称: backup] [地址: /Volumes/Backup/…] [删除]                   │
+│ [名称: <remote>] [地址: ssh://<host>/<volume>/<path>] [删除]      │  ← 一行一条，可多条
+│ [名称: <remote>] [地址: /Volumes/<volume>/<path>]     [删除]      │
 │ [添加 remote]                                                     │
 └─────────────────────────────────────────────────────────────────┘
 ─────────────────── HR.annex-remotes-divider（remote ↔ 模版）───────────────────
 [新模版] [导入模版]                              [添加预设 ▾]       ← 同一行：按钮贴左、下拉贴右
 ┌ .annex-profile-card ────────────────────────────────────────────┐
-│ TECNAI 电镜（…） · id: tecnaitem                     [Saved]     │  ← Name · id · 状态胶囊（靠右）
-│ ┌ textarea.annex-profile-json（等宽，min-height 240px）┐         │
+│ TECNAI 电镜（…） · id: <id>                          [Saved]     │  ← Name · id · 状态胶囊（靠右）
+│ ┌ textarea.annex-profile-json（等宽，带最小高度）──────────┐      │
 │ └──────────────────────────────────────────────────────┘        │
 │ （validateProfile 的 error/warn 逐条列在文本框下面）               │
 │ 解析预览                                                          │
 │ [示例文件名（全宽，输入即解析）]                                    │
 │ ┌ .annex-preview-result（1px 边框）─────────────────────┐        │
-│ │ magnification = 12345                               │        │  ← 每行一条解析
-│ │ marker = 5705                                      │        │
-│ │ index = 15                                          │        │
+│ │ magnification = <value>                             │        │  ← 每行一条解析
+│ │ marker = <marker>                                   │        │
+│ │ index = <index>                                     │        │
 │ └──────────────────────────────────────────────────────┘        │
 │                                     [删除] [打开] [复制] [保存]   │  ← 整排贴右下角
 └─────────────────────────────────────────────────────────────────┘
 ────────────────── HR.annex-settings-divider（模版 ↔ 普通设置项）──────────────────
-缩略图边长  [256]                     ← app 自己的 .setting-item，唯一剩下的普通设置项
+缩略图边长  [<n>]                     ← app 自己的 .setting-item，唯一剩下的普通设置项
 ```
 
-一张卡片 = 一条 profile（`data-profile-id`）。标题、卡片列表、两条分割线都贴内容区左右边缘。
+### 必须成立的不变量
 
-**顶层顺序（6 项，真机与离屏一致）**：
-`H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → HR.annex-settings-divider → DIV.setting-item`
+- **顶层顺序**（离屏与真机必须逐字一致）：
+  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → HR.annex-settings-divider → DIV.setting-item`。
+- **标题**是内容区第一个子元素，是真正的 `<h1>`（`containerEl.createEl("h1", …)`），下方无说明文字；
+  `display: block`、`padding: 0`、只保留一行底部外边距。标题左边缘 = 卡片左边缘 = 内容区左边缘。
+- **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
+  N 行 `.annex-remote-row`（名称 / 地址 / 删除）+ 一个「添加 remote」。行内三列跨行同列对齐；名称列定宽，
+  地址列吃掉剩余宽度。输入即写 `data.json` 的 `remotes`。名称或地址缺一半 ⇒ 行尾红字提示
+  （缺名称 / 缺地址 / 名称里有空白字符）。
+- **工具条**是一行且不换行：两个 `<button>` 贴内容区左边缘，`<select class="dropdown annex-profile-preset">`
+  贴内容区右边缘，中间留白随窗口宽度变化而两端不动；三者 `top` 相同。
+  「新模版」插入 `TEMPLATE_PROFILE` —— 一个通用模板（示例名形状 `<放大倍数>x_<序号>`），把 regex / fields /
+  keyOrder / ask / onMismatch 五样基本写法都演示到，**不是**某台电镜的配置；电镜预设从下拉里加。
+  「导入模版」挂一个隐藏的 `<input type="file" accept=".json,application/json">`，走系统文件选择器，
+  认单条 profile / profile 数组 / `{ profiles: [...] }` 三种形状。
+  下拉的占位项是「添加预设…」，之后是内置预设（含 TECNAI 电镜）。
+- **内置预设的形状**：`TECNAI_TEM_PROFILE` 的 `name` 里写 `<标记>`；`X-` 之间只有一个具名组 `marker`，
+  写成 `(?<marker>.+)`；`fields` 三项（magnification → `number`、marker → `string`、index → `number`）；
+  `keyOrder` 不含 `lens` 与 `eagleId`。同一份 JSON 也落在 `tools/example-profiles/two-profiles.json`、
+  `tools/example-profiles/verify-plugin-load.cjs`（键数断言）与 README 示例里，三处必须一致。
+- **卡片**：一张卡片 = 一条 profile（`data-profile-id`）。头部 Name · `id:` · 状态胶囊（靠右，`data-level`
+  = ok / warn / error）；等宽 textarea 就地编辑；校验消息逐条列在文本框下方；解析预览由一个全宽的示例
+  文件名输入框驱动，输入即解析，结果区带 1px 边框、每行一条 `key = value`；动作按钮整排贴卡片右下角，
+  DOM 顺序 删除→打开→复制→保存。
+- **状态胶囊只有三个词**：`Saved` / `Unsaved changes` / `Syntax Error`。校验的 error/warn 逐条列在文本框
+  下方，不占用这三个词。
+- **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与工具条之间，两侧留白相等；下面那条在卡片与
+  普通设置项之间。
+- **普通设置项只剩一条**「缩略图边长」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
+  这种东西 —— 那三行在设置页不出现。
 
-## 逐条口径（spec → 实况 → 证据）
+## 4. 结构与落点
 
-| spec | 实况 | 证据 |
+| 落点 | 内容 |
+|---|---|
+| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`display()` 负责顶层顺序与标题/两条分割线的创建；`PluginSettings` / `DEFAULT_SETTINGS`；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()`；`hide()` 收摊 |
+| `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：`.annex-remotes-card`、`.annex-remote-list`、`.annex-remote-row`、`.annex-remote-note(-warn)`、`.annex-remote-add` |
+| `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-card`、`-head` / `-name` / `-id` / `-status` / `-json` / `-messages`、`.annex-preview` / `-title` / `-filename` / `-result` / `-actions`；示例名到 stem 的换算 |
+| `src/ui/external-edit.ts` | 外部编辑通道：临时缓冲文件、`openWithDefaultApp()`、mtime+size 轮询与回灌 |
+| `src/core/profiles.ts` | `FieldType`、`ParseProfile`、`TEMPLATE_PROFILE`（新模版用的通用模板）、`TECNAI_TEM_PROFILE`、`DEFAULT_PROFILES` |
+| `src/core/remotes.ts` | `scanRemotes()` / `mergeScannedRemotes()` / `applyRemotes()` |
+| `src/core/stems.ts` | `stemOf()` —— 全插件唯一的 stem 实现 |
+| `styles.css` | 本页全部选择器；与 app.css 的对抗关系写在注释里 |
+| `tools/layout-check.cjs` | 离屏几何（`npm run layout`） |
+| `tools/real-gui-check.py` | 真机结构（`npm run gui`） |
+| `tools/smoke-test.cjs` / `tools/remotes-check.cjs` | 无头结构与落盘、remote 写入语义 |
+
+### 关键选择器与特异度
+
+| 选择器 | 特异度 | 压掉谁 |
 |---|---|---|
-| 标题 `<h1>`「Annex Gallery Settings」，下方无说明 | `<h1 class="annex-settings-title">` 是内容区第一个元素，紧接着就是 remote 区（原来的 h3 + 说明段已删） | `npm run layout`：顶层顺序 = 标题 → remote 区 → 分割线 → 模版区 → 分割线 → 缩略图边长 |
-| Heading 全部没有 padding，与左侧对齐 | `.vertical-tab-content h1.annex-settings-title { display: block; padding: 0; margin: 0 0 16px }` | 实测：标题 left = 519 = 卡片 left = 内容左边缘 |
-| 从左往右的按钮：新模版、导入模版（+ 追问补的「添加预设」） | 两个 `<button>` **贴左边缘** + 一个 `<select class="dropdown annex-profile-preset">`（占位项「添加预设…」，之后是内置预设 TECNAI 电镜）**贴右边缘**；下拉收窄到 14em | `npm run layout`（离屏 41 条：不换行 / flex-start / 新模版贴左 / 下拉贴右 / 两控件间隙 >40px / top 一致）+ `npm run gui`（真机 17 条：新模版 257 = 内容左，下拉右 868 = 内容右） |
-| **（四次修正）**两个按钮靠左、下拉靠右 | `.annex-profiles-toolbar { justify-content: flex-start }` + 下拉 `margin-left: auto`；实测按钮组与下拉之间留白 282.5px | 真机：新模版 257..320、导入模版 327.5..403.5、添加预设… 686..868 |
-| 不要 TECNAI 电镜作 template，用 default template 显示基本写法 | 「新模版」插入 `TEMPLATE_PROFILE`（示例 `<放大倍数>x_<序号>`，演示 regex / fields / keyOrder / ask / onMismatch）；TECNAI 改从「添加预设」下拉里加 | `npm run smoke`：「新模版来自通用模板（不是 TECNAI 电镜）」 |
-| 导入模版 | 工具条里挂隐藏的 `<input type="file" accept=".json,application/json">` → 系统文件选择器；认单条 / 数组 / `{ profiles: [...] }` | `npm run smoke`：读 `.json` 后卡片数 +1 且落盘 |
-| `<Name> <id> <状态：Saved/Unsaved changes/Syntax Error>` | 卡片头三项：Name、`id: …`、状态胶囊（`data-level` = ok / warn / error）；`match: …` 不再显示（在 JSON 里可见） | `npm run smoke`：状态三态断言 |
-| 解析预览 / 第一行：示例文件名（全宽） | `input.annex-preview-filename { width: 100% }`；实测宽 620px = 卡片内宽 | `npm run layout` |
-| 避免可选：相对 vault 路径，解析与路径无关 | 那一格删了；`buildContext(filename)` 只用文件名，relpath 就取文件名 | `npm run smoke`：`annex-preview-relpath` 数 = 0 |
-| 无解析按钮，输入示例文件名自动解析 | 只监听 `input`，没有「解析」按钮 | `npm run smoke`：`annex-preview-run` 数 = 0 |
-| 带边框的解析结果 / 每行一条解析 | `.annex-preview-result { border: 1px solid var(--background-modifier-border) }`，行 = `key = value`；三态不变：没填 → 提示、不命中 → 写明「正则不命中」、命中 → 结果行 | `npm run layout`：border 1px solid，3 行 `magnification = 12345 / marker = 5705 / index = 15` |
-| 一排按钮：保存、复制、打开、删除，从右往左排，右下角 | DOM 顺序 删除→打开→复制→保存，`justify-content: flex-end`；最右的「保存」右边缘 = 卡片内容右边缘 | `npm run layout`：两条断言 |
-| 打开 = 系统默认外部应用打开编辑，自动同步外部应用更改 | 卡片 JSON 写进 `<os.tmpdir()>/annex-gallery-profiles/<id>.json` → **`electron.shell.openPath(绝对路径)`**（拿不到才退回 vault 相对路径的 `app.openWithDefaultApp`）→ 每 700ms 轮询 mtime+size，外部一改就回灌文本框、重跑校验，合法就顺手落盘 | 真机：`lsof` 见 VS Code helper 持有该文件；外部原子改名后面板同步成 `Saved` + 「已从外部应用同步并写盘。」+ `data.json` 同步改 |
-| 分割线 | **两条** `hr`：`annex-remotes-divider`（remote 区 ↔ 模版区）+ `annex-settings-divider`（模版区 ↔ 普通设置项），都 1px、撑满内容宽 | `npm run layout`：顶层顺序 + 「两条分割线都可见/撑宽/1px」+「上面那条真的夹在卡片与工具条之间」 |
-| **（五次修正）**模版设置与 remote 设置之间加分割线 | remote 卡片底 → 线 18.7px，线 → 模版工具条 18.8px（对称） | 真机实测（见下）+ `npm run smoke`：`children[2]` 就是 `annex-remotes-divider` |
-| `<item> 缩略图边长` | 第二条分割线以下只剩这一个 `Setting`；`.gitattributes 路径` / `.gitignore 路径` / `默认样品名` 三行已删 | `npm run smoke`：`data-name` 列表 = `["缩略图边长"]` |
-| .gitattributes / .gitignore 用默认即可 | 合并目标固定 `<vault>/.gitattributes` / `<vault>/.gitignore`，不再暴露路径；旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample` 三个键在加载时删掉 | `main.ts` `loadSettings()` |
-| 没有所谓默认样品名，每次都要填入 | 「默认样品名」设置项删掉；每次生成 metadata 都在弹窗里填（仍按文件夹记住上次的值，只是预填） | 同上 |
-| **（追加）**最上方一个可装多条的 item：remote 设置 | `.annex-remotes-section`（h1 之后、分割线之前）= 一张 `.annex-remotes-card`，里面有 h3「remote 设置」+ 一行说明 + N 行 `[名称][地址][删除]` + 「添加 remote」；输入即写 `data.json` 的 `remotes` | `npm run layout`（顶层顺序 + 行内几何）、`npm run smoke`（增删改/落盘/读回） |
-| **（追加）**remote 的名称与地址 | 「初始化 gallery」逐个 `git remote add`；同名已存在且地址不同 ⇒ `git remote set-url`，地址相同 ⇒ `unchanged`（一个字节都不碰）；名称/地址缺一半、名称带空白 ⇒ `skipped` 并写明原因；同名重复只认第一条；dry-run 只报不写 | `npm run remotes`（21 条断言，真 git 仓库） |
+| `.vertical-tab-content h1.annex-settings-title` | (0,2,1) | app.css 的 `.vertical-tab-content h1`（隐藏 + 行内 padding，约 (0,1,1)） |
+| `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | 同一批给 h3 的行内 padding |
+| `.annex-profiles-toolbar select.annex-profile-preset` | (0,2,1) | `.dropdown { max-width: 100% }` 与 `.theme-dark .dropdown`（(0,1,0)；同权重靠顺序太脆） |
+| `.annex-remotes-divider` | 与 `.annex-settings-divider` 同权重，按出现顺序接管 `margin` | 共用外观类 + 自己的类：外观复用，位置与留白单独可测 |
 
-## 三处 spec 没写死、我按现有信息定的判断
+工具条与下拉的伸缩规则是成套的，不能拆开用：
 
-1. **状态胶囊怎么判**：`Saved` = 文本框内容与盘上那份**语义相同**（按键名排序后比较，只改缩进或键序不算改）；
-   `Unsaved changes` = 语义不同；`Syntax Error` = JSON 解析不过。校验 error/warn 仍逐条列在文本框下方，
-   不占用状态胶囊那三个词。
-2. **JSON 文本框保留**：spec 没提它，但要了「保存」按钮和 Saved / Unsaved changes 两个状态 —— 没有就地编辑就
-   没有这两样东西，所以保留；「打开」是**额外**的一条外部编辑通道，不是替代。
-3. **失焦不再自动保存**：既然有显式「保存」和状态胶囊，textarea 失焦不再写盘（改造前会）。
-   有 error 级问题的配置**任何时候都不写盘**（坏正则进 `data.json` 会让右键弹窗直接崩）。
-
-## 真机复验（Obsidian 1.14.4，2026-10-17）
-
-`npm run gui`（`tools/real-gui-check.py`，CDP 连跑着的 Obsidian）量的。**注意实况**：1.14 里
-`app.setting.open()` 会把设置开成**独立窗口**（target 标题「设置 - <vault>」，`body` 带 `is-popout-window`），
-那个窗口里**没有** `app` 全局 —— 所以读 DOM 走设置窗口那个 target，读 `app` / 插件 settings 走主窗口那个 target。
-脚本开始时会 **disable → enable 插件**（styles.css 是插件加载时才注入 `<style>` 的，不重载就会量到内存里的旧 CSS）。
-
-```
-内容左边缘=257  内容右边缘=868
-h1: display=block  paddingLeft=0px  left=257（= 内容左边缘）  height=18
-顶层顺序: H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider annex-settings-divider
-          → DIV.annex-profiles-section → HR.annex-settings-divider → DIV.setting-item
-工具条: justify=flex-start  wrap=nowrap  box 257..868
-        新模版 257..320(63px) · 导入模版 327.5..403.5(76px) · 添加预设… 686..868(182px)   ← 三者 top 都是 325.7（同一行）
-        按钮组右端 403.5 → 下拉左端 686 = 空隙 282.5px
-分割线①(annex-remotes-divider): 卡片底 310.7 → 线顶 329.4 = 18.7px；线底 330.4 → 模版区顶 349.2 = 18.8px（margin 18.75/18.75）
-remote 行: lab(273..852) · tailscale(273..852)   ← 与 `git -C <vault> remote` 的输出一致（自动扫出来的）
-动作按钮: 删除(629.5) 打开(687) 复制(744.5) 保存(802..852)  justify=flex-end
-REAL-GUI PASS=17 FAIL=0
+```css
+.annex-profiles-toolbar { display: flex; flex-wrap: nowrap; justify-content: flex-start; }
+.annex-profiles-toolbar select.annex-profile-preset {
+  min-width: 0;        /* 允许原生 select 被压窄，否则它按最长选项定宽 */
+  flex: 0 1 auto;      /* 可收缩，不参与均分 */
+  max-width: 14em;     /* 上限，防止长预设名把一排挤成两行 */
+  margin-left: auto;   /* 吃掉富余空间，把下拉顶到右边缘 */
+}
 ```
 
-「打开」与自动同步的真机证据（都是可复算的）：
+分割线的留白同样是一个成套的写法：`.annex-remotes-divider { margin: 1.25em 0 }`，且**上边距必须大于相邻
+容器的底边距**（`.annex-remotes-section` 的 `1em`）。相邻块的外边距会折叠并取大者，上边距写小了就只有
+下面那半生效，视觉上大下小。
 
-- `require("electron").shell.openPath(缓冲文件)` 返回 `""`（Electron 契约：空串 = 成功）；
-- `lsof` 显示 **VS Code 的 helper 进程持有该文件**（`Code H… 33r  …/annex-gallery-profiles/tecnaitem.json`）——
-  即真的被默认外部应用（本机 `.json` 的默认应用 = `/Applications/Visual Studio Code.app`）打开了；
-- 外部按「原子保存（写临时文件 + rename）」改名后 ~2 秒：卡片头 Name 跟着变、状态回到 `Saved`、
-  消息行出现「已从外部应用同步并写盘。」、`data.json` 里的 profile 同步改；把名字改回去同样自动同步回来。
-- 插件 disable → enable 重载：`problems: []`（无异常、无 console error/warning），设置页照常渲染。
+## 5. 约束与取舍
 
-下拉观感的对照实验（同一窗口里）：Obsidian 自己的 `select.dropdown`（外观页那几个）computed 值 =
-`bg rgba(0,0,0,0) / border 0px none / radius 8px / shadow none / 有 chevron`，与我们的
-`select.dropdown.annex-profile-preset` **逐项相同** —— 所以「透明无边框」是这个主题里下拉的本来样子，
-不是我们样式的问题（`--dropdown-background: #333333` 那个变量在这里并没有真的画在控件上，原生下拉也一样）。
+取舍逐条列出，每条都写清另一条为什么不取：
 
-## 离屏实测数字（Obsidian 1.14.4，2026-10-17）
+1. **标题用显式 `<h1>`，不用 `Setting.setHeading()`。** 后者产出的是 `.setting-item` 骨架里的一行标题，
+   既不在「内容区第一个子元素」这个位置，也不落在 `.vertical-tab-content h1.annex-settings-title` 这条
+   规则上；`display`、`padding`、左缘对齐都得重新论证一遍，还会让「顶层第一个元素是 h1」这条断言失效。
+2. **工具条两端分开，不是整排靠右。** 整排靠右会让两个高频按钮远离阅读起点，且视觉重量全压在右侧；
+   两端分开让按钮贴内容左缘、只在需要时把下拉推到右缘。
+3. **下拉收窄，不跟随最长选项。** 原生 `<select>` 按**最长选项文字**定宽，不是当前显示项；预设名一长，
+   整排就被挤到第二行。下拉在选完后立刻回到占位项「添加预设…」，收起态永远只显示这一句，所以收窄是安全的。
+4. **下拉挂 Obsidian 的 `dropdown` 类，不自己画边框/箭头。** 挂上之后吃的是主题里下拉的既有外观
+   （背景、圆角、右侧 chevron 的 svg）；自己画会在换主题时立刻失真。判断「这个主题里下拉就该长这样」
+   的办法是把**原生下拉**的 computed 值与我们的逐项比（`background` / `border` / `border-radius` /
+   `box-shadow` / 有没有 chevron），而不是靠肉眼断言「我们样式坏了」。
+5. **「复制」是复制卡片，不是复制 JSON 到剪贴板。** 副本落成一张新卡片，服务于「在一条相似 profile 上改」；
+   剪贴板语义没有落点，也和「新模版」重复。
+6. **保存是显式按钮 + 状态胶囊，失焦不写盘。** 既然有「保存」和 `Saved` / `Unsaved changes` 两态，
+   失焦自动保存就会让这两态失去意义。JSON 文本框保留是这条的前提：没有就地编辑，就没有这两个状态；
+   「打开」是**额外**的一条外部编辑通道，不是替代。有 error 级问题的配置**任何时候都不写盘** ——
+   坏正则进了 `data.json`，右键弹窗会在解析那一刻直接崩。
+7. **状态按语义比较。** `Saved` = 文本框内容与盘上那份按键名排序后相同，只改缩进或键序不算改；
+   `Unsaved changes` = 语义不同；`Syntax Error` = JSON 解析不过。
+8. **「打开」走 `electron.shell.openPath(绝对路径)`，只在路径确实位于 vault 内时才退回
+   `app.openWithDefaultApp`。** 后者吃的是**vault 相对路径**（bundle 内是 `getFilePath(p)` +
+   `window.open(abs, "_external")`）；传 `TMPDIR` 那种绝对路径会被拼到 vault 根后面，指向不存在的文件
+   —— **静默失败**：返回成功、什么都不弹。因此「把 API 换成探针」只能证明它被调用，证明不了它有效；
+   有效性只能在真机上看副作用（`lsof` / 进程表 / `data.json`）或核对入参语义。
+9. **remote 只写配置，幂等。** 「初始化 gallery」逐个 `git remote add`；同名已存在且地址不同 ⇒
+   `git remote set-url`，地址相同 ⇒ `unchanged`（一个字节都不碰）；名称/地址缺一半、名称带空白 ⇒
+   `skipped` 并写明原因；同名重复只认第一条；dry-run 只报不写。不做 fetch/push，也不整段重写配置。
+10. **加载时扫描只补不覆盖。** `onload` 与每次打开设置页都跑 `scanRemotes()`：仓库里有、设置里没有的补进
+    `data.json`，同名条目**不覆盖**维护者改过的地址，补进来时给一条 Notice。只看 `data.json` 会让仓库里
+    本来就存在的 remote 显示成「没有 remote」，这是这套设计必须避免的假阴性。
+11. **`type: "string"` 作为 `text` 的等价拼写，不新增渲染分支。** 插件 schema 原来只有 `number` / `text`；
+    把 `"string"` 认成 `text` 的同义写法（渲染都走带引号那条，sidecar 里只有 `number` 是特判），
+    是为了让原文 JSON 一个字符都不用改就能落进 schema。
+12. **`<specimen>-<marker>-<index>` 的中间段采 `.+`，不采 `.*`。** 两者的差别只在 marker 能不能为空；
+    真实文件名里不存在空 marker，所以 `.+` 不丢任何现有文件，且比 `.*` 严。旧写法在 `X-` 之间只允许
+    `\d{1,2}` 或 `[0-9A-Za-z]+`，带 `_` 与 `.` 的 marker 直接不命中 —— 这是形状匹配失败的第一层原因。
+13. **`eagleId`（与 `lens`）留在 `constFields` 里，但不进 `keyOrder`。** 按硬规则「不在 `keyOrder` 里的键
+    一律不写」，它们不会落进 frontmatter；这是原文写法的原样保留。要写就把它加回 `keyOrder`。
+14. **分割线共用一个外观类，各自带自己的类。** 外观（1px、变量色）只写一次，位置与留白各自可测：判据能
+    直接问「`children[2]` 是不是 `annex-remotes-divider`」，不必解析计算样式。
+15. **示例文件名不做相对路径输入。** 解析只用文件名，`buildContext(filename)` 的 relpath 就取文件名本身，
+    所以「相对 vault 路径」那一格删掉；没有解析按钮，只监听 `input`。
+16. **`.gitattributes` / `.gitignore` 不暴露路径，没有默认样品名。** 合并目标固定为 `<vault>/.gitattributes`
+    与 `<vault>/.gitignore`；旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample`
+    在 `loadSettings()` 里删掉。样品名每次生成 metadata 都在弹窗里填（仍按文件夹记住上次的值，只是预填）。
 
-`npm run layout` 用**真实 app.css**（从本机 `obsidian-1.14.4.asar` 抽出）+ **真实 DOM**（桩模块跑构建产物
-`main.js` 的 `tab.display()`）+ headless Chromium 量出来的：
+### 示例名到 stem 的换算
+
+预览必须复用 `core/stems` 的 `stemOf` —— 全插件只允许这一份实现，不允许在 UI 里另抄一份。候选有两条，
+**两条都要试，命中即用**：
+
+1. 输入带图片扩展名时，按引擎口径去掉扩展名；
+2. 输入不带图片扩展名时，把这个串本身也当作 stem 再试一次。
+
+两条都不命中，才按引擎那条口径报「正则不命中」。只按「最后一个 `.` 之后整段都是扩展名」来实现是错的：
+`<specimen>-<marker>-<index>` 这种不带扩展名的示例名会被削掉最后一段，本该命中的正则被报成不命中。
+`number` 类型的字段照旧规整掉前导零，与其它编号同一口径。
+判据：`npm run smoke` 与 `npm run gui` 各有一条同义断言（`state=ok`，`marker` 与 `index` 各自对得上）。
+
+### 六条只有量过才成立的约束
+
+1. **`app.css` 在 `.vertical-tab-content` 里隐藏 h1**（`.vertical-tab-content h1 { display: none }`），
+   并给它 `padding: 0 var(--size-4-4)`。核心设置页的标题由 app 自己的 `.setting-page-titlebar` 提供，
+   所以内容里的 h1 被隐掉；插件设置页走旧 API，`containerEl` 就是一个 `.vertical-tab-content`，
+   **没有 titlebar**。因此这个 `<h1>` 必须自带 `display: block` 并把 padding 压掉，
+   选择器写到 `.vertical-tab-content h1.annex-settings-title`（0,2,1）才盖得住 app 的 (0,1,1)。
+   只看代码会以为 h1 正常显示 —— 这条只能量。
+2. **app 的 `.setting-item` 自带内边距**（`padding: var(--size-4-4)`）。所以「缩略图边长」那一行的**文字**
+   比卡片左边缘再右移一个间距。标题与卡片按「无 padding」贴内容左缘；若要让标题也与设置项文字对齐，
+   把 `.annex-settings-title` 的 padding 改成同一个变量即可（一行）。
+3. **原生 `<select>` 的宽度由最长选项决定**，而离屏桩里的 `<option>` 没有文字 ⇒ 永远量成收窄态，看着完全
+   正常。真机上预设名一长就把这一排挤成两行。约束是上面那条收缩链：`flex-wrap: nowrap` +
+   `min-width: 0` + `max-width`，三者缺一都会回到换行。
+4. **`app.openWithDefaultApp(p)` 吃 vault 相对路径。** 传绝对路径会拼成 `<vault>/<绝对路径>`，
+   返回成功但什么都不弹。教训：换 API 为探针只能证明调用发生，证明不了效果；要么真机看副作用，要么先核对
+   入参语义。
+5. **裸 `<select>` 在真机里没有任何控件感**，不挂 `dropdown` 类就吃不到 app.css 那批规则，渲染成一段浅色
+   文字 —— 截图看得出、离屏量不出（两边盒子一样大）。挂上之后还有第二下：`.dropdown { max-width: 100% }`
+   与我们的 `max-width` 同权重（0,1,0），谁在样式表后面谁赢，所以选择器直接写到 (0,2,1)。
+6. **CDP `Page.captureScreenshot` 在窗口被遮挡时会挂到 websocket 超时**（判据全过、`exit=1`、图没落地）。
+   抓图前先 `osascript` activate + `AXRaise` 把设置窗口提到前台。截图**不是判据**：抓不到要打印警告并继续，
+   不能让它把一轮全绿的复核拖成失败。
+
+## 6. 判据
+
+| 命令 | 钉住什么 | 钉不住什么 |
+|---|---|---|
+| `npm run build` | 产物 `main.js` / `styles.css` 可生成 | 任何版式 |
+| `npm run smoke` | 无头加载构建产物：设置页结构（remote 区、两条分割线、三态胶囊、无解析按钮、无 relpath 格）、导入 `.json`、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
+| `npm run layout` | 离屏几何：真实 app.css + 真实 DOM + headless Chromium，只回答「结构没塌」 | 下拉宽度、控件外观、运行时行为 |
+| `npm run remotes` | 真 git 仓库上的 add / set-url / 幂等 / dry-run / 扫描合并 / 非仓库不报错 | 设置页 UI |
+| `npm run gui` | 真机：原生 select 的宽度与外观、`openPath` 的路径语义、popout 分治、重载后的 CSS、外部编辑回灌 | 配色与审美 |
+| 截图 + 人眼 | 配色与观感 | — |
+
+判定统一是**脚本全绿（`FAIL=0`）**，不是断言条数 —— 条数会随用例增长。
+
+### `npm run smoke` 钉住的条目
+
+无头加载构建产物，断言的是结构与落盘，例如：
 
 ```
-内容左边缘=519   内容右边缘=1171   标题左=519   卡片左=519   「缩略图边长」行左=519（行内 padding 16px）
-h1: display=block  paddingLeft=0px  marginTop=0px  fontSize=15px
-顶层: annex-settings-title → annex-remotes-section → annex-remotes-divider → annex-profiles-section
-      → annex-settings-divider → setting-item
-分割线① 519..1171 top=377.4 1px；分割线② 519..1171 top=1098.8 1px
-工具条: 519..1171（justify=flex-start, wrap=nowrap, top=397.1）
-        新模版 519..582(63px) · 导入模版 589.5..665.5(76px) · 添加预设… 989..1171(182px)
-示例文件名: left=535 width=620（= 卡片内宽）
-解析结果: border=1px solid，3 行 magnification = 12345 / marker = 5705 / index = 15
-动作按钮 L→R: 删除(932.5) 打开(990) 复制(1047.5) 保存(1105)   ← 保存贴住卡片内容右边缘
-LAYOUT PASS=41 FAIL=0
+- 顶层 children 顺序；children[2] 就是 annex-remotes-divider
+- 标题是一条 h1，且 styles.css 里 .annex-settings-title 的 margin / padding 都被清零
+- 状态胶囊三态：改一个字符 → Unsaved changes，敲坏 JSON → Syntax Error，存回去 → Saved
+- annex-preview-relpath 数 = 0（没有相对路径那一格）
+- annex-preview-run 数 = 0（没有解析按钮）
+- 「新模版」来自通用模板 TEMPLATE_PROFILE（不是电镜预设）
+- 导入一个 .json 后卡片数 +1 且落盘
+- 第二条分割线以下 data-name 列表 = ["缩略图边长"]
+- remote 的增删改、落盘、读回
 ```
 
-「remote 设置」那一项（同一套量法，装 2 条时）：
+### 离屏几何（`npm run layout`）
+
+用真实 app.css（从本机 Obsidian 安装包的 `obsidian-*.asar` 抽出，macOS 默认在
+`~/Library/Application Support/obsidian/`，缓存在 `TMPDIR`）+ 真实 DOM（桩模块跑构建产物 `main.js` 的
+`tab.display()`）+ headless Chromium。断言全是关系式：
 
 ```
-内容左边缘=519 → remote 卡片 519..1171（padding 15px + border 1px）
-标题「remote 设置」left=535（= 卡片内容左边缘）、自己 padding=0、fontSize=15px
-第1行: name 535..695(160px) → url 702.5..1090(387px) → del 1105..1155
-第2行: 同列对齐（上下排列）
-[添加 remote] left=535（与标题同列）width=96px，在两行下面
+- 内容左边缘 = 标题左 = 卡片左；「缩略图边长」那一行的盒子左也 = 内容左（文字另带 app 的行内 padding）
+- h1: display=block、paddingLeft=0、marginTop=0
+- 顶层顺序 与真机一致
+- 两条分割线都可见、1px、撑满内容宽；上面那条真的夹在卡片与工具条之间
+- 工具条: justify=flex-start、wrap=nowrap，盒子撑满内容宽；两个按钮贴左、下拉贴右、三者 top 相同
+- 示例文件名输入框宽度 = 卡片内宽
+- 解析结果: border=1px solid；命中时行数 = 解析出的字段数
+- 动作按钮 L→R = 删除/打开/复制/保存，最右「保存」贴住卡片内容右边缘
 ```
 
-> 离屏那条下拉的宽度**没有参考价值**（桩模块的 `<option>` 没有文字，永远量成收窄态）——
-> 下拉宽度、chevron、控件的真实观感只能靠 `npm run gui` + 人眼看截图。
+remote 区同一套量法（装两条时）：
 
-## 六个「量出来才知道」的坑
+```
+- remote 卡片撑满内容宽；标题「remote 设置」左 = 卡片内容左，标题自身 padding=0
+- 每一行的 name / url / 删除 三列跨行同列对齐
+- 「添加 remote」与标题同列，排在所有行下面
+```
 
-1. **`.vertical-tab-content h1 { display: none; }`** —— Obsidian 1.14.4 的 `app.css` 会把设置页内容里的 h1
-   **隐掉**（核心设置页的标题由 app 自己的 `.setting-page-titlebar` 提供，所以内容里的 h1 被隐藏）。插件设置页
-   走旧 API，`containerEl` 就是一个 `.vertical-tab-content`，**没有 titlebar** —— 所以 spec 要的那个 `<h1>`
-   必须自带 `display: block` 才看得见；同一批规则还给它 `padding: 0 var(--size-4-4)`（16px），得一起压掉。
-   选择器要写成 `.vertical-tab-content h1.annex-settings-title`（0,2,1）才盖得住 app 的 (0,1,1)。
-   **这条不量就会写错**：只看代码会以为 h1 正常显示。
-2. **app 的 `.setting-item` 自带 16px 内边距**（`padding: var(--size-4-4)`）—— 所以「缩略图边长」那一行的**文字**
-   比卡片左边缘再右移 16px。标题与卡片按 spec「没有 padding」贴内容左边缘；若想让标题跟设置项文字也对齐，
-   把 `.annex-settings-title` 的 padding 改成 `0 var(--size-4-4)` 即可（一行）。
-3. **原生 `<select>` 的宽度由「最长选项文字」决定**，不是当前显示的那一项。TECNAI 预设的名字很长 ⇒ 真机里
-   下拉宽 464px ⇒ 把「新模版 / 导入模版 / 添加预设」这一排挤成两行。**离屏量不出来**：桩模块的 `<option>` 没有
-   文字，量到 41.6px，看着完全正常。修法：`flex-wrap: nowrap` + `min-width: 0` + `max-width: 14em`
-   （选完立刻回到占位项，所以收起时永远只显示「添加预设…」，收窄是安全的）。
-4. **`app.openWithDefaultApp(p)` 吃的是 vault 相对路径**（bundle：`getFilePath(p)` → `window.open(abs,"_external")`）。
-   传绝对路径会被拼成 `<vault>/var/folders/…`，**返回成功、什么都不弹**。教训：用「把 API 换成探针」的办法
-   只能证明它**被调用**，证明不了它**有效** —— 这次就是探针绿了、功能是坏的。要真机看副作用（`lsof` / 进程表 /
-   `data.json`），或至少核对 API 的入参语义。
-5. **裸 `<select>` 在真机里没有任何「控件感」** —— 不挂 Obsidian 的 `dropdown` 类，就吃不到 app.css 里
-   `.dropdown` 那批规则（背景 + 8px 圆角 + 右侧 chevron 的 svg），渲染出来只是一段浅色文字（**截图看得出、
-   离屏量不出**：两边的盒子一样大）。挂上之后还有第二下：`.dropdown { max-width: 100% }` 与我们的
-   `max-width: 14em` **同权重**（0,1,0），谁在样式表里靠后就谁赢 —— 靠「插件 CSS 排在 app.css 之后」这种顺序
-   太脆，直接把选择器写成 `.annex-profiles-toolbar select.annex-profile-preset`（0,2,1）。
-   判断「这个主题里下拉就该长这样」别靠肉眼：把**原生下拉**的 computed 值
-   （`bg / border / radius / shadow / 有没有 chevron`）和我们的逐项比。
-6. **CDP `Page.captureScreenshot` 在窗口被遮挡时会一直挂到 websocket 超时**（实测 60s：判据全过、`exit=1`、
-   图根本没落地）。抓图前先 `osascript` activate + `AXRaise` 把设置窗口提到前台。另外：截图**不是判据**，
-   抓不到要打印警告并继续，不能让它把一轮全绿的复核拖成失败。
+`node tools/layout-check.cjs --json` 另把原始几何打出来，用来检查字段齐不齐 —— 具体数值不作为断言。
 
-## 怎么复跑
+### 真机（`npm run gui`）
+
+在真实窗口上量，断言同样是关系式：
+
+```
+- h1: display=block、paddingLeft=0，左边缘 = 内容区左边缘
+- 顶层顺序 = 上面列的那一串（顺序错即 FAIL）
+- 工具条: justify=flex-start、wrap=nowrap、盒子撑满内容宽；两按钮贴左、下拉贴右、三者 top 相同
+- 按钮组右端 → 下拉左端 = 剩余留白（明显大于一个按钮宽）
+- 分割线①: 卡片底 → 线顶 与 线底 → 模版区顶 两个间隙相等
+- remote 行: 每行的 name / url / 删除 同列对齐；行数 = `git -C <vault> remote` 的条数
+- 动作按钮: justify=flex-end，最右「保存」右边缘 = 卡片内容右边缘
+```
+
+脚本末行打印 PASS / FAIL 计数，`FAIL` 必须为 0；打印出的几何值只供人眼比对，不进判据（换主题、换窗口
+尺寸都会变）。
+
+「打开」与自动同步的真机证据是可复算的副作用，不是探针：
+
+- `require("electron").shell.openPath(<缓冲文件>)` 返回 `""`（Electron 契约：空串 = 成功）；
+- `lsof` 显示外部应用的 helper 进程持有该文件（`<os.tmpdir()>/annex-gallery-profiles/<id>.json`）——
+  即确实被系统给 `.json` 配的默认应用打开（是哪家应用不重要）；
+- 外部按「原子保存（写临时文件 + rename）」改名后，下一个轮询周期（`<ms>`）内：卡片头 Name 跟着变、
+  状态回到 `Saved`、消息行出现「已从外部应用同步并写盘。」、`data.json` 同步改；改回去同样同步回来；
+- 插件 disable → enable 重载后 `problems: []`（无异常、无 console error/warning），设置页照常渲染。
+
+### 复跑
 
 ```bash
 npm run build     # 出 main.js / styles.css
-npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置 + 两条分割线）+ 右键菜单 + 弹窗 + 落盘 + 状态栏（136 条断言）
-npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并（21 条断言）
-npm run layout    # 离屏布局几何：41 条断言（真实 app.css + 真实 DOM + headless Chromium）
-node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来
+npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置 + 两条分割线）+ 右键菜单 + 弹窗 + 落盘 + 状态栏
+npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并
+npm run layout    # 离屏布局几何：真实 app.css + 真实 DOM + headless Chromium
+node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来（看字段齐不齐，别拿数值当断言）
 ```
 
-真机复核（离屏量不出来的那些：原生 select 宽度与外观、`openWithDefaultApp` 的路径语义、观感）：
+真机复核（离屏量不出来的那些：原生 select 宽度与外观、`openPath` 的路径语义、观感）：
 
 ```bash
 # 端口只在启动时生效，所以要重启一次 Obsidian
 osascript -e 'quit app "Obsidian"'
 open -na /Applications/Obsidian.app --args --remote-debugging-port=9333 "--remote-allow-origins=*"
-# 部署产物到 vault 后直接跑；脚本自己会 disable→enable 插件（不用手动重载、不用重启）
-ANNEX_SHOT=/tmp/annex-settings.png npm run gui     # 17 条真机判据 + 截图
+# 部署产物到 <vault>/.obsidian/plugins/<plugin-id>/ 后直接跑；脚本自己会 disable→enable 插件
+ANNEX_SHOT=<shot-path> npm run gui     # 真机判据 + 截图
 ```
 
-`npm run layout` 会从 `~/Library/Application Support/obsidian/obsidian-*.asar` 抽 `app.css`（缓存在 `TMPDIR`），
-本机需要 Chrome / Chromium / Edge 之一；`npm run gui` 需要 `python3` + `websocket-client`。
-`layout` 只保证**结构**不塌（可见性、对齐、边框、方向、溢出），`gui` 补上真机的控件宽度/控件外观/运行时行为，
-**配色与观感**最后仍要人眼看那张截图（见 skill `inspect-obsidian-gui-with-maxim`）。
+`npm run layout` 需要本机有 Chrome / Chromium / Edge 之一，`npm run gui` 需要 `python3` +
+`websocket-client`。
+
+## 7. 已知边界
+
+- **离屏那条下拉的宽度没有参考价值。** 桩模块的 `<option>` 没有文字，永远量成收窄态；下拉宽度、chevron、
+  控件的真实观感只能靠 `npm run gui` + 人眼看截图。
+- **`layout` 只保证结构不塌**（可见性、对齐、边框、方向、溢出），运行时行为一律不在它的范围内。
+- **截图不是判据。** 窗口被遮挡时 `Page.captureScreenshot` 会挂到超时；这不该让一轮复核失败。
+- **设置页在较新的 Obsidian 里是独立窗口。** `app.setting.open()` 会把设置开成独立窗口（target 标题
+  「设置 - <vault>」，`body` 带 `is-popout-window`），那个窗口里**没有** `app` 全局 —— 读 DOM 走设置窗口
+  那个 target，读 `app` / 插件 settings 走主窗口那个 target。
+- **`styles.css` 在插件加载时才注入 `<style>`。** 复核前必须 disable → enable 插件，否则量到的是内存里的
+  旧 CSS。
+- **状态胶囊只覆盖三个词。** 校验 error/warn 仍逐条列在文本框下方，不并入胶囊。
+- **`keyOrder` 之外的键一律不写。** `constFields.eagleId` 因此在，但不进 frontmatter；要写得改 `keyOrder`。
+- **remote 的写入是配置层面的。** 只 `add` / `set-url`，不 fetch、不 push、不改工作区；`dry-run` 只报不写。
+- **配色与观感没有自动判据。** 最终要人眼看那张真机截图（skill `inspect-obsidian-gui-with-maxim`）。
