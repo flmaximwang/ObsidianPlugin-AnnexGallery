@@ -77,6 +77,8 @@ export interface RepoStatus {
   largefiles: number | null;
   /** 给用户看的一句话原因（unavailable / uninitialized 时非空）。 */
   detail: string;
+  /** 悬停提示里追加的解释：`detail` 放不进状态栏（一行）的那些话。 */
+  hint?: string;
 }
 
 /** 一行 note 压成一句人话（git / annex 的 note 常带换行）。 */
@@ -126,8 +128,24 @@ export function countPendingLargefiles(stdout: string): number {
 }
 
 /** 造一条「用不上」的状态（命令缺失 / 报错），供 UI 与测试共用。 */
-export function unavailableStatus(dir: string, detail: string, repoRoot: string | null = null): RepoStatus {
-  return { dir, repoRoot, level: "unavailable", commitsPending: 0, untracked: 0, largefiles: null, detail };
+export function unavailableStatus(
+  dir: string,
+  detail: string,
+  repoRoot: string | null = null,
+  hint = "",
+): RepoStatus {
+  return { dir, repoRoot, level: "unavailable", commitsPending: 0, untracked: 0, largefiles: null, detail, hint };
+}
+
+/**
+ * `git annex …` 失败的原因是不是「git 找不到 git-annex 这个子命令」。
+ *
+ * git 对不存在的子命令只有一句 `<cmd>: '<sub>' is not a git command`（本机 Apple Git
+ * 2.54 实测，exit 1），所以 `execFile` 的 `ENOENT` 判据永远不成立（git 自己是找得到的）
+ * —— 必须按 stderr 认这一句，才不会被当成「git annex add 失败」报给用户。
+ */
+export function isAnnexBinaryMissing(text: string): boolean {
+  return /'annex' is not a git command/.test(text);
 }
 
 /** 造一条「还没初始化」的状态。 */
@@ -178,7 +196,14 @@ export async function readRepoStatus(dir: string): Promise<RepoStatus> {
     return { ...base, commitsPending: tracked, untracked };
   }
   if (dry.code !== 0) {
-    const base = unavailableStatus(repoRoot, `git annex add --dry-run 失败：${firstLine(dry.stderr) || `退出码 ${dry.code}`}`, repoRoot);
+    const annexMissing = isAnnexBinaryMissing(`${dry.stderr}\n${dry.stdout}`);
+    const detail = annexMissing
+      ? "找不到 git-annex 命令（brew install git-annex）"
+      : `git annex add --dry-run 失败：${firstLine(dry.stderr) || `退出码 ${dry.code}`}`;
+    const hint = annexMissing
+      ? "git 在 PATH 与 /opt/homebrew/bin 等常见目录里都没找到 git-annex（从 Finder/Dock 启动的 Obsidian 只有 launchd 那份极小 PATH）；装好后点这一行重新统计即可，不用重启 Obsidian"
+      : "";
+    const base = unavailableStatus(repoRoot, detail, repoRoot, hint);
     return { ...base, commitsPending: tracked, untracked };
   }
   const largefiles = countPendingLargefiles(dry.stdout);
@@ -208,6 +233,7 @@ export function statusTooltip(status: RepoStatus): string {
   if (status.repoRoot !== null) lines.push(`仓库：${status.repoRoot}`);
   if (status.level === "unavailable" || status.level === "uninitialized") {
     lines.push(status.detail);
+    if (status.hint !== undefined && status.hint !== "") lines.push(status.hint);
     lines.push(
       status.level === "uninitialized"
         ? `点击这一行 → 初始化 gallery · 每 ${STATUS_REFRESH_MS / 1000} 秒自动刷新`

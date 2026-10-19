@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 
 export interface RunResult {
@@ -9,11 +10,69 @@ export interface RunResult {
 }
 
 /**
+ * 子进程 PATH 末尾补上的可执行目录（只补真正存在的）。
+ *
+ * 从 Finder / Dock 启动的 Obsidian 继承的是 launchd 的环境：本机实测主进程
+ * `PATH=/usr/bin:/bin:/usr/sbin:/sbin`（`ps -Eww -p <pid>`），Homebrew 的
+ * `/opt/homebrew/bin` 不在里面。`git` 本身还能找到（`/usr/bin/git`），但 `git annex`
+ * 是 **git 去 PATH 里找 `git-annex`**：找不到就退化成
+ * `git: 'annex' is not a git command. See 'git --help'.`（exit 1），状态栏于是只剩一句
+ * 「无法统计」。见 `issues/git-annex-not-on-gui-path_2026.10.19.md`。
+ *
+ * **追加，不前置**：`/usr/bin/git`（Apple Git）继续胜出，补进去的只是「PATH 里原本
+ * 根本没有的目录」；从终端启动时（这些目录已在 PATH 里）结果逐字节不变。
+ */
+const EXTRA_BIN_DIRS = [
+  "/opt/homebrew/bin",
+  "/opt/homebrew/sbin",
+  "/usr/local/bin",
+  "/usr/local/sbin",
+  "/opt/local/bin",
+  "/opt/local/sbin",
+  "~/.local/bin",
+  "~/bin",
+];
+
+/** 连 PATH 都没有时的起点（与 launchd 的默认值一致）。 */
+const FALLBACK_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+function expandHome(dir: string): string {
+  if (dir === "~") return os.homedir();
+  return dir.startsWith("~/") ? path.join(os.homedir(), dir.slice(2)) : dir;
+}
+
+/**
+ * 把 {@link EXTRA_BIN_DIRS}（以及 `ANNEX_GALLERY_EXTRA_PATH`，`path.delimiter` 分隔）
+ * 追加到 PATH 后面，已有的目录不重复加。
+ *
+ * `ANNEX_GALLERY_NO_PATH_FIX=1` 时原样返回 —— 验证脚本用它复现「GUI 里找不到
+ * git-annex」那一档，确认修复确实起作用，而不是碰巧。
+ */
+export function withBinaryDirs(pathValue: string | undefined): string {
+  const base = pathValue === undefined || pathValue.trim() === "" ? FALLBACK_PATH : pathValue;
+  const parts = base.split(path.delimiter).filter((entry) => entry !== "");
+  if (process.env.ANNEX_GALLERY_NO_PATH_FIX === "1") return parts.join(path.delimiter);
+  const seen = new Set(parts);
+  const configured = `${process.env.ANNEX_GALLERY_EXTRA_PATH ?? ""}`.split(path.delimiter);
+  for (const raw of [...EXTRA_BIN_DIRS, ...configured]) {
+    if (raw === "") continue;
+    const dir = expandHome(raw);
+    if (seen.has(dir) || !fs.existsSync(dir)) continue;
+    seen.add(dir);
+    parts.push(dir);
+  }
+  return parts.join(path.delimiter);
+}
+
+/**
  * Environment for every child process.
  *
  * This machine routes through a local Clash-style proxy (127.0.0.1:7890) that
  * is often not running: with HTTP(S)_PROXY set, git/annex fail *silently*.
  * Every subprocess we start therefore gets a proxy-free environment.
+ *
+ * PATH 也在这里补（见 {@link withBinaryDirs}）：GUI 启动的 Obsidian 只有 launchd 的
+ * 极小 PATH，`git annex` 会找不到 `git-annex`。
  */
 export function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
@@ -25,6 +84,7 @@ export function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv 
   }
   delete env.no_proxy;
   delete env.NO_PROXY;
+  env.PATH = withBinaryDirs(env.PATH);
   return env;
 }
 

@@ -78,6 +78,14 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
 
 前两档合并成一句「未初始化」，因为对状态栏这一行来说它们要做的动作是同一个；区别留在悬停提示里。
 
+「找不到 git-annex」有两种来路，别混：**真的没装**，与**装了但 GUI 的 PATH 里没有它**。从 Finder / Dock
+启动的 Obsidian 继承的是 launchd 的那份极小 PATH（`/usr/bin:/bin:/usr/sbin:/sbin`），Homebrew 的
+`/opt/homebrew/bin` 不在里面 —— `git` 找得到（`/usr/bin/git`），`git annex` 却退化成
+`git: 'annex' is not a git command. See 'git --help'.`（exit 1），后者才是本插件必须自己处理的。做法是给
+**每个子进程**的 PATH 末尾补上常见可执行目录（见下节），于是「装了但 GUI 看不见」这一档不再出现；真的
+一个都找不到时，状态栏写「找不到 git-annex 命令（brew install git-annex）」，悬停提示里写明是 PATH 的问题
+（细节与复现见 [`issues/git-annex-not-on-gui-path_2026.10.19.md`](../issues/git-annex-not-on-gui-path_2026.10.19.md)）。
+
 ## 数据来源与为什么是异步
 
 数据只来自两条命令（`src/core/status.ts`，**没有 Obsidian import**）：`git status --porcelain -uall` 与
@@ -87,6 +95,11 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
   `spawnSync` 会在 Obsidian 的渲染进程里同步阻塞这么久 —— 一个状态栏数字不值得让界面卡住。
 - **`cleanEnv()` 剥掉代理变量**（沿用 `git.ts` 的做法）：代理变量会让 git/annex **静默失败**而不是报错，
   失败被当成「0 个」比报错更坏。
+- **`cleanEnv()` 同时补 PATH，且只追加不前置**：`/opt/homebrew/bin` / `/opt/homebrew/sbin` / `/usr/local/bin` /
+  `/usr/local/sbin` / `/opt/local/bin` / `/opt/local/sbin` / `~/.local/bin` / `~/bin` 里**存在且不在 PATH 中**的，
+  按顺序追加到末尾；`ANNEX_GALLERY_EXTRA_PATH` 可以再补自定义目录。前置会改变 `git` 的解析（Homebrew Git 会
+  压过 `/usr/bin/git`），追加只解决「PATH 里根本没有这个目录」这一件事。判据也在这里：`ANNEX_GALLERY_NO_PATH_FIX=1`
+  关掉补 PATH，`verify:status` 用它证明修复不是碰巧。
 - **反过来判 note**：`--json` 里会进 annex 的文件**不给** `note`，进 git 的写
   `non-large file; adding content to git repository`（dotfile 是 `dotfile; adding content to git repository`）。
   代码判「note 里没有 `git repository` 就计数」，比列举 annex 侧文案更耐 git-annex 版本变化。
@@ -135,11 +148,12 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
 | 未跟踪目录里放多个文件 | 未跟踪 = 文件数（不是目录数） |
 | 被 `.gitignore` 忽略的 `.obsidian` 下的文件 | 三个数都不变（dry-run 尊重忽略规则） |
 | 非 annex 仓库 / 非 git 目录 | `未初始化 · 点击初始化 gallery` |
+| PATH 只剩 launchd 那四个目录（= 从 Finder / Dock 启动的 Obsidian） | 三个数与终端里**逐个相同**；关掉补 PATH（`ANNEX_GALLERY_NO_PATH_FIX=1`）时变成 `无法统计：找不到 git-annex 命令（brew install git-annex）` |
 | 空目录点一下状态栏（= 初始化 gallery） | 初始化成功，那一行变成可统计的三段（未跟踪 = 盘上原本就在的文件） |
 
-这些场景**全 PASS** 才算口径成立；出现 FAIL 时按下面四条查是哪一层错。
+这些场景**全 PASS** 才算口径成立；出现 FAIL 时按下面五条查是哪一层错。
 
-## 四个「不量就会写错」的判定要点
+## 五个「不量就会写错」的判定要点
 
 1. **「未入库」的判据只能是 `git annex add --dry-run`**（`--json` 的 `note` 字段）。它列的是
    **「还没 add 进 index 的文件」**：已跟踪、但内容改过还没重新 add 的大文件也在里面。所以
@@ -153,6 +167,12 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
    git-annex 分支 `annex.addunlocked=true`（并按标准状态修本机覆盖 / `thin`）+ 合并
    `.gitattributes` / `.gitignore`，口径见 [`docs/commands.md`](commands.md)），盘上复核 `.git/annex` 出现，
    不是只看 Notice 文案。
+5. **GUI 启动的 Obsidian 拿的不是终端的 PATH**：`git annex` 是 **git 去 PATH 里找 `git-annex`**；找不到时 git
+   只给一句 `git: 'annex' is not a git command`（exit 1），而 `execFile` 的 `ENOENT` 判据永远不成立（git 自己
+   是找得到的）。所以两件事都得做：子进程 PATH **末尾**补常见目录，以及把这一句 stderr 单独认出来报成
+   「找不到 git-annex 命令」。只做前者，非标准安装的用户仍然看到一句没有任何出路的 git 原文；只做后者，
+   装了 Homebrew 版的人每个 30 秒都被劝去 `brew install`。verify:status 把「补了 PATH 能出数」与「关掉补
+   PATH 会变成哪句文案」两条一起钉住。
 
 ## 怎么复跑
 

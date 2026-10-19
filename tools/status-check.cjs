@@ -15,6 +15,9 @@
  *      （已跟踪但改过还没重新 add 的大文件也算未入库）；
  *   5. 未跟踪目录里的 3 个文件算 3（`-uall`，一个文件一行，不是 `?? dir/` 一行）；
  *   6. 非 annex 仓库 / 非 git 目录 → `未初始化 · 点击初始化 gallery`，悬停提示写明原因；
+ *   6b. PATH 只剩 launchd 那四个目录（= 从 Finder / Dock 启动的 Obsidian）→ 仍然量出三个数
+ *      （子进程 PATH 末尾补了 /opt/homebrew/bin 等目录）；关掉补 PATH 时改报
+ *      「找不到 git-annex 命令」—— 见 issues/git-annex-not-on-gui-path_2026.10.19.md；
  *   7. 空目录上**点击状态栏** → 真跑「初始化 gallery」（`.git/annex` 出现），
  *      刷新后 `未跟踪 2 · 未入库 largefiles 0`（两个 dotfile 进 git 不算 largefile）；
  *   8. 注册 1 个状态栏项、文字 + `refresh-cw` 图标、30 秒轮询（间隔字段与 setInterval 一致）。
@@ -206,6 +209,54 @@ async function main() {
     check(
       textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
       "被 .gitignore 忽略的 .obsidian 下的文件一个都不算（数字与上一步相同）",
+    );
+
+    // ── 5c. 只有 launchd 那份 PATH（从 Finder / Dock 启动的 Obsidian）────────
+    //
+    // 实测（issues/git-annex-not-on-gui-path_2026.10.19.md）：GUI 里 PATH 只有
+    // /usr/bin:/bin:/usr/sbin:/sbin，Homebrew 的 /opt/homebrew/bin 不在里面 ——
+    // `git` 找得到（/usr/bin/git），`git annex` 却退化成
+    // `git: 'annex' is not a git command. See 'git --help'.`。
+    const realPath = process.env.PATH;
+    process.env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    try {
+      delete process.env.ANNEX_GALLERY_NO_PATH_FIX;
+      const bare = sh("git", ["-C", gallery, "annex", "add", "--dry-run", "--json"]);
+      check(
+        bare.status === 1 && /'annex' is not a git command/.test(bare.stderr),
+        "对照：这份 PATH 下裸跑 git annex 就是用户看到的那句报错（复现）",
+      );
+      await galleryPlugin.plugin.refreshStatus();
+      console.log(`  GUI 式 PATH（只剩 launchd 那四个目录）→ ${textOf(galleryPlugin.el)}`);
+      check(
+        textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
+        "同一份 PATH 下仍然量出三个数（子进程 PATH 末尾补了 /opt/homebrew/bin 等目录）",
+      );
+      check(galleryPlugin.el.getAttr("data-level") === "dirty", "data-level=dirty，不是 unavailable");
+
+      process.env.ANNEX_GALLERY_NO_PATH_FIX = "1";
+      await galleryPlugin.plugin.refreshStatus();
+      console.log(`  关掉补 PATH 之后 → ${textOf(galleryPlugin.el)}`);
+      check(
+        textOf(galleryPlugin.el) === "无法统计：找不到 git-annex 命令（brew install git-annex）",
+        "真的找不到 git-annex 时，报「找不到 git-annex 命令（brew install git-annex）」",
+      );
+      check(
+        !/is not a git command/.test(textOf(galleryPlugin.el)),
+        "不再出现 git 的原文（那句对用户没有出路）",
+      );
+      check(
+        /launchd/.test(String(galleryPlugin.el.getAttr("aria-label"))),
+        "悬停提示补上原因：GUI 启动的 Obsidian 只有 launchd 那份极小 PATH",
+      );
+    } finally {
+      delete process.env.ANNEX_GALLERY_NO_PATH_FIX;
+      process.env.PATH = realPath;
+    }
+    await galleryPlugin.plugin.refreshStatus();
+    check(
+      textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
+      "PATH 恢复后数字与之前一致（补 PATH 是纯追加，不改变原有解析顺序）",
     );
 
     // ── 6. 非 annex 仓库 / 非 git 目录 ─────────────────────────────────────
