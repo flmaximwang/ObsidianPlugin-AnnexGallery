@@ -194,6 +194,20 @@ npm run gui:status -- --reload  # 先把插件关/开一次（会改运行中的
 
 `npm run verify:status` 用临时 annex 仓库，跑完删掉，需要本机有 `git` 与 `git annex`。
 
+`gui:status` 要求 Obsidian 带 `--remote-debugging-port` 启动（那个开关只在启动时生效，得先真退出）。**没带
+调试端口、也不想重启 app** 时，用 Obsidian 自带的 CLI 读同一份真 DOM、并让改过的插件就地生效（Obsidian
+1.14.4 实测）：
+
+```bash
+obsidian vault=<vault名> dev:dom selector=".annex-status-bar" text           # 那一行的文字
+obsidian vault=<vault名> dev:dom selector=".annex-status-bar" attr=data-level
+obsidian vault=<vault名> dev:dom selector=".annex-status-bar .annex-status-counts" css=color  # 整份 computed style
+obsidian vault=<vault名> plugin:reload id=annex-gallery                      # 换上 vault 里的 main.js，不重启 app
+obsidian vault=<vault名> eval 'code=document.querySelector(".annex-status-bar")?.dataset.level'  # 返回 `=> dirty`
+```
+
+`dev:dom css=<prop>` 打印的是**整份** computed style（不是只那一项），`eval` 的结果带 `=> ` 前缀。
+
 ## 真机复核的口径
 
 真机复核读的是**跑着的 Obsidian 里的真 DOM / computed style**（CDP over `--remote-debugging-port=9333`，

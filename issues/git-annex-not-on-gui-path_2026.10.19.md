@@ -86,7 +86,7 @@ git 报错失败。状态栏只是第一个把它显示出来的地方。
 | `src/core/status.ts:216-221` | `git annex add --dry-run` 失败点：同上；短句 `ANNEX_MISSING_DETAIL`（`:158`）、长解释 `ANNEX_MISSING_HINT`（`:161`）由 `statusTooltip()` 追加 |
 | `tools/status-check.cjs:214` | 场景 5c：把进程 PATH 改成 launchd 那份，先断言裸跑 `git annex` 得到用户看到的那句（复现），再断言插件仍能量出三个数；`ANNEX_GALLERY_NO_PATH_FIX=1` 时断言文案变成「找不到 git-annex 命令」 |
 | `tools/status-check.cjs:262` | 场景 5d：unlock 一张已 tracked 的 annexed 图并做**尺寸不变**的改动（racily clean ⇒ `git status` 必须过 clean filter），复现 `Data_zsqlab_08` 那句，断言 `git status` 这一路也报同一句短文案 |
-| `docs/status-bar.md` | 不可统计那一节补「两种来路」，数据来源补 PATH 口径，场景表补一行，判定要点 5 |
+| `docs/status-bar.md` | 不可统计那一节补「两种来路」，数据来源补 PATH 口径，场景表补一行，判定要点 5；「怎么复跑」补不带调试端口时的 Obsidian CLI（`dev:dom` / `plugin:reload`） |
 
 ## 实测
 
@@ -102,6 +102,8 @@ git 报错失败。状态栏只是第一个把它显示出来的地方。
 | 同上 · 同 vault 命令行独立量（终端 PATH） | `git status --porcelain -uall` → 24 / 5；`git annex add --dry-run --json` 会进 annex → 0 —— 三个数与状态栏**逐个相同**（vault 正在用，数字本身会变；判据是两路逐个相同，不是某组固定值） |
 | 真 vault 探针 · `Data_zsqlab_08`（同一个插件文件） | `未提交 1519 · 未跟踪 2 · 未入库 largefiles 1520`，与终端 PATH 下逐个相同；关掉补 PATH 时状态栏变成「找不到 git-annex 命令」——修复前是 `git status 失败：git-annex filter-process: git-annex: command not found` |
 | 同探针 · `ANNEX_GALLERY_NO_PATH_FIX=1`（= 修复前） | `无法统计：找不到 git-annex 命令（brew install git-annex）`，悬停提示写明是 launchd 的 PATH |
+| **活着的 Obsidian 窗口**（1.14.4，CLI `dev:dom`，`Data_zsqlab_10`）· 重载前 | 那一行就是用户的原话：`无法统计：git annex add --dry-run 失败：git: 'annex' is not a git command. See 'git --help'.`，`data-level=unavailable` |
+| 同一窗口 · `obsidian vault=Data_zsqlab_10 plugin:reload id=annex-gallery` 之后 | `未提交 63 · 未跟踪 5 · 未入库 largefiles 0`，`data-level=dirty`；同一时刻命令行独立量也是 63 / 5 / 0 —— 逐个相同 |
 
 对照组用的是同一份构建产物、同一个 vault、同一个进程，只切 PATH —— 所以「终端能跑、GUI 不能跑」这件事
 被钉在 PATH 上，而不是仓库、git 版本或 annex 版本。
