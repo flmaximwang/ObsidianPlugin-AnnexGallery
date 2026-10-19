@@ -45,6 +45,12 @@ env PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin git -C "$V" annex add -
    `/opt/homebrew/bin/git-annex`（→ Cellar 10.20260901），那份 PATH 里没有它；而 `git` 自己是
    `/usr/bin/git`（Apple Git 2.54），找得到。于是 git 打印
    `git: 'annex' is not a git command. See 'git --help'.` 并以 1 退出。
+2b. **同一根因还有第二种形态：`git status` 自己就失败。** `git annex init` 会写 `.git/info/attributes`
+   的 `* filter=annex` 并注册 `filter.annex.process = git-annex filter-process`；仓库里有已跟踪的 annexed
+   文件、且工作树里是**尺寸不变**的改动时，index 条目是 racily clean，`git status` 必须过 clean filter
+   去算哈希 —— 找不到 binary 时 git 报
+   `git-annex filter-process: git-annex: command not found` + `fatal: the remote end hung up unexpectedly`
+   （exit 128）。`Data_zsqlab_08` 上直接实测到这一句，此时状态栏连「未提交 / 未跟踪」两个数都拿不到。
 3. **这个失败被当成了「annex 命令跑失败」。** `readRepoStatus()` 里 `dry.missing` 只在 `execFile` 报
    `ENOENT`（连 `git` 都找不到）时成立 —— git 在，所以永远走通用分支，把 git 的原文转述成
    「git annex add --dry-run 失败：…」。既没说清原因，也没给出路。
@@ -63,9 +69,11 @@ git 报错失败。状态栏只是第一个把它显示出来的地方。
    「PATH 里根本没这个目录」这一件事，从终端启动时行为逐字节不变。
 2. **留两个出口**：`ANNEX_GALLERY_EXTRA_PATH` 给非标准安装（nix / conda / 自定义 prefix）补目录；
    `ANNEX_GALLERY_NO_PATH_FIX=1` 关掉补 PATH，专供验证脚本复现失败那一档 —— 否则「修好了」可能只是碰巧。
-3. **把「git 找不到 annex 子命令」单独认出来**：`readRepoStatus()` 判 stderr 里的
-   `'annex' is not a git command`，报「找不到 git-annex 命令（brew install git-annex）」；状态栏那一行放不下
-   的解释（GUI 只有 launchd 的 PATH、装好后点一下即重新统计、不用重启 Obsidian）放进悬停提示。
+3. **把「找不到 git-annex」单独认出来**：`readRepoStatus()` 同时认两种原文
+   （`'annex' is not a git command` 与 `git-annex: command not found`），`git status` 与
+   `git annex add --dry-run` 两个失败点都报「找不到 git-annex 命令（brew install git-annex）」；
+   状态栏那一行放不下的解释（GUI 只有 launchd 的 PATH、装好后点一下即重新统计、不用重启 Obsidian）
+   放进悬停提示。
 
 ## 解决
 
@@ -73,10 +81,12 @@ git 报错失败。状态栏只是第一个把它显示出来的地方。
 |---|---|
 | `src/core/git.ts:25` | `EXTRA_BIN_DIRS` + `withBinaryDirs()`：只追加存在且缺的目录；`~` 展开；`ANNEX_GALLERY_EXTRA_PATH` / `ANNEX_GALLERY_NO_PATH_FIX` 两个开关 |
 | `src/core/git.ts:87` | `cleanEnv()` 出口统一 `env.PATH = withBinaryDirs(env.PATH)` —— 所有 `git` / `git annex` / `magick` 子进程都走这一处 |
-| `src/core/status.ts:147` | `isAnnexBinaryMissing()`：认 `'annex' is not a git command` 这一句 |
-| `src/core/status.ts:199-206` | 该情形报短句 `找不到 git-annex 命令（brew install git-annex）`，长解释进 `hint`（`RepoStatus.hint`，`statusTooltip()` 在 `src/core/status.ts:236` 追加） |
-| `tools/status-check.cjs:214` | 新场景 5c：把进程 PATH 改成 launchd 那份，先断言裸跑 `git annex` 得到用户看到的那句（复现），再断言插件仍能量出三个数；`ANNEX_GALLERY_NO_PATH_FIX=1` 时断言文案变成「找不到 git-annex 命令」 |
-| `docs/status-bar.md` | 不可统计那一节补「两种来路」、数据来源补 PATH 口径、场景表补一行、判定要点 5 |
+| `src/core/status.ts:153` | `isAnnexBinaryMissing()`：认 `'annex' is not a git command` 与 `git-annex: command not found` 两种原文 |
+| `src/core/status.ts:201-205` | `git status` 失败点：是这件事就报短句 + 长解释，不再转述成「git status 失败：…」 |
+| `src/core/status.ts:216-221` | `git annex add --dry-run` 失败点：同上；短句 `ANNEX_MISSING_DETAIL`（`:158`）、长解释 `ANNEX_MISSING_HINT`（`:161`）由 `statusTooltip()` 追加 |
+| `tools/status-check.cjs:214` | 场景 5c：把进程 PATH 改成 launchd 那份，先断言裸跑 `git annex` 得到用户看到的那句（复现），再断言插件仍能量出三个数；`ANNEX_GALLERY_NO_PATH_FIX=1` 时断言文案变成「找不到 git-annex 命令」 |
+| `tools/status-check.cjs:262` | 场景 5d：unlock 一张已 tracked 的 annexed 图并做**尺寸不变**的改动（racily clean ⇒ `git status` 必须过 clean filter），复现 `Data_zsqlab_08` 那句，断言 `git status` 这一路也报同一句短文案 |
+| `docs/status-bar.md` | 不可统计那一节补「两种来路」，数据来源补 PATH 口径，场景表补一行，判定要点 5 |
 
 ## 实测
 
@@ -84,12 +94,13 @@ git 报错失败。状态栏只是第一个把它显示出来的地方。
 |---|---|
 | `npm run typecheck` | 通过（无输出） |
 | `npm run build` | 通过（`main.js` / `styles.css` / `tools/annex-gallery.mjs`） |
-| `npm run verify:status` | **PASS=38 FAIL=0**（原 31 条 + 新场景 5c 的 7 条）；含「复现」与「关掉补 PATH 后的文案」两侧断言 |
+| `npm run verify:status` | **PASS=41 FAIL=0**（原 31 条 + 场景 5c 的 7 条 + 场景 5d 的 3 条）；含两条「复现」断言与「关掉补 PATH 后的文案」断言 |
 | `npm test`（6 个 largefiles 命令 × 4 场景） | PASS=155 FAIL=0 |
 | `npm run smoke` | SMOKE OK（结构断言全过） |
 | `npm run verify:init` | PASS=49 FAIL=0 |
-| 真 vault 探针（构建产物 + `PATH=/usr/bin:/bin:/usr/sbin:/sbin`） | `未提交 23 · 未跟踪 1 · 未入库 largefiles 0`，`data-level=dirty` |
-| 同 vault 命令行独立量（终端 PATH） | `git status --porcelain -uall` → 23 / 1；`git annex add --dry-run --json` 会进 annex → 0 —— 三个数与状态栏**逐个相同** |
+| 真 vault 探针 · `Data_zsqlab_10`（vault 里装着的构建产物 + `PATH=/usr/bin:/bin:/usr/sbin:/sbin`） | 当场 `未提交 24 · 未跟踪 5 · 未入库 largefiles 0`，`data-level=dirty` |
+| 同上 · 同 vault 命令行独立量（终端 PATH） | `git status --porcelain -uall` → 24 / 5；`git annex add --dry-run --json` 会进 annex → 0 —— 三个数与状态栏**逐个相同**（vault 正在用，数字本身会变；判据是两路逐个相同，不是某组固定值） |
+| 真 vault 探针 · `Data_zsqlab_08`（同一个插件文件） | `未提交 1519 · 未跟踪 2 · 未入库 largefiles 1520`，与终端 PATH 下逐个相同；关掉补 PATH 时状态栏变成「找不到 git-annex 命令」——修复前是 `git status 失败：git-annex filter-process: git-annex: command not found` |
 | 同探针 · `ANNEX_GALLERY_NO_PATH_FIX=1`（= 修复前） | `无法统计：找不到 git-annex 命令（brew install git-annex）`，悬停提示写明是 launchd 的 PATH |
 
 对照组用的是同一份构建产物、同一个 vault、同一个进程，只切 PATH —— 所以「终端能跑、GUI 不能跑」这件事

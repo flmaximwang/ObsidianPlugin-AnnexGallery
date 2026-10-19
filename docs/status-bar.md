@@ -86,6 +86,11 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
 一个都找不到时，状态栏写「找不到 git-annex 命令（brew install git-annex）」，悬停提示里写明是 PATH 的问题
 （细节与复现见 [`issues/git-annex-not-on-gui-path_2026.10.19.md`](../issues/git-annex-not-on-gui-path_2026.10.19.md)）。
 
+同一根因还会让 **`git status` 自己失败**：`git annex init` 写下的 `* filter=annex` 与
+`filter.annex.process = git-annex filter-process` 意味着「工作树里尺寸不变的改动」必须过 clean filter 才算得出
+哈希，这时 git 报 `git-annex filter-process: git-annex: command not found`（exit 128）—— 连前两个数都拿不到。
+两条命令的失败点因此都要认这两种原文，各自报同一句「找不到 git-annex 命令」。
+
 ## 数据来源与为什么是异步
 
 数据只来自两条命令（`src/core/status.ts`，**没有 Obsidian import**）：`git status --porcelain -uall` 与
@@ -169,10 +174,12 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
    不是只看 Notice 文案。
 5. **GUI 启动的 Obsidian 拿的不是终端的 PATH**：`git annex` 是 **git 去 PATH 里找 `git-annex`**；找不到时 git
    只给一句 `git: 'annex' is not a git command`（exit 1），而 `execFile` 的 `ENOENT` 判据永远不成立（git 自己
-   是找得到的）。所以两件事都得做：子进程 PATH **末尾**补常见目录，以及把这一句 stderr 单独认出来报成
-   「找不到 git-annex 命令」。只做前者，非标准安装的用户仍然看到一句没有任何出路的 git 原文；只做后者，
-   装了 Homebrew 版的人每个 30 秒都被劝去 `brew install`。verify:status 把「补了 PATH 能出数」与「关掉补
-   PATH 会变成哪句文案」两条一起钉住。
+   是找得到的）。同一条 PATH 还会让 `git status` 在「尺寸不变的改动」上失败，原文是
+   `git-annex filter-process: git-annex: command not found`（exit 128）。所以两件事都得做：子进程 PATH
+   **末尾**补常见目录，以及把这两种原文单独认出来报成「找不到 git-annex 命令」。只做前者，非标准安装的
+   用户仍然看到一句没有任何出路的 git 原文；只做后者，装了 Homebrew 版的人每个 30 秒都被劝去
+   `brew install`。verify:status 把「补了 PATH 能出数」与「关掉补 PATH 会变成哪句文案」两条一起钉住
+   （`git annex` 与 `git status` 两个失败点各一条）。
 
 ## 怎么复跑
 

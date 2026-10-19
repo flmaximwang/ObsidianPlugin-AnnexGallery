@@ -259,6 +259,41 @@ async function main() {
       "PATH 恢复后数字与之前一致（补 PATH 是纯追加，不改变原有解析顺序）",
     );
 
+    // ── 5d. 同一根因的第二种形态：`git status` 自己就失败 ──────────────────
+    //
+    // 已跟踪的 annexed 文件被 unlock 又改过之后，`git status` 要跑 git-annex 的 clean
+    // filter；找不到 binary 时 git 报 `git-annex filter-process: git-annex: command
+    // not found`（Data_zsqlab_08 实测原文）。触发条件是 **尺寸不变** 的改动：尺寸一变 git
+    // 直接判 modified、不再算哈希；尺寸不变时条目是 racily clean，git 必须过 clean filter。
+    git(["annex", "unlock", "sub/ses1/a.tif"], gallery);
+    const aPath = path.join(gallery, "sub/ses1/a.tif");
+    const aBytes = fs.readFileSync(aPath);
+    aBytes[0] ^= 0xff;
+    fs.writeFileSync(aPath, aBytes);
+    process.env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+    process.env.ANNEX_GALLERY_NO_PATH_FIX = "1";
+    try {
+      const bareStatus = sh("git", ["-C", gallery, "status", "--porcelain", "-uall"]);
+      check(
+        bareStatus.status !== 0 && /git-annex: command not found/.test(bareStatus.stderr),
+        "对照：这份 PATH 下 git status 也会因 annex 的 clean filter 失败（原文 git-annex: command not found）",
+      );
+      await galleryPlugin.plugin.refreshStatus();
+      check(
+        textOf(galleryPlugin.el) === "无法统计：找不到 git-annex 命令（brew install git-annex）",
+        "git status 这一路失败时也报「找不到 git-annex 命令」，不是「git status 失败：…」",
+      );
+    } finally {
+      delete process.env.ANNEX_GALLERY_NO_PATH_FIX;
+      process.env.PATH = realPath;
+    }
+    await galleryPlugin.plugin.refreshStatus();
+    console.log(`  解锁改一张图之后（补了 PATH）→ ${textOf(galleryPlugin.el)}`);
+    check(
+      textOf(galleryPlugin.el) === "未提交 1 · 未跟踪 3 · 未入库 largefiles 4",
+      "补 PATH 之后 git status 正常跑完：改过的 a.tif 计入未提交，dry-run 把它与 3 个未跟踪图一起算 4",
+    );
+
     // ── 6. 非 annex 仓库 / 非 git 目录 ─────────────────────────────────────
     const notAnnexPlugin = await withPlugin(notAnnex);
     console.log(`  非 annex 仓库 → ${textOf(notAnnexPlugin.el)}`);

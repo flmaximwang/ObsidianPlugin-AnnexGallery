@@ -138,15 +138,28 @@ export function unavailableStatus(
 }
 
 /**
- * `git annex …` 失败的原因是不是「git 找不到 git-annex 这个子命令」。
+ * `git …` 失败的原因是不是「找不到 git-annex 这个可执行文件」。
  *
- * git 对不存在的子命令只有一句 `<cmd>: '<sub>' is not a git command`（本机 Apple Git
- * 2.54 实测，exit 1），所以 `execFile` 的 `ENOENT` 判据永远不成立（git 自己是找得到的）
- * —— 必须按 stderr 认这一句，才不会被当成「git annex add 失败」报给用户。
+ * 两种原文都是本机实测（见 issues/git-annex-not-on-gui-path_2026.10.19.md）：
+ *
+ * - `git: 'annex' is not a git command` —— 直接跑 `git annex …`，git 去 PATH 里找
+ *   `git-annex` 找不到（exit 1）；
+ * - `git-annex filter-process: git-annex: command not found` —— `git status` 自己触发
+ *   `filter=annex` 的 clean filter（仓库里有解锁后改过的 annexed 文件时才会），
+ *   git-annex 的输出又被 git 包装了一层。
+ *
+ * 两种情况 `execFile` 的 `ENOENT` 判据都不成立（git 自己被找到了），只能按 stderr 认。
  */
 export function isAnnexBinaryMissing(text: string): boolean {
-  return /'annex' is not a git command/.test(text);
+  return /'annex' is not a git command/.test(text) || /git-annex: command not found/.test(text);
 }
+
+/** 「找不到 git-annex」时状态栏那一行的短句（一行放得下）。 */
+const ANNEX_MISSING_DETAIL = "找不到 git-annex 命令（brew install git-annex）";
+
+/** 同一情形的完整解释，进悬停提示（状态栏放不下）。 */
+const ANNEX_MISSING_HINT =
+  "git 在 PATH 与 /opt/homebrew/bin 等常见目录里都没找到 git-annex（从 Finder/Dock 启动的 Obsidian 只有 launchd 那份极小 PATH）；装好后点这一行重新统计即可，不用重启 Obsidian";
 
 /** 造一条「还没初始化」的状态。 */
 export function uninitializedStatus(dir: string, detail: string, repoRoot: string | null = null): RepoStatus {
@@ -186,6 +199,10 @@ export async function readRepoStatus(dir: string): Promise<RepoStatus> {
     return unavailableStatus(repoRoot, "找不到 git 命令（请先安装 git）", repoRoot);
   }
   if (status.code !== 0) {
+    if (isAnnexBinaryMissing(`${status.stderr}\n${status.stdout}`)) {
+      const base = unavailableStatus(repoRoot, ANNEX_MISSING_DETAIL, repoRoot, ANNEX_MISSING_HINT);
+      return base;
+    }
     return unavailableStatus(repoRoot, `git status 失败：${firstLine(status.stderr) || `退出码 ${status.code}`}`, repoRoot);
   }
   const { tracked, untracked } = classifyPorcelain(status.stdout);
@@ -198,12 +215,9 @@ export async function readRepoStatus(dir: string): Promise<RepoStatus> {
   if (dry.code !== 0) {
     const annexMissing = isAnnexBinaryMissing(`${dry.stderr}\n${dry.stdout}`);
     const detail = annexMissing
-      ? "找不到 git-annex 命令（brew install git-annex）"
+      ? ANNEX_MISSING_DETAIL
       : `git annex add --dry-run 失败：${firstLine(dry.stderr) || `退出码 ${dry.code}`}`;
-    const hint = annexMissing
-      ? "git 在 PATH 与 /opt/homebrew/bin 等常见目录里都没找到 git-annex（从 Finder/Dock 启动的 Obsidian 只有 launchd 那份极小 PATH）；装好后点这一行重新统计即可，不用重启 Obsidian"
-      : "";
-    const base = unavailableStatus(repoRoot, detail, repoRoot, hint);
+    const base = unavailableStatus(repoRoot, detail, repoRoot, annexMissing ? ANNEX_MISSING_HINT : "");
     return { ...base, commitsPending: tracked, untracked };
   }
   const largefiles = countPendingLargefiles(dry.stdout);
