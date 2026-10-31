@@ -26,7 +26,7 @@ Chrome DevTools Protocol 连进去（需要 `websocket-client`）。
 | 脚本 | 钉住 |
 |---|---|
 | `status-gui-check.py`（`npm run gui:status`） | 状态栏那一行的文字形态、`data-level` 五档之一、数字等宽、图标与文字垂直居中、整行可点、盒子高度与同行其它项一致、悬停提示写着三项定义 |
-| `real-gui-check.py`（`npm run gui`） | 设置页在真机里的几何（原生 `<select>` 按最长选项定宽）、工具条是否被挤成两行、`openPath` 走的是绝对路径还是 vault 相对路径、观察用的截图 |
+| `real-gui-check.py`（`npm run gui`） | 设置页在真机里的几何（原生 `<select>` 按最长选项定宽）、工具条是否被挤成两行、**设置页渲染的行数与 `data.json` 里登记的外部文件一一对应**、没有旧内联编辑器 / 内置模板行、观察用的截图 |
 
 ## 三条纪律
 
@@ -38,5 +38,6 @@ Chrome DevTools Protocol 连进去（需要 `websocket-client`）。
 ## 与桩层的边界（常见误判）
 
 - 原生控件的宽度：**只在真机能量**（桩里 option 没有文字，量出来是常量）。
-- 外部应用的打开行为：**只在真机能验**（取决于运行时的进程与环境，不取决于我们的代码分支）。
+- 外部应用的打开行为：**脚本不点「打开」** —— 那会拉起系统默认应用；成功 / 失败由桩层用可替换的
+  `openWithDefaultApp` 覆盖（见 `tools/smoke-test.cjs`）。
 - 其余「元素在不在、class 对不对、文字是什么」：**都在桩层判**，别搬到这里来拖慢回归。

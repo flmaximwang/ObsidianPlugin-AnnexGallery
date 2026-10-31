@@ -12,6 +12,7 @@
     "verify:sidecar": "node tools/verify-sidecar-overwrite.cjs",
     "verify:gallery": "node tools/verify-gallery.cjs",
     "verify:init": "node tools/verify-init.cjs",
+    "verify:core": "node tools/verify-core-contract.cjs",
     "smoke": "node tools/smoke-test.cjs",
     "remotes": "node tools/remotes-check.cjs",
     "verify:status": "node tools/status-check.cjs",

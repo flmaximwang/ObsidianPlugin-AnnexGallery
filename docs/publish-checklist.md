@@ -53,7 +53,8 @@ curl -s "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/c
 
 - 起 `git` / `git annex` 子进程执行仓库操作；
 - `git annex get` / `drop` 会走已配的 remote ⇒ **网络**；
-- 外部编辑用的缓冲文件落在系统临时目录（`TMPDIR`）⇒ **vault 之外**。
+- 设置页的「打开」会用**系统默认应用**打开 vault 里已登记的外部文件（`.json` / `.md` / `.base`）——
+  文件都在 vault 内，不写系统临时目录，也没有临时缓冲文件回同步。
 
 ## 2. 代码卫生（不阻塞，但会被 review 挑）
 

@@ -1,12 +1,17 @@
 # 配置驱动的 metadata 解析
 
-「生成元数据」写出的 sidecar 由 **profile** 驱动，内置的 TECNAI 只是其中一条：一条 profile =
+「生成元数据」写出的 sidecar 由 **profile** 驱动：一条 profile =
 一条正则 + 具名捕获组 → 字段命名与类型 + 最终写进 frontmatter 的键顺序（`keyOrder`）。
 
 schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的类型与 `DEFAULT_PROFILES`
-（`ParseProfile` / `FieldSpec` / `DERIVED_KEYS` / `COMPUTED_KEYS` / `DEFAULT_ASK`）。设置页可增删 /
-复制多条 profile（落进 `data.json` 的 `profiles` 数组）；右键 **Annex Gallery → 使用 Annex Gallery
-管理** 的弹窗按 `match` 自动预选、并列出全部让人挑，profile 选择与 ask 值都按文件夹记住。
+（`ParseProfile` / `FieldSpec` / `DERIVED_KEYS` / `COMPUTED_KEYS` / `DEFAULT_ASK`）。
+
+**profile 从哪来（冻结口径，spec-774d7ee）**：运行时的唯一来源是设置页登记的**外部 `.json` 文件** ——
+**一份 JSON = 一条 profile**，顶层必须是一条 `ParseProfile` 对象。`data.json` 里只存
+`profileFiles: [{ path }]`（vault 相对路径）；`id` / `name` / `regex` 一律以文件内容为准。
+旧的内联 `profiles` 数组**不读、不迁移、不删除**（只在设置页显示一条失效提示）。
+右键 **Annex Gallery → 生成元数据** 的弹窗按 `match` 自动预选、并列出全部已登记的 profile 让人挑，
+profile 选择与 ask 值都按文件夹记住。
 
 ## 一条 profile 能给出的五类值
 
@@ -18,7 +23,7 @@ schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的�
 | ② | 派生 | `tags`（相对 vault 的第一段路径）/ `session`（所在文件夹名）/ `date`（`session` 前 8 位 → `YYYY-MM-DD`，否则空串）。 |
 | ③ | 自动 | `width` / `height`（`magick identify`）/ `size`（字节数）/ `btime`（文件 birthtime，**不是**拍摄时间）/ `thumbnail` / `tif`（都是 `"[[全 vault 路径]]"`）。 |
 | ④ | 常量 `constFields` | 固定写入的键值。 |
-| ⑤ | 询问 `ask` | 右键（**Annex Gallery** 子菜单 → 使用 Annex Gallery 管理）时弹窗现场填（内置默认 `["sample"]`），按文件夹记住上次的值。 |
+| ⑤ | 询问 `ask` | 右键（**Annex Gallery** 子菜单 → 生成元数据）时弹窗现场填（预设默认 `["sample"]`），按文件夹记住上次的值。 |
 
 ## `keyOrder` 的语义
 
@@ -42,7 +47,7 @@ profile 给出的值前面；没有 `tags` 时仍会在最前面补一行 `tags:
    `skip`（跳过这张图）。另有 `pathRegex` + `pathFields` 跑在相对 vault 的路径上，**同名的键覆盖
    派生值**。
 
-## 示例 1 —— 内置 TECNAI 电镜（`DEFAULT_PROFILES[0]`；文件名形态 `<specimen>-<marker>-<index>`）
+## 示例 1 —— TECNAI 电镜（预设素材 `DEFAULT_PROFILES[0]`；文件名形态 `<specimen>-<marker>-<index>`）
 
 ```jsonc
 {
@@ -125,9 +130,13 @@ tif: "[[20260417-plate-run/plate01_wellA3_4000x_007.png]]"
 
 ## metadata 模板（`metadataTemplate`）
 
-profile 决定 frontmatter，**模板决定 sidecar 的整份文本**（frontmatter + 正文）。profile 的
-`metadataTemplate` 字段指定默认用哪份模板，不写等价于 `"default"`；「生成元数据」弹窗里还有一个模板
-下拉框，优先级是**按文件夹记住的 > `profile.metadataTemplate` > 内置 `default`**。
+profile 决定 frontmatter，**模板决定 sidecar 的整份文本**（frontmatter + 正文）。模板同样是
+**vault 里的外部 `.md` 文件**，在设置页「模板」区登记；运行时只认登记过的文件，**没有内置兜底**。
+
+profile 的 `metadataTemplate` 字段指定默认用哪份**已登记**的模板 id；不写等价于「用第一条已登记的」。
+「生成元数据」弹窗里还有一个模板下拉框，优先级是**按文件夹记住的 > `profile.metadataTemplate` >
+第一条已登记**。声明的 id 没登记（旧的内置 `default` / `embed` 也算）⇒ 直接报错并引导去登记，
+**不静默回退到内置内容**。
 
 模板的硬约束与占位符：
 
@@ -140,16 +149,17 @@ profile 决定 frontmatter，**模板决定 sidecar 的整份文本**（frontmat
   （笔误 `{{fooo}}` 同样处理）。**模板本身**坏了（文件不存在、第一行不是 `{{frontmatter}}`）才整体停下，
   不静默回退到内置默认。
 
-内置模板只有两份，源码在 `src/defaults/metadata/`（构建时内联，源码里只有这一份）：
+预设素材有两份 metadata（`src/defaults/metadata/`，构建时内联，源码里只有这一份），它们**只是
+「从预设创建」的素材**，不是运行时可直接使用的模板：
 
-| id | 正文 |
+| 预设 id | 正文 |
 |---|---|
 | `default` | 与改造前硬编码的正文逐字节相同（缩略图链接 + 原图链接两行） |
 | `embed` | `!{{thumbnail}}` 直接嵌入缩略图 + 原图链接 |
 
-自定义模板是 vault 里的 `.md`，在设置页「模板」区登记（内置的可以「复制为自定义」，副本落在
-`Annex Gallery Templates/`）。选哪份、怎么登记、加画廊时怎么用，见 [`gallery.md`](gallery.md) §8 与
-[`setting-panel.md`](setting-panel.md)。
+设置页的「从预设创建…」会把其中一份写成 vault 里的独立文件（`AnnexGalleryTemplates/default.md` 等），
+登记之后才算数；同名再加序号（`default 2.md`），不覆盖、不自动打开。
+选哪份、怎么登记，见 [`setting-panel.md`](setting-panel.md) 与 [`gallery.md`](gallery.md) §8。
 
 ## 命令行
 
@@ -161,15 +171,19 @@ node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> -
   [--profiles-file <json>] [--template <id|file>] [--apply|--verify]
 ```
 
-`--profiles-file` 传 profile 数组或 `{ "profiles": [ … ] }`，不给就用内置 `DEFAULT_PROFILES`。
-`--template` 认内置模板 id 或模板文件路径（CLI 不读设置，自定义模板直接给文件）。
+`--profiles-file` 传 profile 数组或 `{ "profiles": [ … ] }`，不给就用 CLI 自带的 `DEFAULT_PROFILES`
+（**CLI 的刻意例外**：命令行没有设置页可点，脚本场景要有开箱即用的默认值；插件运行时没有这个例外）。
+`--template` 认 CLI 自带的预设 id（metadata：`default` / `embed`）或模板文件路径；不给 `--template`
+等价于 `default`。CLI **不读** `data.json`，所以插件设置里登记的模板 id 在 CLI 不可用 ——
+自定义模板直接给文件路径。
 合成语料、两条 profile 与一键复跑脚本见 [`tools/cli.md`](tools/cli.md)。
 
 ## 判据
 
 | 命令 | 钉住什么 |
 |---|---|
-| `npm run verify:sidecar` | 重跑语义：`--plan` 不写盘、默认只补缺失、`--overwrite` 覆盖重算、脏文件保护 |
-| `npm run verify:gallery` | 标签：`tags` 第一项恒为 `annex-gallery-metadata`（含 `keyOrder` 没有 `tags` 的 profile）；metadata 模板：内置 `default` 与改造前逐字节相同、`embed`、占位符缺值留空、坏模板整体停下 |
-| `npm run smoke` | 设置页的 profile 编辑器、解析预览、右键弹窗与落盘；设置页「模板」区（内置只读 / 复制为自定义 / 登记 / 删除只取消登记） |
+| `npm run verify:sidecar` | 重跑语义：`--plan` 不写盘、默认只补缺失、`--overwrite` 覆盖重算、脏文件保护；插件路径在**登记了外部 profile / metadata 模板**之后才走得通 |
+| `npm run verify:gallery` | 标签：`tags` 第一项恒为 `annex-gallery-metadata`（含 `keyOrder` 没有 `tags` 的 profile）；metadata 模板：预设 `default` 与改造前逐字节相同、`embed`、占位符缺值留空、坏模板整体停下 |
+| `npm run smoke` | 外部 profile JSON 的登记 / 各种坏法（数组、`{ profiles: [...] }`、坏 JSON、坏正则、文件丢失、跨文件 id 重复）、运行时重读外部内容、坏文件在写盘前停下、设置页「模板」区（登记 / 从预设创建 / 打开 / 取消登记） |
+| `npm run smoke` + `tools/example-profiles/verify-plugin-load.cjs` | 示例 profile 逐字节读回、外部改动即时生效、旧内联 profiles 不迁移不参与运行时 |
 | `npm test` | sidecar 与 annex 操作的组合场景（含内容逐字节不变的断言） |

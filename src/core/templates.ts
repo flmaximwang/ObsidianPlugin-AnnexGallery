@@ -1,20 +1,20 @@
 /**
  * 模板：metadata 模板（sidecar `.md` 的整份文本）与画廊模板（`.base`）。
  *
- * - **内置模板**以普通文件放在 `src/defaults/metadata/*.md` 与 `src/defaults/base/*.base`，
- *   构建时由 esbuild 的 `defaults-text` 插件内联成字符串（和 `.gitattributes` 同一条路）——
- *   源码里只有这一份，设置页把它原样展示出来（只读，可「复制为自定义」）。
- * - **自定义模板**是 vault 里的文件，设置里只登记 `{ id, name, path }`（path 相对 vault）。
+ * **运行时唯一事实来源是 vault 里的外部文件**：设置里登记 `{ id, name, path }`
+ * （`path` 相对 vault）。`PRESET_*` / `BUILTIN_*` 只是「从预设创建」的素材，
+ * 不是可用模板列表，也**不参与任何运行时 fallback** —— 找不到已登记模板就报错，
+ * 让用户去设置页创建/登记外部文件。
  *
  * 占位符一律 `{{name}}`。取不到值的占位符替换成空串，并把名字交还给调用方记进报告 ——
- * 不让一个笔误（`{{fooo}}`）把整批生成弄失败。模板本身坏了（文件不存在、metadata 模板没有
- * `{{frontmatter}}`、`.base` 填完占位符后 YAML 解析不了）才整体停下。
+ * 不让一个笔误（`{{fooo}}`）把整批生成弄失败。模板本身坏了（文件不存在、路径越界、
+ * metadata 模板没有 `{{frontmatter}}`、`.base` 填完占位符后 YAML 解析不了）才整体停下。
  */
 import * as fs from "fs";
-import * as path from "path";
 import metadataDefault from "../defaults/metadata/default.md";
 import metadataEmbed from "../defaults/metadata/embed.md";
 import baseDefault from "../defaults/base/default.base";
+import { readVaultTextFile } from "./external-files";
 
 export type TemplateKind = "metadata" | "base";
 
@@ -28,55 +28,104 @@ export interface TemplateRef {
   path: string;
 }
 
-export interface BuiltinTemplate {
+/** 预设素材：只用于「从预设创建」一份独立的外部模板文件。 */
+export interface TemplatePreset {
   id: string;
   name: string;
   text: string;
 }
 
+/** @deprecated 旧名字；语义已是「预设素材」，不是可用内置模板。 */
+export type BuiltinTemplate = TemplatePreset;
+
 /** 解析出来、可以直接用的一份模板文本。 */
 export interface ResolvedTemplate {
   id: string;
-  /** 报错时用来指明是哪份模板（内置写「内置模板 <id>」，自定义写 vault 路径）。 */
+  /** 报错时用来指明是哪份模板（外部模板写 vault 相对路径）。 */
   label: string;
   text: string;
 }
 
+/** 已登记模板的下拉列表项。运行时没有内置条目，`builtin` 恒为 false。 */
+export interface TemplateListEntry {
+  id: string;
+  name: string;
+  path: string;
+  /** 兼容旧调用点的字段；运行时不存在内置模板，所以恒为 false。 */
+  builtin: false;
+}
+
+/** 预设 material 的 id（不是运行时默认值；运行时没有 fallback）。 */
 export const DEFAULT_TEMPLATE_ID = "default";
 
-export const BUILTIN_METADATA_TEMPLATES: BuiltinTemplate[] = [
+/** 预设素材（metadata）——只用于「从预设创建」。 */
+export const PRESET_METADATA_TEMPLATES: TemplatePreset[] = [
   { id: "default", name: "默认（缩略图链接 + 原图链接）", text: metadataDefault },
   { id: "embed", name: "嵌入缩略图（![[…]] + 原图链接）", text: metadataEmbed },
 ];
 
-export const BUILTIN_BASE_TEMPLATES: BuiltinTemplate[] = [
+/** 预设素材（画廊 `.base`）——只用于「从预设创建」。 */
+export const PRESET_BASE_TEMPLATES: TemplatePreset[] = [
   { id: "default", name: "默认（卡片：文件名 + 缩略图）", text: baseDefault },
 ];
 
-export function builtinTemplates(kind: TemplateKind): BuiltinTemplate[] {
-  return kind === "metadata" ? BUILTIN_METADATA_TEMPLATES : BUILTIN_BASE_TEMPLATES;
-}
+/**
+ * @deprecated 旧名字，转发到 `PRESET_METADATA_TEMPLATES`。
+ * 仅供「从预设创建」读取原文；**不要再把它当可用模板列表**。
+ */
+export const BUILTIN_METADATA_TEMPLATES: TemplatePreset[] = PRESET_METADATA_TEMPLATES;
 
-/** 内置 + 自定义的 id/名字列表（下拉框用）；自定义 id 与内置同名时内置优先。 */
-export function listTemplates(kind: TemplateKind, custom: TemplateRef[]): Array<{ id: string; name: string; builtin: boolean }> {
-  const builtins = builtinTemplates(kind);
-  const taken = new Set(builtins.map((entry) => entry.id));
-  return [
-    ...builtins.map((entry) => ({ id: entry.id, name: entry.name, builtin: true })),
-    ...custom.filter((entry) => !taken.has(entry.id)).map((entry) => ({ id: entry.id, name: entry.name, builtin: false })),
-  ];
+/** @deprecated 旧名字，转发到 `PRESET_BASE_TEMPLATES`。 */
+export const BUILTIN_BASE_TEMPLATES: TemplatePreset[] = PRESET_BASE_TEMPLATES;
+
+/** 某个 kind 的预设素材。 */
+export function presetTemplates(kind: TemplateKind): TemplatePreset[] {
+  return kind === "metadata" ? PRESET_METADATA_TEMPLATES : PRESET_BASE_TEMPLATES;
 }
 
 /**
- * 按 id 取一份模板的文本：先内置，再自定义（读 vault 里的文件）。
- * 找不到 / 读不了 ⇒ 抛错，错误里带模板名或文件路径（不静默回退到内置默认）。
+ * @deprecated 旧名字，转发到 `presetTemplates`。
+ * 返回的是**预设素材**，不是运行时可用模板；设置页不应再把它列为可直接使用的模板。
  */
-export function resolveTemplate(kind: TemplateKind, id: string, custom: TemplateRef[], vaultRoot: string): ResolvedTemplate {
-  const builtin = builtinTemplates(kind).find((entry) => entry.id === id);
-  if (builtin !== undefined) return { id, label: `内置模板 ${id}`, text: builtin.text };
-  const ref = custom.find((entry) => entry.id === id);
-  if (ref === undefined) throw new Error(`找不到${kind === "metadata" ? " metadata " : "画廊"}模板「${id}」（设置页「模板」里看有哪些）`);
-  return readTemplateFile(path.join(vaultRoot, ref.path), ref.path, id);
+export function builtinTemplates(kind: TemplateKind): TemplatePreset[] {
+  return presetTemplates(kind);
+}
+
+/**
+ * 已登记外部模板的 id/名字列表（下拉框用）。
+ * 只返回 `registered` 里的条目；不读文件、不检查路径 —— 列表要能显示坏条目让用户修复。
+ * 运行时解析（`resolveTemplate`）才做路径/存在性/重复检查。
+ */
+export function listTemplates(_kind: TemplateKind, registered: readonly TemplateRef[]): TemplateListEntry[] {
+  return registered.map((entry) => ({ id: entry.id, name: entry.name, path: entry.path, builtin: false }));
+}
+
+/**
+ * 按 id 取一份**已登记外部模板**的文本：路径校验 + 文件存在 + 读盘，每次调用都重新做。
+ *
+ * 找不到 ⇒ 抛错并引导去设置页登记；id 重复登记、路径不安全、扩展名不对、文件不存在
+ * ⇒ 抛错。**不会回退到预设/内置内容**。
+ */
+export function resolveTemplate(
+  kind: TemplateKind,
+  id: string,
+  registered: readonly TemplateRef[],
+  vaultRoot: string,
+): ResolvedTemplate {
+  const kindName = kind === "metadata" ? "metadata 模板" : "画廊模板";
+  const matches = registered.filter((entry) => entry.id === id);
+  if (matches.length === 0) {
+    throw new Error(`找不到 ${kindName}「${id}」（请在设置页「模板」里登记或从预设创建外部文件）`);
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `${kindName} id「${id}」重复登记：${matches.map((entry) => entry.path).join("、")}（请删掉多余的一条）`,
+    );
+  }
+
+  const ref = matches[0];
+  const file = readVaultTextFile(vaultRoot, ref.path, kind);
+  return { id: ref.id, label: file.relPath, text: file.text };
 }
 
 /** 直接读一份模板文件（CLI 的 `--template <file>` 也走这里）。 */

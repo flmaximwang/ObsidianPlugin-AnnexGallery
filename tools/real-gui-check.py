@@ -7,10 +7,13 @@
     python3 tools/real-gui-check.py [vault 名（默认 Data_lab_10）]
 
 为什么需要它（离屏 tools/layout-check.cjs 覆盖不到）：
-  * 原生 `<select>` 的宽度由**最长选项文字**决定 —— 桩环境里 option 没有文字，离屏量出来是 41px，
-    真机里 TECNAI 那条是 464px（会把工具条挤成两行）。只有真机能量准。
-  * `openWithDefaultApp` 这类**运行时行为**（绝对路径 vs vault 相对路径）只能在真机验。
+  * 原生 `<select>` 的宽度由**最长选项文字**决定 —— 桩环境里 option 没有真实字体度量，
+    真机里 profile 预设名很长；只有真机能确认外置工具条没被撑破。
+  * 真实插件 settings 与设置页 DOM 的对应关系（登记了几份外部文件就渲染几行）只有真机可核。
   * 观察观感（配色、空旷感）最终要人眼看截图；本脚本负责把截图生成出来 + 把结构判据钉死。
+
+本脚本**不会点「打开」**（那会拉起系统默认应用），Open 成功/失败宿主行为由
+tools/smoke-test.cjs 用可替换的 openWithDefaultApp 覆盖。
 
 结构（探过的实况，别猜）：Obsidian 1.14 里 `app.setting.open()` 会把设置开成**独立窗口**
 （target 标题「设置 - <vault>」，url=about:blank，body 带 is-popout-window/is-popout-modal）；
@@ -97,21 +100,70 @@ PROBE = r"""JSON.stringify((() => {
   if (!pane) return {error: 'no settings pane in this target'};
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return {left:+b.left.toFixed(1), top:+b.top.toFixed(1), right:+b.right.toFixed(1), width:+b.width.toFixed(1), height:+b.height.toFixed(1)}; };
   const cs = (el, p) => el ? getComputedStyle(el)[p] : null;
+  const text = (el) => el ? el.textContent.trim().replace(/\s+/g, ' ').slice(0, 80) : null;
   const bar = pane.querySelector('.annex-profiles-toolbar');
   const remotes = pane.querySelector('.annex-remotes-card');
   const h1 = pane.querySelector('.annex-settings-title');
+  const profileRows = [...pane.querySelectorAll('.annex-profile-row')];
+  const templateCards = [...pane.querySelectorAll('.annex-templates-card')];
   return {
     contentLeft: +((pane.getBoundingClientRect().left) + parseFloat(cs(pane,'paddingLeft'))).toFixed(1),
     contentRight: +((pane.getBoundingClientRect().right) - parseFloat(cs(pane,'paddingRight'))).toFixed(1),
     topLevel: [...pane.children].map(c => c.tagName + '.' + c.className),
     h1: h1 ? {text: h1.textContent.trim(), display: cs(h1,'display'), left: box(h1).left, padL: cs(h1,'paddingLeft'), height: box(h1).height} : null,
     toolbar: bar ? {justify: cs(bar,'justifyContent'), wrap: cs(bar,'flexWrap'), box: box(bar),
-      controls: [...bar.children].filter(c => cs(c,'display') !== 'none').map(c => ({tag: c.tagName, label: c.tagName === 'SELECT' ? c.options[0].text : c.textContent.trim(), box: box(c)}))} : null,
+      controls: [...bar.children].filter(c => cs(c,'display') !== 'none').map(c => ({
+        tag: c.tagName,
+        label: c.tagName === 'SELECT' ? (c.options[0] ? c.options[0].text : '') : c.textContent.trim(),
+        placeholder: c.getAttribute('placeholder'),
+        box: box(c),
+      }))} : null,
+    profileRows: profileRows.map(r => ({
+      box: box(r),
+      state: r.getAttribute('data-state'),
+      name: text(r.querySelector('.annex-profile-name')),
+      id: text(r.querySelector('.annex-profile-id')),
+      path: text(r.querySelector('.annex-profile-path')),
+      open: box(r.querySelector('.annex-profile-open')),
+      del: box(r.querySelector('.annex-profile-del')),
+      error: r.querySelector('.annex-profile-error') ? text(r.querySelector('.annex-profile-error')) : null,
+    })),
+    oldUi: {
+      cards: pane.querySelectorAll('.annex-profile-card').length,
+      actions: pane.querySelectorAll('.annex-profile-actions').length,
+      preview: pane.querySelectorAll('.annex-preview-filename').length + pane.querySelectorAll('.annex-preview-result').length,
+      json: pane.querySelectorAll('.annex-profile-json').length,
+      status: pane.querySelectorAll('.annex-profile-status').length,
+      builtinRows: pane.querySelectorAll('.annex-template-builtin').length,
+      viewButtons: pane.querySelectorAll('.annex-template-view-btn').length,
+      copyButtons: pane.querySelectorAll('.annex-template-copy').length,
+    },
+    templateCards: templateCards.map(card => ({
+      kind: card.getAttribute('data-kind'),
+      box: box(card),
+      title: text(card.querySelector('.annex-templates-title')),
+      empty: card.querySelector('.annex-templates-empty') !== null,
+      rows: [...card.querySelectorAll('.annex-template-row')].map(r => ({
+        state: r.getAttribute('data-state'),
+        id: text(r.querySelector('.annex-template-id')),
+        path: text(r.querySelector('.annex-template-path')),
+        error: r.querySelector('.annex-template-error') ? text(r.querySelector('.annex-template-error')) : null,
+      })),
+      add: (() => {
+        const add = card.querySelector('.annex-template-add-row');
+        if (!add) return null;
+        return {
+          input: box(add.querySelector('.annex-template-path-input')),
+          button: box(add.querySelector('.annex-template-add')),
+          select: box(add.querySelector('.annex-template-preset')),
+          buttonText: text(add.querySelector('.annex-template-add')),
+          selectFirst: add.querySelector('.annex-template-preset') ? add.querySelector('.annex-template-preset').options[0].text : null,
+        };
+      })(),
+    })),
+    legacyWarning: pane.querySelector('.annex-legacy-profiles-warning') ? text(pane.querySelector('.annex-legacy-profiles-warning')) : null,
     remoteRows: remotes ? [...remotes.querySelectorAll('.annex-remote-row')].map(r => ({name: r.querySelector('.annex-remote-name').value, url: r.querySelector('.annex-remote-url').value, box: box(r)})) : null,
     remoteAdd: remotes ? remotes.querySelector('.annex-remote-add').textContent.trim() : null,
-    actions: [...pane.querySelectorAll('.annex-profile-actions button')].map(b => ({label: b.textContent.trim(), box: box(b)})),
-    actionsJustify: cs(pane.querySelector('.annex-profile-actions'),'justifyContent'),
-    status: pane.querySelector('.annex-profile-status') ? pane.querySelector('.annex-profile-status').textContent.trim() : null,
     plainSettings: [...pane.querySelectorAll('.setting-item')].map(s => s.getAttribute('data-name') || (s.querySelector('.setting-item-name') ? s.querySelector('.setting-item-name').textContent.trim() : null)),
   };
 })())"""
@@ -129,11 +181,21 @@ def main():
 
     env = app.js(r"""JSON.stringify((() => {
       const p = app.plugins.plugins['annex-gallery'];
-      return {vault: app.vault.getName(), vaultPath: app.vault.adapter.getBasePath(), loaded: Boolean(p),
-              version: p ? p.manifest.version : null, settingsKeys: p ? Object.keys(p.settings) : null,
-              remotes: p ? p.settings.remotes : null};
+      return {
+        vault: app.vault.getName(),
+        vaultPath: app.vault.adapter.getBasePath(),
+        loaded: Boolean(p),
+        version: p ? p.manifest.version : null,
+        settingsKeys: p ? Object.keys(p.settings) : null,
+        remotes: p ? p.settings.remotes : null,
+        profileFiles: p ? p.settings.profileFiles : null,
+        metadataTemplates: p ? p.settings.metadataTemplates : null,
+        baseTemplates: p ? p.settings.baseTemplates : null,
+        legacyPresent: p ? Boolean(p.legacyInlineProfiles && p.legacyInlineProfiles.present) : null,
+        legacyCount: p && p.legacyInlineProfiles ? p.legacyInlineProfiles.count : null,
+      };
     })())""")
-    print(f"主窗口：{main_t['title']}\nvault：{env.get('vaultPath')}  插件 0.1.0 loaded={env.get('loaded')}")
+    print(f"主窗口：{main_t['title']}\nvault：{env.get('vaultPath')}  插件 loaded={env.get('loaded')} version={env.get('version')}")
     print(f"settings 键：{env.get('settingsKeys')}")
 
     # 先从盘上重载插件：styles.css 是插件加载时才注入 <style> 的，
@@ -157,36 +219,83 @@ def main():
         print(f"✗ {rep['error']}")
         return 1
 
-    print("\n真机结构判据：")
+    print("\n真机结构判据（外部文件模型）：")
     check(rep["h1"] is not None and rep["h1"]["display"] != "none" and rep["h1"]["height"] > 0,
           f"标题可见（app.css 有 .vertical-tab-content h1{{display:none}}，必须被压掉）：{rep['h1']}")
     check(rep["h1"] is not None and abs(rep["h1"]["left"] - rep["contentLeft"]) < 0.5,
           f"标题与内容左边缘对齐：{rep['h1']['left'] if rep['h1'] else '?'} vs {rep['contentLeft']}")
     expected_order = ["annex-settings-title", "annex-remotes-section", "annex-remotes-divider",
-                      "annex-profiles-section", "annex-settings-divider", "setting-item"]
+                      "annex-profiles-section", "annex-templates-section", "annex-settings-divider", "setting-item"]
     got = [c.split(".", 1)[1].split(" ")[0] for c in rep["topLevel"]]
     check(got == expected_order,
-          f"顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 分割线 → 缩略图边长：{rep['topLevel']}")
+          f"顶层顺序 = 标题 → remote 设置 → 分割线 → 文件名匹配模板 → 模板区 → 分割线 → 缩略图边长：{rep['topLevel']}")
 
+    # ── 文件名匹配模板：路径输入 + 登记 + 从预设创建（只有外部文件） ──────────
     bar = rep["toolbar"] or {}
     controls = bar.get("controls", [])
-    check(bar.get("wrap") == "nowrap" and bar.get("justify") == "flex-start",
-          f"工具条不换行且两端分开（按钮靠左、下拉靠右）：wrap={bar.get('wrap')} justify={bar.get('justify')}")
-    check(len(controls) == 3 and len({c["box"]["top"] for c in controls}) == 1,
-          f"三个控件在同一行（新模版 / 导入模版 / 添加预设）：{[c['label'] for c in controls]}")
-    if controls:
-        left_most = min(c["box"]["left"] for c in controls)
-        check(abs(left_most - bar["box"]["left"]) < 1,
-              f"最左的「新模版」贴住左边缘：{left_most} vs {bar['box']['left']}")
-        sel = [c for c in controls if c["tag"] == "SELECT"]
-        check(bool(sel) and abs(sel[-1]["box"]["right"] - bar["box"]["right"]) < 1,
-              f"「添加预设」下拉贴住右边缘：{sel[-1]['box']['right'] if sel else '?'} vs {bar['box']['right']}")
-        btns = [c for c in controls if c["tag"] == "BUTTON"]
-        if btns and sel:
-            gap = sel[-1]["box"]["left"] - max(b["box"]["right"] for b in btns)
-            check(gap > 40, f"按钮组与下拉之间留出空隙（左一组、右一个）：{round(gap, 1)}px")
-        select_width = [c["box"]["width"] for c in controls if c["tag"] == "SELECT"]
-        check(bool(select_width) and select_width[0] < 260, f"「添加预设」下拉宽度已收窄：{select_width}")
+    labels = [c["label"] for c in controls]
+    check(len(controls) == 3, f"工具条只有 3 个控件：{labels}")
+    check(controls and controls[0]["tag"] == "INPUT" and "profile JSON 路径" in (controls[0].get("placeholder") or ""),
+          f"第 1 格是 vault 相对路径输入框：{controls[0] if controls else None}")
+    check(len(controls) > 1 and controls[1]["tag"] == "BUTTON" and controls[1]["label"] == "登记",
+          f"第 2 格是「登记」按钮：{controls[1] if len(controls) > 1 else None}")
+    check(len(controls) > 2 and controls[2]["tag"] == "SELECT" and controls[2]["label"] == "从预设创建…",
+          f"第 3 格是「从预设创建…」下拉：{controls[2] if len(controls) > 2 else None}")
+    if len(controls) == 3:
+        check(controls[0]["box"]["left"] < controls[1]["box"]["left"] < controls[2]["box"]["left"],
+              "三个控件真的从左往右排")
+        centers = [c["box"]["top"] + c["box"]["height"] / 2 for c in controls]
+        check(max(centers) - min(centers) < 2, f"三个控件在同一行（原生 select 宽度没有把工具条挤断）：{centers}")
+        check(controls[2]["box"]["width"] < 360,
+              f"「从预设创建…」下拉宽度受 CSS max-width 约束：{controls[2]['box']['width']}px")
+        check(abs(controls[2]["box"]["right"] - bar["box"]["right"]) < 2,
+              f"预设下拉贴住工具条右边缘：{controls[2]['box']['right']} vs {bar['box']['right']}")
+
+    profiles = rep["profileRows"]
+    wanted_paths = [entry.get("path") for entry in (env.get("profileFiles") or [])]
+    shown_paths = [row["path"] for row in profiles]
+    check(len(profiles) == len(wanted_paths),
+          f"设置里登记了 {len(wanted_paths)} 份外部 profile，设置页就渲染 {len(profiles)} 行：{shown_paths}")
+    check(shown_paths == wanted_paths,
+          f"每行 path 与 data.json 的 profileFiles 一一对应：设置={wanted_paths} 页面={shown_paths}")
+    check(all(row["id"] and row["id"].startswith("id: ") for row in profiles),
+          f"每行都显示外部 JSON 的 id：{[row['id'] for row in profiles]}")
+    check(all(row["open"] and row["del"] for row in profiles), "每行都有「打开」「删除」")
+    check(all(row["del"]["right"] <= row["box"]["right"] + 1 for row in profiles),
+          "行内按钮没有溢出本行")
+
+    old = rep["oldUi"]
+    check(old["cards"] == 0 and old["actions"] == 0 and old["preview"] == 0 and old["json"] == 0 and old["status"] == 0,
+          f"没有旧内联编辑器 / 预览 / 动作排：{old}")
+    check(old["builtinRows"] == 0 and old["viewButtons"] == 0 and old["copyButtons"] == 0,
+          f"没有可直接使用的内置模板行 / 查看 / 复制为自定义：{old}")
+
+    # ── metadata / 画廊模板：一行一个已登记外部文件 ──────────────────────────
+    cards = rep["templateCards"]
+    check([c["kind"] for c in cards] == ["metadata", "base"],
+          f"模板区 = metadata + 画廊模板两张卡片：{[c['kind'] for c in cards]}")
+    for card, key in (("metadata", "metadataTemplates"), ("base", "baseTemplates")):
+        found = next((c for c in cards if c["kind"] == card), None)
+        if found is None:
+            check(False, f"缺少 {card} 模板卡片")
+            continue
+        wanted_ids = [entry.get("id") for entry in (env.get(key) or [])]
+        shown_ids = [row["id"].replace("id: ", "") if row["id"] else None for row in found["rows"]]
+        check(len(found["rows"]) == len(wanted_ids),
+              f"{card}：data.json 登记 {len(wanted_ids)} 份外部文件，页面渲染 {len(found['rows'])} 行：{shown_ids}")
+        check(shown_ids == wanted_ids,
+              f"{card}：页面每行 id 与登记项一一对应：设置={wanted_ids} 页面={shown_ids}")
+        check(found["add"] is not None and found["add"]["buttonText"] == "登记" and found["add"]["selectFirst"] == "从预设创建…",
+              f"{card}：登记行 = 路径输入 + 登记 + 从预设创建…：{found['add']}")
+        check(len(found["rows"]) > 0 or found["empty"],
+              f"{card}：没有登记项时显示引导（而不是内置模板）：{found['empty']}")
+
+    legacy_present = env.get("legacyPresent")
+    check((rep["legacyWarning"] is not None) == bool(legacy_present),
+          f"旧内联 profiles 提示只在 data.json 真的有时出现（present={legacy_present}）：{rep['legacyWarning']}")
+    if legacy_present:
+        check("不会读取、不会自动迁移" in (rep["legacyWarning"] or ""),
+              f"提示写明不读取、不自动迁移：{rep['legacyWarning']}")
 
     rows = rep["remoteRows"]
     repo_remotes = subprocess.run(["git", "-C", env["vaultPath"], "remote"], capture_output=True, text=True).stdout.split()
@@ -194,29 +303,7 @@ def main():
     check(set(r["name"] for r in rows or []) >= set(repo_remotes),
           f"仓库里存在的 remote 都被识别出来了：仓库={repo_remotes} 设置页={[r['name'] for r in rows or []]}")
     check(rep.get("remoteAdd") == "添加 remote", "列表下方是「添加 remote」")
-
-    acts = [a["label"] for a in rep["actions"]]
-    check(acts == ["删除", "打开", "复制", "保存"] and rep["actionsJustify"] == "flex-end",
-          f"卡片动作 DOM 顺序 删除→打开→复制→保存 且靠右下角：{acts} justify={rep['actionsJustify']}")
     check(rep["plainSettings"] == ["缩略图边长"], f"只有「缩略图边长」一个普通设置项：{rep['plainSettings']}")
-
-    # 解析预览的真机行为：用户报的样例（中间段带下划线 + 小数点、且不带扩展名）。
-    # 老实现会把 `.4-0001` 当扩展名吃掉（stem 削成 `12345X-5_1`）⇒ 明明该命中却显示「正则不命中」。
-    prev = ui.js(r"""JSON.stringify((() => {
-      const inp = document.querySelector('.annex-preview-filename');
-      if (!inp) return { error: '没有预览输入框' };
-      inp.value = '12345X-5_1.4-0001';
-      inp.dispatchEvent(new Event('input', { bubbles: true }));
-      const box = document.querySelector('.annex-preview-result');
-      const rows = [...document.querySelectorAll('.annex-preview-row')]
-        .map((r) => [r.getAttribute('data-key'), r.getAttribute('data-value')]);
-      return { state: box ? box.getAttribute('data-state') : null, rows: Object.fromEntries(rows) };
-    })())""")
-    prev_rows = prev.get("rows") or {}
-    check(prev.get("state") == "ok",
-          f"真机预览：12345X-5_1.4-0001 命中（state={prev.get('state')}）{prev}")
-    check(prev_rows.get("marker") == "5_1.4", f"真机预览 marker=5_1.4：{prev_rows}")
-    check(prev_rows.get("index") == "1", f"真机预览 index 按 number 规整（0001 → 1）：{prev_rows}")
 
     # 截图前先把设置窗口提到前台：窗口被遮挡/最小化时 Chromium 会推迟渲染，
     # Page.captureScreenshot 会一直等到 websocket 超时（实测 60s 挂死，判据全过但 exit=1）。

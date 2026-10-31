@@ -29,7 +29,19 @@ git + git-annex 仓库（已经是仓库的不会重建，只补缺的步骤）�
 | 文件管理器右键 · **Annex Gallery** | 9 个动作：生成元数据 / 生成缩略图 / 创建画廊 / Add / Unlock & unannex / Lock / Unlock / Get / Drop | [`docs/context-menu.md`](docs/context-menu.md) |
 | 文件管理器右键 · **Annex Gallery → 创建画廊** | 生成 `<文件夹>/<文件夹名>.base`（vault 根 → `<vault name>.base`），成员 = 带 `annex-gallery-metadata` 标签的 sidecar，作用域递归、模板可换 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏（右下角） | **未提交 · 未跟踪 · 未入库 largefiles** 三个数，30 秒刷新、点一下立即刷新 | [`docs/status-bar.md`](docs/status-bar.md) |
-| 设置页 | profile（文件名解析规则）编辑器、模板区（metadata / 画廊模板）、缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
+| 设置页 | 登记外部文件：文件名匹配模板（每条一个 `.json`）、metadata 模板（`.md`）、画廊模板（`.base`）；再是缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
+
+### 配置从哪来
+
+插件的运行时**只认 vault 里的文件**，没有内置兜底：
+
+- **文件名匹配模板**：一条一个 `.json`（顶层是一条 `ParseProfile` 对象），在设置页登记 vault 相对路径；
+- **metadata 模板 / 画廊模板**：vault 里的 `.md` / `.base`，同样在设置页登记；
+- 设置页的「从预设创建…」会把内置预设写成一份独立文件（`AnnexGalleryTemplates/<id>.<ext>`，文件夹名无空格），
+  同名再加序号，不覆盖、不自动打开；「打开」交给系统默认应用编辑；「删除」只取消登记、文件留着。
+
+改完文件直接生效 —— 每次生成都重新读外部文件；文件坏了会在写盘前停下并指名是哪一个。
+旧版本内联在 `data.json` 里的 profile 只显示一条失效提示，不读取、不迁移。
 
 ## 开发入门
 
@@ -52,9 +64,9 @@ npm run layout     # 设置页布局（真实 app.css + headless Chromium）
 ```
 main.ts            插件入口：命令、状态栏、9 个右键菜单项、设置页接线
 src/core/          核心逻辑（不依赖 Obsidian，插件与 CLI 共用）
-                   init · rules · thumbnails · sidecar · gallery · templates · stems · annex · git · status · remotes
-src/ui/            设置页、profile 编辑器、模板编辑器、remotes 编辑器、「打开」的外部编辑
-src/defaults/      内置规则文件与模板（.gitattributes / .gitignore / metadata / base）
+                   init · rules · thumbnails · sidecar · gallery · templates · external-files · profile-files · stems · annex · git · status · remotes
+src/ui/            设置页、文件名匹配模板编辑器、模板编辑器、remotes 编辑器
+src/defaults/      内置规则文件与预设素材（.gitattributes / .gitignore / metadata / base）
 tools/             判据（桩层 / 真仓库层 / 真机层）、CLI、示例语料
 tests/             数据安全测试（npm test）
 docs/              设计与口径文档（见下）

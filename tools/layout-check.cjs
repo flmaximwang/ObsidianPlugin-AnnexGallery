@@ -11,9 +11,10 @@
  *   ② 真实 DOM：用 tools/obsidian-stub.cjs 跑构建产物 main.js，`tab.display()` 出来的那棵树；
  *   ③ 真实引擎：headless Chromium（本机 Chrome）算的几何。
  *
- * 它验证的是 spec（docs/setting-panel.md）里能变成数字的那几条：标题可见且与左侧对齐、解析结果带边框、
- * 示例文件名全宽、动作按钮右对齐且从右往左读是「保存、复制、打开、删除」、分割线在卡片与普通设置项之间。
- * 观感（配色、间距好不好看）仍然要人眼在真机上看一眼 —— 这个脚本只负责「结构塌了没有」。
+ * 验证的是 spec-774d7ee 里能变成数字的那些：标题可见且与左侧对齐；remote 设置在最上方；
+ * 文件名匹配模板工具条 = 路径输入 + 登记 + 从预设创建；每条已登记 JSON 一行（name/id/path/打开/删除）；
+ * metadata / 画廊模板各一张卡片、一行一个外部文件；没有内置可用行、没有内联编辑器/预览/旧动作排；
+ * 所有内容没有横向溢出。观感（配色、间距好不好看）仍要人眼在真机上看一眼。
  *
  * 依赖：本机有 Chrome / Chromium / Edge 之一（自动找）。
  */
@@ -24,6 +25,7 @@ const { execFileSync } = require("child_process");
 
 const REPO = path.resolve(__dirname, "..");
 const CACHE = path.join(os.tmpdir(), "annex-gallery-layout");
+const VAULT = path.join(os.tmpdir(), "annex-gallery-layout-vault");
 const CHROME_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -78,6 +80,27 @@ function chromeBinary() {
   throw new Error("找不到 Chrome/Chromium/Edge，无法离屏量几何");
 }
 
+/** 在 /tmp 造一个真实 vault：外部 profile JSON / .md / .base 都在盘上，设置里只登记路径。 */
+function seedVault() {
+  fs.rmSync(VAULT, { recursive: true, force: true });
+  const write = (rel, text) => {
+    const abs = path.join(VAULT, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, text, "utf8");
+  };
+  const tec = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/two-profiles.json"), "utf8"))[0];
+  const plate = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/plate-profile.json"), "utf8"))[0];
+  write("Profiles/tecnaitem.json", `${JSON.stringify(tec, null, 2)}\n`);
+  write("Profiles/Other/platewell.json", `${JSON.stringify(plate, null, 2)}\n`);
+  write("Templates/meta.md", "{{frontmatter}}\n\n缩略图：{{thumbnail}}\n原图：{{tif}}\n");
+  write("Templates/base.base", "views:\n  - type: cards\n    name: Layout {{folder}}\n    cardSize: {{cardSize}}\n");
+  return {
+    profileFiles: [{ path: "Profiles/tecnaitem.json" }, { path: "Profiles/Other/platewell.json" }],
+    metadataTemplates: [{ id: "meta", name: "meta", path: "Templates/meta.md" }],
+    baseTemplates: [{ id: "base", name: "base", path: "Templates/base.base" }],
+  };
+}
+
 const VOID_TAGS = new Set(["INPUT", "BR", "HR", "IMG", "META", "LINK"]);
 const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -96,7 +119,7 @@ function serialize(el, out) {
   out.push(`</${tag}>`);
 }
 
-/** 渲染真实设置页 DOM。 */
+/** 渲染真实设置页 DOM（外部文件模型）。 */
 function renderFragment() {
   const Module = require("module");
   const stub = require(path.join(REPO, "tools", "obsidian-stub.cjs"));
@@ -106,20 +129,20 @@ function renderFragment() {
     return original.call(this, request, ...rest);
   };
   const PluginClass = require(path.join(REPO, "main.js")).default;
-  const app = stub.makeApp("/tmp/layout-check-vault");
+  const seeded = seedVault();
+  const app = stub.makeApp(VAULT);
   const plugin = new PluginClass(app, { id: "annex-gallery", version: "0.0.0" });
   return (async () => {
     await plugin.onload();
     const tab = stub.registry.tabs[0];
+    // 两条已登记外部 profile + 各一份外部 metadata / 画廊模板。
+    Object.assign(plugin.settings, seeded);
     // 两行 remote：量「一个 item 装多条」时的行内布局
     plugin.settings.remotes = [
       { name: "origin", url: "ssh://nas.example/volume1/Data_lab_10" },
       { name: "backup", url: "/Volumes/Backup/Data_lab_10" },
     ];
     tab.display();
-    const filename = stub.walk(tab.containerEl).filter((el) => el.hasClass("annex-preview-filename"))[0];
-    filename.value = "12345X-5705-0015.tif";
-    filename.dispatchEvent({ type: "input" });
     const out = [];
     for (const child of tab.containerEl.children) serialize(child, out);
     return out.join("\n");
@@ -128,26 +151,85 @@ function renderFragment() {
 
 const MEASURE = String.raw`(function () {
   const num = (n) => Math.round(n * 100) / 100;
-  const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { left: num(b.left), right: num(b.right), top: num(b.top), width: num(b.width), height: num(b.height) }; };
+  const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { left: num(b.left), right: num(b.right), top: num(b.top), bottom: num(b.bottom), width: num(b.width), height: num(b.height) }; };
   const cs = (el, props) => { if (!el) return null; const s = getComputedStyle(el); const o = {}; for (const p of props) o[p] = s[p]; return o; };
-  const text = (el) => (el ? el.textContent.trim().replace(/\s+/g, " ").slice(0, 30) : null);
+  const text = (el) => (el ? el.textContent.trim().replace(/\s+/g, " ").slice(0, 40) : null);
+  const visible = (el) => el !== null && getComputedStyle(el).display !== "none";
   const pane = document.getElementById("pane");
   const h1 = document.querySelector(".annex-settings-title");
-  const card = document.querySelector(".annex-profile-card");
-  const row = document.querySelector(".setting-item");
-  const actions = [...document.querySelectorAll(".annex-profile-actions button")];
-  const result = document.querySelector(".annex-preview-result");
+  const settingRow = document.querySelector(".setting-item");
+  const toolbar = document.querySelector(".annex-profiles-toolbar");
+  const toolbarBox = box(toolbar);
+  const profileRows = [...document.querySelectorAll(".annex-profile-row")];
+  const templateCards = [...document.querySelectorAll(".annex-templates-card")];
+  const templateInfo = templateCards.map((card) => {
+    const rows = [...card.querySelectorAll(".annex-template-row")];
+    const add = card.querySelector(".annex-template-add-row");
+    return {
+      kind: card.getAttribute("data-kind"),
+      box: box(card),
+      title: text(card.querySelector(".annex-templates-title")),
+      hint: text(card.querySelector(".annex-templates-hint")),
+      empty: card.querySelector(".annex-templates-empty") !== null,
+      rows: rows.map((row) => ({
+        box: box(row),
+        state: row.getAttribute("data-state"),
+        id: text(row.querySelector(".annex-template-id")),
+        path: text(row.querySelector(".annex-template-path")),
+        open: box(row.querySelector(".annex-template-open")),
+        del: box(row.querySelector(".annex-template-del")),
+        error: row.querySelector(".annex-template-error") !== null,
+        wrap: getComputedStyle(row).flexWrap,
+      })),
+      add: add ? {
+        box: box(add),
+        wrap: getComputedStyle(add).flexWrap,
+        input: box(add.querySelector(".annex-template-path-input")),
+        button: box(add.querySelector(".annex-template-add")),
+        select: box(add.querySelector(".annex-template-preset")),
+      } : null,
+    };
+  });
   document.getElementById("report").textContent = "REPORT_JSON_BEGIN" + JSON.stringify({
     contentLeft: num(pane.getBoundingClientRect().left + parseFloat(getComputedStyle(pane).paddingLeft)),
     paneScrollWidth: pane.scrollWidth,
     paneClientWidth: pane.clientWidth,
-    h1: { box: box(h1), display: h1 ? getComputedStyle(h1).display : null, text: text(h1), pad: cs(h1, ["paddingLeft", "paddingRight"]), marginTop: h1 ? getComputedStyle(h1).marginTop : null, fontSize: h1 ? getComputedStyle(h1).fontSize : null },
-    card: box(card),
-    settingRow: { box: box(row), innerPadLeft: row ? getComputedStyle(row).paddingLeft : null },
+    h1: { box: box(h1), display: h1 ? getComputedStyle(h1).display : null, text: text(h1), pad: cs(h1, ["paddingLeft", "paddingRight"]), marginTop: h1 ? getComputedStyle(h1).marginTop : null },
+    settingRow: { box: box(settingRow), innerPadLeft: settingRow ? getComputedStyle(settingRow).paddingLeft : null },
     topLevel: [...pane.children].map((c) => ({ tag: c.tagName, cls: c.className, display: getComputedStyle(c).display, box: box(c), borderTopWidth: getComputedStyle(c).borderTopWidth })),
-    toolbar: (() => { const t = document.querySelector(".annex-profiles-toolbar"); return t ? [...t.children].filter((c) => getComputedStyle(c).display !== "none").map((c) => ({ tag: c.tagName, label: c.tagName === "SELECT" ? (c.options[0] ? c.options[0].text.trim() : "") : text(c), cls: c.className, box: box(c) })) : null; })(),
-    toolbarBox: (() => { const t = document.querySelector(".annex-profiles-toolbar"); return t ? { box: box(t), justify: getComputedStyle(t).justifyContent, wrap: getComputedStyle(t).flexWrap } : null; })(),
-    filename: (() => { const i = document.querySelector(".annex-preview-filename"); return i ? { box: box(i), width: getComputedStyle(i).width } : null; })(),
+    toolbar: toolbar ? [...toolbar.children].filter(visible).map((c) => ({
+      tag: c.tagName,
+      cls: c.className,
+      text: c.tagName === "SELECT" ? (c.options[0] ? c.options[0].text.trim() : "") : text(c),
+      placeholder: c.getAttribute("placeholder"),
+      box: box(c),
+    })) : null,
+    toolbarBox: toolbar ? { box: toolbarBox, justify: getComputedStyle(toolbar).justifyContent, wrap: getComputedStyle(toolbar).flexWrap } : null,
+    profiles: {
+      rows: profileRows.map((row) => ({
+        box: box(row),
+        state: row.getAttribute("data-state"),
+        name: text(row.querySelector(".annex-profile-name")),
+        id: text(row.querySelector(".annex-profile-id")),
+        path: text(row.querySelector(".annex-profile-path")),
+        nameBox: box(row.querySelector(".annex-profile-name")),
+        pathBox: box(row.querySelector(".annex-profile-path")),
+        open: box(row.querySelector(".annex-profile-open")),
+        del: box(row.querySelector(".annex-profile-del")),
+        error: row.querySelector(".annex-profile-error") !== null,
+        wrap: getComputedStyle(row).flexWrap,
+        borderTopWidth: getComputedStyle(row).borderTopWidth,
+      })),
+      oldCards: document.querySelectorAll(".annex-profile-card").length,
+      oldActions: document.querySelectorAll(".annex-profile-actions").length,
+      oldPreview: document.querySelectorAll(".annex-preview-filename").length + document.querySelectorAll(".annex-preview-result").length,
+      oldJson: document.querySelectorAll(".annex-profile-json").length,
+      oldStatus: document.querySelectorAll(".annex-profile-status").length,
+    },
+    templates: templateInfo,
+    builtinRows: document.querySelectorAll(".annex-template-builtin").length,
+    viewButtons: document.querySelectorAll(".annex-template-view-btn").length,
+    copyButtons: document.querySelectorAll(".annex-template-copy").length,
     remotes: (() => {
       const card = document.querySelector(".annex-remotes-card");
       if (!card) return null;
@@ -158,15 +240,12 @@ const MEASURE = String.raw`(function () {
         card: box(card),
         cardPadLeft: getComputedStyle(card).paddingLeft,
         cardBorderLeft: getComputedStyle(card).borderLeftWidth,
-        title: { text: title ? title.textContent.trim() : null, box: box(title), pad: title ? getComputedStyle(title).paddingLeft : null, fontSize: title ? getComputedStyle(title).fontSize : null },
+        title: { text: text(title), box: box(title), pad: title ? getComputedStyle(title).paddingLeft : null },
         rows: rows.length,
-        rowBoxes: rows.map((r) => ({ box: box(r), name: box(r.querySelector(".annex-remote-name")), url: box(r.querySelector(".annex-remote-url")), del: box(r.querySelector(".annex-remote-del")), note: r.querySelector(".annex-remote-note") ? r.querySelector(".annex-remote-note").textContent.trim() : "" })),
+        rowBoxes: rows.map((r) => ({ box: box(r), name: box(r.querySelector(".annex-remote-name")), url: box(r.querySelector(".annex-remote-url")), del: box(r.querySelector(".annex-remote-del")) })),
         addButton: { text: add ? add.textContent.trim() : null, box: box(add) },
       };
     })(),
-    result: result ? { box: box(result), border: cs(result, ["borderTopWidth", "borderTopStyle", "paddingLeft"]), rows: [...result.querySelectorAll(".annex-preview-row")].map((r) => text(r)) } : null,
-    actions: (() => { const a = document.querySelector(".annex-profile-actions"); return a ? { justify: getComputedStyle(a).justifyContent, box: box(a), cardInnerRight: num(card.getBoundingClientRect().right - parseFloat(getComputedStyle(card).paddingRight) - parseFloat(getComputedStyle(card).borderRightWidth)), buttons: actions.map((b) => ({ label: text(b), box: box(b) })) } : null; })(),
-    status: cs(document.querySelector(".annex-profile-status"), ["display", "marginLeft"]),
   }, null, 1) + "REPORT_JSON_END";
 })();`;
 
@@ -218,27 +297,26 @@ ${fragment}
 
   const contentLeft = rep.contentLeft;
   const h1Left = rep.h1.box === null ? null : rep.h1.box.left;
-  const cardLeft = rep.card.left;
-  const btns = rep.actions.buttons;
 
   console.log("\n设置页布局检查（真实 app.css + 真实 DOM + headless Chromium）");
-  console.log(`  内容左边缘=${contentLeft}  标题左=${h1Left}  卡片左=${cardLeft}  「缩略图边长」行左=${rep.settingRow.box.left}（行内 padding ${rep.settingRow.innerPadLeft}）`);
+  console.log(`  内容左边缘=${contentLeft}  标题左=${h1Left}  「缩略图边长」行左=${rep.settingRow.box.left}（行内 padding ${rep.settingRow.innerPadLeft}）`);
 
+  // ── 标题 / 顶层顺序 / 分割线 ───────────────────────────────────────────────
   check(rep.h1.display !== "none" && rep.h1.box.height > 0, "标题 h1 真的可见（app.css 有 .vertical-tab-content h1{display:none}，必须被压掉）", `display=${rep.h1.display}`);
   check(rep.h1.text === "Annex Gallery Settings", "标题文本 = Annex Gallery Settings");
   check(h1Left !== null && Math.abs(h1Left - contentLeft) < 0.5, "标题与左侧内容左对齐（padding 0，不是 app 的 16px）", `标题 left=${h1Left} vs 内容左=${contentLeft}`);
   check(rep.h1.pad.paddingLeft === "0px" && rep.h1.pad.paddingRight === "0px", "标题左右 padding 都是 0");
   check(rep.h1.marginTop === "0px", "标题没有上边距（贴住内容区顶部的 padding）");
-  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-templates-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 模板区 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
+  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-templates-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 文件名匹配模板 → 模板区 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
   check(rep.topLevel[6].display === "flex", "最后一项是 app 的 .setting-item（缩略图边长）");
   const dividers = rep.topLevel.filter((t) => t.tag === "HR");
-  check(dividers.length === 2, `两条分割线（remote/模版 之间 + 模版/普通设置项 之间）：${dividers.length} 条`);
+  check(dividers.length === 2, `两条分割线（remote/模板 之间 + 模板/普通设置项 之间）：${dividers.length} 条`);
   check(dividers.every((d) => d.display !== "none" && d.box.width > 100 && d.box.height > 0 && d.borderTopWidth === "1px"),
     "两条分割线都可见、撑满内容宽、1px 上边框", JSON.stringify(dividers.map((d) => ({ w: d.box.width, h: d.box.height, bt: d.borderTopWidth }))));
-  check(rep.remotes.card.top + rep.remotes.card.height <= dividers[0].box.top && dividers[0].box.top + dividers[0].box.height <= rep.toolbarBox.box.top,
-    "上面那条分割线真的夹在 remote 卡片与工具条之间", `card 底=${rep.remotes.card.top + rep.remotes.card.height} 线=${dividers[0].box.top} 工具条=${rep.toolbarBox.box.top}`);
+  check(rep.remotes.card.bottom <= dividers[0].box.top && dividers[0].box.top + dividers[0].box.height <= rep.toolbarBox.box.top,
+    "上面那条分割线真的夹在 remote 卡片与工具条之间", `card 底=${rep.remotes.card.bottom} 线=${dividers[0].box.top} 工具条=${rep.toolbarBox.box.top}`);
 
-  // 「remote 设置」：一个 item 装多条，逐条量行内布局
+  // ── remote 设置：一个 item 装多条 ─────────────────────────────────────────
   const remotes = rep.remotes;
   check(remotes !== null && remotes.title.text === "remote 设置", "最上方那一项的标题 = remote 设置", remotes === null ? "(缺)" : remotes.title.text);
   check(remotes.rows === 2, "同一个 item 里装了 2 条 remote");
@@ -246,7 +324,6 @@ ${fragment}
   const cardInnerLeft = remotes.card.left + parseFloat(remotes.cardBorderLeft) + parseFloat(remotes.cardPadLeft);
   check(Math.abs(remotes.title.box.left - cardInnerLeft) < 0.5, "remote 设置的标题与卡片内容左边缘对齐（缩进只来自卡片自己的 padding）", `标题 left=${remotes.title.box.left} vs 卡片内容左=${cardInnerLeft}`);
   check(Math.abs(remotes.card.left - contentLeft) < 0.5, "remote 设置整块与内容左边缘对齐");
-  check(remotes.card.right <= contentLeft + remotes.card.width + 0.5 && remotes.card.width > 0, "remote 设置整块有宽度（是卡片，不是塌成 0）");
   const [row0, row1] = remotes.rowBoxes;
   check(row1.box.top > row0.box.top, "两行 remote 上下排列（第 2 行在第 1 行下面）");
   check(row0.name.left < row0.url.left && row0.url.left < row0.del.left, "行内从左往右 = 名称 → 地址 → 删除", `${row0.name.left} / ${row0.url.left} / ${row0.del.left}`);
@@ -255,33 +332,59 @@ ${fragment}
   check(remotes.addButton.text === "添加 remote", "列表下方是「添加 remote」");
   check(Math.abs(remotes.addButton.box.left - remotes.title.box.left) < 0.5, "「添加 remote」与标题左对齐");
   check(remotes.addButton.box.top > row1.box.top, "「添加 remote」在两行 remote 下面");
-  check(
-    rep.toolbar.map((c) => c.label).join(",") === "新模版,导入模版,添加预设…",
-    "工具条从左往右 = 新模版、导入模版、添加预设（下拉）",
-    rep.toolbar.map((c) => `${c.tag}:${c.label}`).join(" | "),
-  );
-  check(rep.toolbar[2].tag === "SELECT", "第三个控件是下拉选框（select）");
+
+  // ── 文件名匹配模板：外部 JSON 工具条 + 每文件一行 ─────────────────────────
+  check(rep.toolbar.length === 3, "工具条只有 3 个控件（路径输入 / 登记 / 从预设创建）", `${rep.toolbar.length} 个`);
+  check(rep.toolbar[0].tag === "INPUT" && /profile JSON 路径/.test(rep.toolbar[0].placeholder ?? ""), "第 1 格是 vault 相对路径输入框");
+  check(rep.toolbar[1].tag === "BUTTON" && rep.toolbar[1].text === "登记", "第 2 格是「登记」按钮");
+  check(rep.toolbar[2].tag === "SELECT" && rep.toolbar[2].text === "从预设创建…", "第 3 格是「从预设创建…」下拉");
   check(rep.toolbar[0].box.left < rep.toolbar[1].box.left && rep.toolbar[1].box.left < rep.toolbar[2].box.left, "三个控件真的从左往右排");
-  check(rep.toolbarBox.wrap === "nowrap", "工具条不换行（flex-wrap: nowrap）");
-  check(rep.toolbarBox.justify === "flex-start", "工具条左对齐（justify-content: flex-start）");
-  const toolTops = rep.toolbar.map((c) => c.box.top);
-  check(Math.max(...toolTops) - Math.min(...toolTops) < 1, "三个控件在同一行（top 一致）", toolTops.join(" / "));
-  check(Math.abs(rep.toolbar[0].box.left - rep.toolbarBox.box.left) < 1, "「新模版」贴住工具条左边缘（按钮靠左）", `${rep.toolbar[0].box.left} vs ${rep.toolbarBox.box.left}`);
-  check(Math.abs(rep.toolbar[2].box.right - rep.toolbarBox.box.right) < 1, "「添加预设」下拉贴住工具条右边缘（下拉靠右）", `${rep.toolbar[2].box.right} vs ${rep.toolbarBox.box.right}`);
-  check(rep.toolbar[1].box.right < rep.toolbar[2].box.left - 40, "按钮组与下拉之间留出空隙（左一组、右一个）", `${rep.toolbar[1].box.right} → ${rep.toolbar[2].box.left}`);
-  check(Math.abs(rep.filename.width.replace("px", "") - (rep.card.right - rep.card.left - 2 * parseFloat(rep.result.border.paddingLeft) - 2)) < 40, "示例文件名占满卡片内宽", `输入框 ${rep.filename.width} vs 卡片内容宽`);
-  check(rep.result.border.borderTopWidth === "1px" && rep.result.border.borderTopStyle === "solid", "解析结果是带边框的一块");
-  check(rep.result.rows.length > 0, `解析结果每行一条解析：${rep.result.rows.join(" / ")}`);
-  check(rep.actions.justify === "flex-end", "动作按钮整排贴右下角（justify-content: flex-end）");
-  check(
-    btns.map((b) => b.label).join(",") === "删除,打开,复制,保存",
-    "动作按钮 DOM 顺序 删除→打开→复制→保存（从右往左读 = 保存、复制、打开、删除）",
-    btns.map((b) => b.label).join(" | "),
-  );
-  check(btns[3].box.left > btns[2].box.left && btns[2].box.left > btns[1].box.left && btns[1].box.left > btns[0].box.left, "四个按钮真的从左往右排（保存最右）");
-  check(Math.abs(btns[3].box.right - rep.actions.cardInnerRight) < 1.5, "最右的「保存」贴住卡片右下角", `保存右边缘=${btns[3].box.right} vs 卡片内容右=${rep.actions.cardInnerRight}`);
-  check(Math.abs(cardLeft - contentLeft) < 0.5, "卡片与内容左边缘对齐");
-  check(rep.paneScrollWidth <= rep.paneClientWidth, "没有横向溢出（内容放得下）");
+  check(rep.toolbarBox.wrap === "wrap", "工具条允许换行（flex-wrap: wrap，窄窗口不撑破）");
+  check(["normal", "flex-start", "start"].includes(rep.toolbarBox.justify), "工具条左对齐（默认/显式 flex-start 均可）", rep.toolbarBox.justify);
+  const toolCenters = rep.toolbar.map((c) => c.box.top + c.box.height / 2);
+  check(Math.max(...toolCenters) - Math.min(...toolCenters) < 1, "三个控件垂直居中对齐（同一行）", toolCenters.join(" / "));
+  check(Math.abs(rep.toolbar[0].box.left - rep.toolbarBox.box.left) < 1, "输入框贴住工具条左边缘");
+  check(rep.toolbar[0].box.width > rep.toolbar[1].box.width + rep.toolbar[2].box.width, "输入框占据剩余宽度，是工具条里最宽的一格", `${rep.toolbar[0].box.width} vs ${rep.toolbar[1].box.width}+${rep.toolbar[2].box.width}`);
+  check(Math.abs(rep.toolbar[2].box.right - rep.toolbarBox.box.right) < 1, "预设下拉贴住工具条右边缘", `${rep.toolbar[2].box.right} vs ${rep.toolbarBox.box.right}`);
+
+  check(rep.profiles.rows.length === 2, "每条已登记外部 JSON 各一行（2 条）");
+  check(rep.profiles.oldCards === 0 && rep.profiles.oldActions === 0 && rep.profiles.oldPreview === 0 && rep.profiles.oldJson === 0 && rep.profiles.oldStatus === 0,
+    "没有旧的内联卡片 / 动作排 / 解析预览 / JSON textarea / 状态胶囊",
+    JSON.stringify({ cards: rep.profiles.oldCards, actions: rep.profiles.oldActions, preview: rep.profiles.oldPreview, json: rep.profiles.oldJson, status: rep.profiles.oldStatus }));
+  const [pr0, pr1] = rep.profiles.rows;
+  check(pr0.state === "ok" && pr1.state === "ok", "两条已登记 profile 都成功读到（data-state=ok）");
+  check(/^id: /.test(pr0.id) && pr0.id.includes("tecnaitem"), "行上显示外部 JSON 的 id", pr0.id);
+  check(pr0.path === "Profiles/tecnaitem.json" && pr1.path === "Profiles/Other/platewell.json", "行上显示 vault 相对路径", `${pr0.path} / ${pr1.path}`);
+  check(pr0.nameBox.left < pr0.pathBox.left && pr0.open.left > pr0.pathBox.right - 0.5, "行内先 name/id/path，再排「打开」「删除」", `${pr0.nameBox.left} / ${pr0.pathBox.left}..${pr0.pathBox.right} / ${pr0.open.left}`);
+  check(pr0.del.top > pr0.open.top || pr0.del.left > pr0.open.left, "「删除」在「打开」之后（行内换行时落到下一行也算）", `open=${pr0.open.left}@${pr0.open.top} del=${pr0.del.left}@${pr0.del.top}`);
+  check(pr0.wrap === "wrap", "profile 行允许换行（窄窗口不溢出）");
+  check(pr0.borderTopWidth === "1px", "每行有可见边框（一行一份外部文件）");
+  check(pr0.open.right <= pr0.box.right + 0.5 && pr0.del.right <= pr0.box.right + 0.5, "行内按钮没有溢出本行");
+  check(pr1.box.top > pr0.box.top, "两行上下排列");
+  check(Math.abs(pr0.box.left - contentLeft) < 0.5 && Math.abs(pr0.box.width - rep.toolbarBox.box.width) < 1, "profile 行与工具条同宽、同左边缘");
+
+  // ── metadata / 画廊模板卡片：一行一个外部文件 ──────────────────────────────
+  check(rep.templates.length === 2, "模板区有 2 张卡片");
+  check(rep.templates.map((c) => c.kind).join(",") === "metadata,base", "卡片依次 = metadata / base");
+  check(rep.templates[0].title === "metadata 模板" && rep.templates[1].title === "画廊模板", "两张卡片标题正确");
+  check(rep.templates.every((c) => c.hint !== null && c.hint.length > 10), "两张卡片都有使用说明");
+  check(rep.builtinRows === 0 && rep.viewButtons === 0 && rep.copyButtons === 0, "没有内置模板行 / 查看 / 复制为自定义", JSON.stringify({ builtin: rep.builtinRows, view: rep.viewButtons, copy: rep.copyButtons }));
+  check(rep.templates.every((c) => !c.empty && c.rows.length === 1), "两张卡片各显示 1 行已登记外部文件");
+  check(rep.templates[0].box.top < rep.templates[1].box.top, "metadata 卡片在画廊模板卡片上面");
+  check(Math.abs(rep.templates[0].box.left - contentLeft) < 0.5 && Math.abs(rep.templates[0].box.width - rep.toolbarBox.box.width) < 1, "模板卡片与工具条同宽、同左边缘");
+  for (const card of rep.templates) {
+    const row = card.rows[0];
+    check(row.state === "ok" && !row.error, `${card.kind} 行成功读到（data-state=ok）`);
+    check(row.id === `id: ${card.kind === "metadata" ? "meta" : "base"}`, `${card.kind} 行显示 id`, row.id);
+    check(row.oldPath === undefined && row.path === (card.kind === "metadata" ? "Templates/meta.md" : "Templates/base.base"), `${card.kind} 行显示 vault 相对路径`, row.path);
+    check(row.open.left < row.del.left && row.del.right <= row.box.right + 0.5, `${card.kind} 行尾 = 打开 → 删除，且不溢出`);
+    check(card.add !== null && card.add.input.left < card.add.button.left && card.add.button.left < card.add.select.left, `${card.kind} 登记行从左往右 = 路径输入 → 登记 → 从预设创建`);
+    check(Math.abs(card.add.input.left - card.box.left - 16) < 1, `${card.kind} 登记行贴住卡片内容左边缘`);
+    check(card.add.wrap === "wrap", `${card.kind} 登记行允许换行（窄窗口不溢出）`);
+    check(card.add.box.bottom <= card.box.bottom + 0.5, `${card.kind} 登记行在卡片内`);
+  }
+
+  check(rep.paneScrollWidth <= rep.paneClientWidth, "没有横向溢出（内容放得下）", `${rep.paneScrollWidth} > ${rep.paneClientWidth}`);
 
   console.log(`\nLAYOUT PASS=${pass} FAIL=${fail}`);
   if (fail > 0) process.exit(1);

@@ -1,51 +1,41 @@
 /**
- * 设置页里的「多配置（profile）编辑器」——按 docs/setting-panel.md 的布局重写。
+ * 设置页的「文件名匹配模板」区 —— 外部 JSON 文件管理（spec-774d7ee / ticket 2133603）。
  *
- * 一张卡片 = 一条 profile：
- *   <Name> <id> <状态头>          ← 状态只有三种：Saved / Unsaved changes / Syntax Error
- *   JSON 文本框                    ← 就地编辑；只做实时校验与预览，点「保存」才写盘
- *   解析预览                       ← 第一行是示例文件名（全宽，输入即解析，没有解析按钮）
- *     带边框的解析结果             ← 每行一条解析（`key = value`）
- *   右下角一排按钮：删除 打开 复制 保存（从右往左读 = 保存、复制、打开、删除）
+ * 冻结口径：
+ * - 每条模板 = vault 里一个独立的 `.json` 文件，顶层是一条 `ParseProfile` 对象；
+ *   设置里只登记路径（`settings.profileFiles`），name/id 全部以 JSON 内容为准。
+ * - 每行显示 外部 JSON 的 name / id / path，并提供「打开」「删除」；删除只取消登记。
+ * - 登记时校验路径安全性（vault 内相对路径、`.json`）与文件存在性，并拒绝重复路径。
+ * - 「从预设创建」每次写一个独立文件到 `AnnexGalleryTemplates/<preset-id>.json`；
+ *   路径冲突由 `createVaultFile` 加序号（不覆盖），创建后不自动打开。
+ *   写文件前先用 `loadProfileFiles` 读全部已登记文件：任何一份坏了/重复 id 都整体失败，
+ *   绝不跳过坏文件去猜 id 是否重复；id 撞了就为待创建对象生成唯一 id（名称标副本）。
+ * - 逐行独立读取：一份坏文件只让那一行显示错误，不影响其它行，也不阻止「打开」去修它。
+ * - 运行时没有内置/预设 fallback；预设只是「从预设创建」的素材。
  *
- * 「打开」= 把这条 profile 的 JSON 写进临时缓冲文件 → 系统默认外部应用打开 →
- * 外部应用一改就自动同步回面板（合法就顺手写盘）。实现见 ./external-edit.ts。
- *
- * 落盘纪律：输入时只做实时校验与预览（不写盘）；点「保存」或外部应用的改动才写 data.json。
- * 有 error 级问题的配置**绝不写盘**（坏正则写进 data.json 会让右键弹窗直接崩）。
+ * 旧的内联 textarea / 临时缓冲文件回同步 / 预览 / 逐条保存与复制都已删除。
  */
 import { Notice } from "obsidian";
-import { IMAGE_EXTENSIONS, stemOf } from "../core/stems";
-import {
-  DEFAULT_PROFILES,
-  TEMPLATE_PROFILE,
-  type ParseContext,
-  type ParsedFields,
-  type ParseProfile,
-  parseWithProfile,
-  validateProfile,
-  type ProfileIssue,
-} from "../core/profiles";
-import { bufferPath, ExternalEditSessions, type ExternalEditHost } from "./external-edit";
+import { normalizeVaultRelPath, resolveVaultFile } from "../core/external-files";
+import { loadProfileFile, loadProfileFiles, type LoadedProfile, type ProfileFileRef } from "../core/profile-files";
+import { DEFAULT_PROFILES, TEMPLATE_PROFILE, type ParseProfile } from "../core/profiles";
 import type { PluginSettings } from "./settings";
+import { TEMPLATE_FOLDER } from "./templates-editor";
 
-export interface ProfileEditorHost extends ExternalEditHost {
+export interface ProfileEditorHost {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
+  vaultRoot(): string;
+  /** 用系统默认外部应用打开一个本地绝对路径；失败时 throw。 */
+  openWithDefaultApp(filePath: string): Promise<void>;
+  /** 在 vault 里新建文件（被占用时自动加后缀），返回实际写入的 vault 相对路径。 */
+  createVaultFile(relPath: string, text: string): Promise<string>;
 }
 
-/** 卡片右上角状态胶囊的三种取值（spec 点名了这三个词）。 */
-type SaveState = "saved" | "unsaved" | "badjson";
+/** 「从预设创建」可选的素材：空白示例 + 内置默认 profile。 */
+const PROFILE_PRESETS: ParseProfile[] = [TEMPLATE_PROFILE, ...DEFAULT_PROFILES];
 
-const STATE_LABEL: Record<SaveState, string> = {
-  saved: "Saved",
-  unsaved: "Unsaved changes",
-  badjson: "Syntax Error",
-};
-
-const STATE_LEVEL: Record<SaveState, string> = { saved: "ok", unsaved: "warn", badjson: "error" };
-
-/** 深拷贝一条 profile —— 编辑/复制时绝不能改到 core 里的对象或 DEFAULT_PROFILES。 */
+/** 深拷贝一条 profile —— 创建副本时绝不能改到 core 里的 preset 对象。 */
 export function cloneProfile(profile: ParseProfile): ParseProfile {
   return JSON.parse(JSON.stringify(profile)) as ParseProfile;
 }
@@ -58,55 +48,18 @@ function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 这个串是不是以「引擎认识的图片扩展名」结尾。 */
-function hasImageExtension(name: string): boolean {
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return false;
-  return (IMAGE_EXTENSIONS as readonly string[]).includes(name.slice(dot).toLowerCase());
+/** 路径规范化；非法路径（越界/绝对路径）返回 null，仅用于重复比较的尽力而为。 */
+function normalizedOrNull(raw: string): string | null {
+  try {
+    return normalizeVaultRelPath(raw);
+  } catch {
+    return null;
+  }
 }
 
-/**
- * 预览要给正则试的 stem 候选（按优先级）：用户填的是**示例文件名**。
- *   ① 带图片扩展名（`x.tif`）⇒ 按引擎口径去掉扩展名（`stemOf`，与 `core/stems` 同一份实现）；
- *   ② 不带（`12345X-5_1.4-0001` 这种中间段自带小数点的名字）⇒ **它本身就是 stem**，
- *      不能把 `.4-0001` 当扩展名吃掉 —— 用户实测就栽在这里：旧实现把 stem 削成 `12345X-5_1`，
- *      于是明明该命中的名字显示成「正则不命中」。
- * 两条都试，哪条命中用哪条；都不命中时用引擎口径那条报错（与真跑一遍的行为一致）。
- */
-function previewStems(text: string): string[] {
-  const engineStem = stemOf(text);
-  if (hasImageExtension(text) || engineStem === text) return [engineStem];
-  return [text, engineStem];
-}
-
-/**
- * 预览用的 ParseContext：解析与路径无关，所以只用文件名（相对路径那一格按 spec 去掉了），
- * 路径就取文件名本身。
- */
-function buildContext(filename: string, stem: string): ParseContext {
-  return { stem, filename, relpath: filename, folderName: "" };
-}
-
-/**
- * 状态判定用的规范化：按键名排序后序列化。
- * 只把键顺序或缩进改一改，不该被判成「Unsaved changes」。
- */
-function canonical(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value === null || typeof value !== "object") return value;
-  const source = value as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-  for (const key of Object.keys(source).sort()) out[key] = sortKeys(source[key]);
-  return out;
-}
-
-/** 唯一 id：撞了就加 `-2`、`-3`…（复制/新增/导入都走这里）。 */
-function uniqueId(existing: ParseProfile[], base: string): string {
-  const ids = new Set(existing.map((profile) => profile.id));
+/** 唯一 id：撞了就加 `-2`、`-3`…（从预设创建时用）。 */
+function uniqueId(existing: Iterable<string>, base: string): string {
+  const ids = new Set(existing);
   const seed = base.trim() === "" ? "profile" : base.trim();
   if (!ids.has(seed)) return seed;
   let n = 2;
@@ -114,364 +67,197 @@ function uniqueId(existing: ParseProfile[], base: string): string {
   return `${seed}-${n}`;
 }
 
-/** 导入的 .json 可以是单条 profile、一个数组，或 `{ profiles: [...] }`。 */
-function profilesFromImport(raw: unknown): ParseProfile[] {
-  const candidate = Array.isArray(raw)
-    ? raw
-    : raw !== null && typeof raw === "object" && Array.isArray((raw as { profiles?: unknown }).profiles)
-      ? ((raw as { profiles: unknown[] }).profiles)
-      : [raw];
-  const profiles: ParseProfile[] = [];
-  for (const item of candidate) {
-    if (item === null || typeof item !== "object" || Array.isArray(item)) {
-      throw new Error("每一条 profile 必须是一个 JSON 对象");
-    }
-    profiles.push(item as ParseProfile);
-  }
-  return profiles;
+/** 一行登记项 + 本次读取结果。坏文件只有 `error`，其余字段为空。 */
+interface ProfileRow {
+  index: number;
+  ref: ProfileFileRef;
+  loaded?: LoadedProfile;
+  error?: string;
 }
 
 export class ProfileEditor {
-  private readonly sessions: ExternalEditSessions;
-
-  constructor(private readonly container: HTMLElement, private readonly host: ProfileEditorHost) {
-    this.sessions = new ExternalEditSessions(host);
-  }
-
-  /** 设置页隐藏/重渲染时收摊：停掉外部编辑的轮询，不留定时器。 */
-  destroy(): void {
-    this.sessions.stopAll();
-  }
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly host: ProfileEditorHost,
+  ) {}
 
   render(): void {
-    this.sessions.stopAll();
     this.container.empty();
     const root = this.container.createDiv({ cls: "annex-profiles" });
 
-    // ── 工具条：新模版 / 导入模版 / 添加预设（下拉选框），从左往右 ──────────
-    const toolbar = root.createDiv({ cls: "annex-profiles-toolbar" });
-    const newButton = toolbar.createEl("button", { cls: "annex-profile-new", text: "新模版" });
-    newButton.addEventListener("click", () => void this.addProfile(TEMPLATE_PROFILE));
-
-    const importButton = toolbar.createEl("button", { cls: "annex-profile-import", text: "导入模版" });
-    const importInput = toolbar.createEl("input", { cls: "annex-profile-import-file", type: "file" });
-    importInput.setAttr("accept", ".json,application/json");
-    importInput.addClass("annex-hidden");
-    importButton.addEventListener("click", () => importInput.click());
-    importInput.addEventListener("change", () => {
-      const file = (importInput as HTMLInputElement).files?.[0];
-      if (file !== undefined && file !== null) void this.importFile(file);
-    });
-
-    const presetSelect = toolbar.createEl("select", { cls: "dropdown annex-profile-preset" });
-    presetSelect.createEl("option", { text: "添加预设…", value: "" });
-    for (const preset of DEFAULT_PROFILES) {
-      presetSelect.createEl("option", { text: `${preset.name}（${preset.id}）`, value: preset.id });
-    }
-    presetSelect.addEventListener("change", () => {
-      const chosen = DEFAULT_PROFILES.find((preset) => preset.id === presetSelect.value);
-      presetSelect.value = "";
-      if (chosen !== undefined) void this.addProfile(chosen);
-    });
-
-    // ── 卡片列表 ────────────────────────────────────────────────────────────
+    this.renderToolbar(root);
     const list = root.createDiv({ cls: "annex-profile-list" });
-    const profiles = this.host.settings.profiles;
-    if (profiles.length === 0) {
+    const refs = this.host.settings.profileFiles;
+
+    let vaultRoot: string | null = null;
+    let rootError = "";
+    try {
+      vaultRoot = this.host.vaultRoot();
+    } catch (error) {
+      rootError = `读不了 vault 路径：${errText(error)}`;
+    }
+
+    const rows: ProfileRow[] = refs.map((ref, index) => {
+      if (vaultRoot === null) return { index, ref, error: rootError };
+      try {
+        return { index, ref, loaded: loadProfileFile(vaultRoot, ref.path) };
+      } catch (error) {
+        return { index, ref, error: errText(error) };
+      }
+    });
+    this.markDuplicateIds(rows);
+
+    if (refs.length === 0) {
+      if (rootError !== "") list.createDiv({ cls: "annex-profiles-error", text: rootError });
       list.createDiv({
         cls: "annex-profiles-empty",
-        text: "还没有配置。点「新模版」建一条，或「导入模版」读一份 .json。",
+        text: "还没有登记文件名匹配模板。填 vault 里的 .json 路径点「登记」，或用「从预设创建…」生成一份。",
       });
       return;
     }
-    profiles.forEach((profile, index) => this.renderCard(list, profile, index));
+
+    for (const row of rows) this.renderRow(list, row);
   }
 
-  /** 新增一条（新模版 / 添加预设共用）。 */
-  private async addProfile(template: ParseProfile): Promise<void> {
-    const profiles = this.host.settings.profiles;
-    const copy = cloneProfile(template);
-    const id = uniqueId(profiles, template.id);
-    copy.id = id;
-    if (id !== template.id) copy.name = `${template.name}（副本）`;
-    profiles.push(copy);
-    await this.host.saveSettings();
-    this.render();
+  /** 工具条：路径输入 + 登记 + 从预设创建。 */
+  private renderToolbar(root: HTMLElement): void {
+    const toolbar = root.createDiv({ cls: "annex-profiles-toolbar" });
+
+    const input = toolbar.createEl("input", { cls: "annex-profile-path-input", type: "text" });
+    input.setAttr("placeholder", "vault 里的 profile JSON 路径（.json，每条模板一个文件）");
+
+    const register = toolbar.createEl("button", { cls: "annex-profile-register", text: "登记" });
+    const submit = (): void => void this.register(input.value);
+    register.addEventListener("click", submit);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submit();
+    });
+
+    const presetSelect = toolbar.createEl("select", { cls: "dropdown annex-profile-preset" });
+    presetSelect.createEl("option", { text: "从预设创建…", value: "" });
+    for (const preset of PROFILE_PRESETS) {
+      presetSelect.createEl("option", { text: `${preset.name}（${preset.id}）`, value: preset.id });
+    }
+    presetSelect.addEventListener("change", () => {
+      const chosen = PROFILE_PRESETS.find((preset) => preset.id === presetSelect.value);
+      presetSelect.value = "";
+      if (chosen !== undefined) void this.createFromPreset(chosen);
+    });
   }
 
-  /** 导入一个 .json（单条 / 数组 / `{ profiles: [...] }` 都认）。 */
-  private async importFile(file: File): Promise<void> {
-    try {
-      const raw = JSON.parse(await file.text()) as unknown;
-      const incoming = profilesFromImport(raw);
-      if (incoming.length === 0) throw new Error("文件里没有 profile");
-      const added: string[] = [];
-      for (const profile of incoming) {
-        const copy = cloneProfile(profile);
-        copy.id = uniqueId(this.host.settings.profiles, copy.id);
-        added.push(copy.id);
-        this.host.settings.profiles.push(copy);
+  /** 跨文件 id 重复：两条都标成错误行（仍保留 path 与「打开」）。 */
+  private markDuplicateIds(rows: ProfileRow[]): void {
+    const pathsById = new Map<string, string[]>();
+    for (const row of rows) {
+      const id = row.loaded?.profile.id;
+      if (id === undefined) continue;
+      pathsById.set(id, [...(pathsById.get(id) ?? []), row.ref.path]);
+    }
+    for (const row of rows) {
+      const id = row.loaded?.profile.id;
+      if (id === undefined) continue;
+      const paths = pathsById.get(id) ?? [];
+      if (paths.length > 1) {
+        row.error = `profile id「${id}」重复登记：${paths.join("、")}（请删掉多余的一条，或修改其中一份 JSON 的 id）`;
       }
-      await this.host.saveSettings();
-      this.render();
-      new Notice(`已导入 ${added.length} 条配置：${added.join("、")}`);
-    } catch (error) {
-      new Notice(`导入失败：${errText(error)}`, 10000);
     }
   }
 
-  private async duplicate(index: number): Promise<void> {
-    const profiles = this.host.settings.profiles;
-    const source = profiles[index];
-    if (source === undefined) return;
-    const copy = cloneProfile(source);
-    copy.id = uniqueId(profiles, source.id);
-    copy.name = `${source.name}（副本）`;
-    profiles.splice(index + 1, 0, copy);
-    await this.host.saveSettings();
-    this.render();
+  private renderRow(parent: HTMLElement, row: ProfileRow): void {
+    const el = parent.createDiv({ cls: "annex-profile-row" });
+    el.setAttr("data-profile-path", row.ref.path);
+    el.setAttr("data-state", row.error === undefined ? "ok" : "error");
+    if (row.loaded !== undefined) el.setAttr("data-profile-id", row.loaded.profile.id);
+    if (row.error !== undefined) el.addClass("annex-profile-row-error");
+
+    const name = row.loaded?.profile.name?.trim() ?? "";
+    el.createSpan({ cls: "annex-profile-name", text: name === "" ? "（未命名）" : name });
+    if (row.loaded !== undefined) {
+      el.createSpan({ cls: "annex-profile-id", text: `id: ${row.loaded.profile.id}` });
+    }
+    el.createSpan({ cls: "annex-profile-path", text: row.ref.path });
+
+    const open = el.createEl("button", { cls: "annex-profile-open", text: "打开" });
+    open.setAttr("aria-label", "用系统默认应用打开这份 JSON（改完在设置页重新读取即可生效）");
+    open.addEventListener("click", () => void this.open(row.ref));
+
+    const remove = el.createEl("button", { cls: "annex-profile-del mod-warning", text: "删除" });
+    remove.setAttr("aria-label", "取消登记（不删除文件）");
+    remove.addEventListener("click", () => void this.unregister(row.index));
+
+    if (row.error !== undefined) {
+      el.createDiv({ cls: "annex-profile-error", text: row.error });
+    }
   }
 
-  private async remove(index: number): Promise<void> {
-    const profiles = this.host.settings.profiles;
-    const target = profiles[index];
-    if (target === undefined) return;
-    this.sessions.stop(target.id);
-    profiles.splice(index, 1);
+  /** 登记一个已有文件：路径安全 + 扩展名 + 存在性 + 重复路径。 */
+  private async register(raw: string): Promise<void> {
+    let relPath: string;
+    try {
+      relPath = resolveVaultFile(this.host.vaultRoot(), raw, "profile").relPath;
+    } catch (error) {
+      new Notice(`登记失败：${errText(error)}`, 10000);
+      return;
+    }
+
+    const duplicate = this.host.settings.profileFiles.some(
+      (ref) => ref.path === relPath || normalizedOrNull(ref.path) === relPath,
+    );
+    if (duplicate) {
+      new Notice(`这个文件已经登记过：${relPath}`);
+      return;
+    }
+
+    this.host.settings.profileFiles.push({ path: relPath });
     await this.host.saveSettings();
     this.render();
+    new Notice(`已登记：${relPath}`);
   }
 
-  private renderCard(parent: HTMLElement, profile: ParseProfile, index: number): void {
-    const card = parent.createDiv({ cls: "annex-profile-card" });
-    card.setAttr("data-profile-id", profile.id);
+  /**
+   * 从预设创建一份独立 JSON 文件。
+   *
+   * 写盘前读取全部已登记文件：只要有一份坏掉/重复 id 就整体失败（错误可见），
+   * 不跳过坏条目去猜 id 冲突；全部有效时再为待创建对象生成唯一 id。
+   */
+  private async createFromPreset(preset: ParseProfile): Promise<void> {
+    try {
+      const loaded = loadProfileFiles(this.host.vaultRoot(), this.host.settings.profileFiles);
+      const copy = cloneProfile(preset);
+      const id = uniqueId(loaded.map((entry) => entry.profile.id), preset.id);
+      copy.id = id;
+      if (id !== preset.id) copy.name = `${preset.name}（副本）`;
 
-    // ── 头一行：<Name> <id> <状态> ──────────────────────────────────────────
-    const head = card.createDiv({ cls: "annex-profile-card-head" });
-    const nameEl = head.createSpan({ cls: "annex-profile-name", text: profile.name || "（未命名）" });
-    head.createSpan({ cls: "annex-profile-sep", text: "·" });
-    const idEl = head.createSpan({ cls: "annex-profile-id", text: `id: ${profile.id}` });
-    const statusEl = head.createSpan({ cls: "annex-profile-status" });
-
-    // ── JSON 文本框 ─────────────────────────────────────────────────────────
-    const jsonArea = card.createEl("textarea", { cls: "annex-profile-json" });
-    // Obsidian 的 textarea 默认只有 2 行高，JSON 配置根本看不全
-    jsonArea.rows = 20;
-    jsonArea.spellcheck = false;
-    jsonArea.value = JSON.stringify(profile, null, 2);
-
-    const messages = card.createDiv({ cls: "annex-profile-messages" });
-
-    // ── 解析预览 ────────────────────────────────────────────────────────────
-    const preview = card.createDiv({ cls: "annex-preview" });
-    preview.createDiv({ cls: "annex-preview-title", text: "解析预览" });
-    const filenameInput = preview.createEl("input", { cls: "annex-preview-filename", type: "text" });
-    filenameInput.setAttr("placeholder", "示例文件名（输入即解析，例：12345X-5705-0015.tif）");
-    const resultEl = preview.createDiv({ cls: "annex-preview-result" });
-
-    // ── 底部动作：DOM 顺序 删除→打开→复制→保存，视觉上从右往左读就是 ────────
-    //    保存、复制、打开、删除；整排贴右下角（styles.css 里 justify-content: flex-end）。
-    const actions = card.createDiv({ cls: "annex-profile-actions" });
-    const deleteButton = actions.createEl("button", { cls: "annex-profile-del mod-warning", text: "删除" });
-    const openButton = actions.createEl("button", { cls: "annex-profile-open", text: "打开" });
-    const duplicateButton = actions.createEl("button", { cls: "annex-profile-dup", text: "复制" });
-    const saveButton = actions.createEl("button", { cls: "annex-profile-save mod-cta", text: "保存" });
-
-    let draft: ParseProfile = cloneProfile(profile);
-    /** 盘上那份（语义比较的基线）。 */
-    let onDisk: ParseProfile = cloneProfile(profile);
-
-    const setState = (state: SaveState): void => {
-      statusEl.setText(STATE_LABEL[state]);
-      statusEl.setAttr("data-level", STATE_LEVEL[state]);
-    };
-
-    const listIssues = (issues: ProfileIssue[]): void => {
-      for (const issue of issues) {
-        messages.createDiv({
-          cls: `annex-profile-msg annex-profile-msg-${issue.level}`,
-          text: `[${issue.level}] ${issue.message}`,
-        });
-      }
-    };
-
-    /** 校验 draft；引擎抛错时当作「没有 error」（绝不因为校验器坏了就卡住写盘）。 */
-    const issuesOf = (candidate: ParseProfile): ProfileIssue[] => {
-      try {
-        return validateProfile(candidate);
-      } catch (error) {
-        messages.createDiv({ cls: "annex-profile-msg annex-profile-msg-warn", text: `校验暂不可用：${errText(error)}` });
-        return [];
-      }
-    };
-
-    const parseDraft = (): ParseProfile => {
-      const raw = JSON.parse(jsonArea.value) as unknown;
-      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("JSON 顶层必须是一个对象");
-      return raw as ParseProfile;
-    };
-
-    const renderPreview = (): void => {
-      resultEl.empty();
-      const filename = filenameInput.value.trim();
-      if (filename === "") {
-        resultEl.setAttr("data-state", "idle");
-        resultEl.createDiv({
-          cls: "annex-preview-hint",
-          text: "在上面填一个真实文件名再看结果（不带扩展名也行：`12345X-5_1.4-0001` 里的小数点不会被当成扩展名）；正则不命中时这里会写明「正则不命中」。预览只显示正则拆出来的字段（tags / session / date / width 等是生成时另算的）。",
-        });
-        return;
-      }
-      try {
-        const [primary, ...fallbacks] = previewStems(filename);
-        let parsed = parseWithProfile(draft, buildContext(filename, primary));
-        for (const stem of fallbacks) {
-          if (parsed.matched) break;
-          const alt = parseWithProfile(draft, buildContext(filename, stem));
-          if (alt.matched) parsed = alt;
-        }
-        resultEl.setAttr("data-state", parsed.matched ? "ok" : "nomatch");
-        renderParsed(resultEl, draft, parsed, filename);
-      } catch (error) {
-        resultEl.setAttr("data-state", "error");
-        resultEl.createDiv({ cls: "annex-preview-error", text: `解析暂不可用：${errText(error)}` });
-      }
-    };
-
-    /** 文本框一变就跑：JSON 语法 → 实时校验 → 预览 → 状态胶囊。不写盘。 */
-    const refresh = (): void => {
-      messages.empty();
-      let parsed: ParseProfile;
-      try {
-        parsed = parseDraft();
-      } catch (error) {
-        messages.createDiv({ cls: "annex-profile-msg annex-profile-msg-error", text: `JSON 解析失败：${errText(error)}` });
-        setState("badjson");
-        resultEl.empty();
-        resultEl.setAttr("data-state", "badjson");
-        resultEl.createDiv({ cls: "annex-preview-error", text: "JSON 有语法错误，先修好才能预览解析结果。" });
-        return;
-      }
-      draft = parsed;
-      card.setAttr("data-profile-id", draft.id ?? "");
-      nameEl.setText(draft.name || "（未命名）");
-      idEl.setText(`id: ${draft.id ?? ""}`);
-      listIssues(issuesOf(draft));
-      setState(canonical(draft) === canonical(onDisk) ? "saved" : "unsaved");
-      renderPreview();
-    };
-
-    /** 把 draft 写进 data.json（有 error 级问题就拒绝）。返回是否写成功。 */
-    const writeThrough = async (): Promise<boolean> => {
-      const parsed = parseDraft();
-      const issues = issuesOf(parsed);
-      const errors = issues.filter((issue) => issue.level === "error");
-      if (errors.length > 0) {
-        setState("unsaved");
-        new Notice(`有 ${errors.length} 条 error，未写盘：${errors[0].message}`, 8000);
-        return false;
-      }
-      this.host.settings.profiles[index] = parsed;
+      const relPath = await this.host.createVaultFile(
+        `${TEMPLATE_FOLDER}/${preset.id}.json`,
+        `${JSON.stringify(copy, null, 2)}\n`,
+      );
+      this.host.settings.profileFiles.push({ path: relPath });
       await this.host.saveSettings();
-      onDisk = cloneProfile(parsed);
-      setState("saved");
-      return true;
-    };
-
-    const save = async (): Promise<void> => {
-      try {
-        if (await writeThrough()) this.sessions.sync(draft.id, jsonArea.value);
-      } catch (error) {
-        messages.empty();
-        messages.createDiv({ cls: "annex-profile-msg annex-profile-msg-error", text: `JSON 解析失败，未写盘：${errText(error)}` });
-        setState("badjson");
-      }
-    };
-
-    /** 外部应用改了缓冲文件 → 回灌文本框、重跑校验，合法就顺手写盘。 */
-    const applyExternal = (text: string): void => {
-      jsonArea.value = text;
-      refresh();
-      let parsed: ParseProfile;
-      try {
-        parsed = parseDraft();
-      } catch {
-        return; // 语法错误：refresh() 已经把状态胶囊点成 Syntax Error
-      }
-      try {
-        if (issuesOf(parsed).some((issue) => issue.level === "error")) return; // 不写盘，等用户在面板里修
-      } catch {
-        return;
-      }
-      this.host.settings.profiles[index] = parsed;
-      onDisk = cloneProfile(parsed);
-      setState("saved");
-      messages.createDiv({ cls: "annex-profile-msg annex-profile-msg-ok", text: "已从外部应用同步并写盘。" });
-      void this.host.saveSettings();
-    };
-
-    const openExternally = async (): Promise<void> => {
-      const id = (draft.id ?? "").trim() === "" ? `profile-${index + 1}` : draft.id;
-      try {
-        const file = await this.sessions.open(id, jsonArea.value, applyExternal);
-        new Notice(`已用系统默认应用打开：\n${file}\n在那里改完保存，这里会自动同步。`, 8000);
-      } catch (error) {
-        new Notice(`打不开系统默认应用，可以手动打开这个文件：\n${bufferPath(id)}\n（${errText(error)}）`, 12000);
-      }
-    };
-
-    jsonArea.addEventListener("input", refresh); // 实时校验/预览，不落盘
-    filenameInput.addEventListener("input", renderPreview); // 输入即解析，没有解析按钮
-    saveButton.addEventListener("click", () => void save());
-    duplicateButton.addEventListener("click", () => void this.duplicate(index));
-    deleteButton.addEventListener("click", () => void this.remove(index));
-    openButton.addEventListener("click", () => void openExternally());
-
-    refresh();
+      this.render();
+      new Notice(`已从预设创建：${relPath}`);
+    } catch (error) {
+      new Notice(`从预设创建失败：${errText(error)}`, 12000);
+    }
   }
-}
 
-function renderParsed(
-  resultEl: HTMLElement,
-  profile: ParseProfile,
-  parsed: ParsedFields,
-  filename: string,
-): void {
-  if (!parsed.matched) {
-    resultEl.createDiv({
-      cls: "annex-preview-nomatch",
-      text: `正则不命中：「${filename}」不符合这条 profile 的 regex（onMismatch=${profile.onMismatch ?? "empty"}）。下面每行是把 fields 按 whenMissing 填出来的值，不是从文件名解析出来的。`,
-    });
+  /** 用系统默认应用打开登记的文件；打开前重新做路径/存在性检查，失败绝不自动创建。 */
+  private async open(ref: ProfileFileRef): Promise<void> {
+    try {
+      const file = resolveVaultFile(this.host.vaultRoot(), ref.path, "profile");
+      await this.host.openWithDefaultApp(file.absPath);
+    } catch (error) {
+      new Notice(`打不开「${ref.path}」：${errText(error)}`, 12000);
+    }
   }
-  const rows = resultEl.createDiv({ cls: "annex-preview-rows" });
-  const fieldSpecs = Array.isArray(profile.fields) ? profile.fields : [];
-  if (fieldSpecs.length === 0) {
-    rows.createDiv({ cls: "annex-preview-empty", text: "这条 profile 没有声明 fields（具名组 → 键）。" });
-  }
-  for (const field of fieldSpecs) {
-    const key = field.key ?? field.group;
-    const raw = parsed.values[key] ?? parsed.values[field.group];
-    const value = raw === undefined ? "" : raw;
-    const missing = parsed.missingGroups.includes(field.group);
-    const row = rows.createDiv({ cls: "annex-preview-row" });
-    row.setAttr("data-key", key);
-    row.setAttr("data-value", value);
-    if (missing) row.addClass("annex-preview-missing");
-    const isEmpty = value === "" || value === '""' || value === "''";
-    if (isEmpty) row.addClass("annex-preview-empty-value");
-    row.createSpan({ cls: "annex-preview-key", text: `${key} = ` });
-    row.createSpan({ cls: "annex-preview-value", text: isEmpty ? "（空）" : value });
-  }
-  if (parsed.missingGroups.length > 0) {
-    resultEl.createDiv({
-      cls: "annex-preview-missing-groups",
-      text: `未参与匹配的具名组：${parsed.missingGroups.join(", ")}`,
-    });
-  }
-  if (parsed.extraGroups.length > 0) {
-    resultEl.createDiv({
-      cls: "annex-preview-extra-groups",
-      text: `正则里未映射到键的具名组（正常，用于配平分支）：${parsed.extraGroups.join(", ")}`,
-    });
+
+  /** 删除只取消登记，文件保留。 */
+  private async unregister(index: number): Promise<void> {
+    const target = this.host.settings.profileFiles[index];
+    if (target === undefined) return;
+    this.host.settings.profileFiles.splice(index, 1);
+    await this.host.saveSettings();
+    this.render();
+    new Notice(`已取消登记（文件未删除）：${target.path}`);
   }
 }

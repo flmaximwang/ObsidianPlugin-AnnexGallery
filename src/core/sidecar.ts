@@ -4,7 +4,6 @@ import { Progress } from "./types";
 import { git, magickBinary, run, statusPorcelain } from "./git";
 import { collectImages, stemOf } from "./stems";
 import {
-  DEFAULT_PROFILES,
   parseWithProfile,
   pickProfile,
   type FieldType,
@@ -12,7 +11,6 @@ import {
   type ParseProfile,
 } from "./profiles";
 import {
-  BUILTIN_METADATA_TEMPLATES,
   checkMetadataTemplate,
   fillPlaceholders,
   type ResolvedTemplate,
@@ -24,13 +22,6 @@ import {
  * 否则一条 profile 就能让它生成的 sidecar 悄悄从所有画廊里消失。
  */
 export const GALLERY_TAG = "annex-gallery-metadata";
-
-/** 内置默认 metadata 模板（与改造前硬编码的正文逐字节相同）。 */
-export const DEFAULT_METADATA_TEMPLATE: ResolvedTemplate = {
-  id: BUILTIN_METADATA_TEMPLATES[0].id,
-  label: `内置模板 ${BUILTIN_METADATA_TEMPLATES[0].id}`,
-  text: BUILTIN_METADATA_TEMPLATES[0].text,
-};
 
 /**
  * Legacy default frontmatter key order (TECNAI). Kept as an exported constant
@@ -325,7 +316,8 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
 
   // 正文 = metadata 模板填完占位符：{{frontmatter}} / {{stem}} 由这里给，其余 {{<键>}} 与
   // frontmatter 同一套取值（含不在 keyOrder 里的派生 / 自动值，例如 {{thumbnail}}、{{tif}}）。
-  const template = opts.template ?? DEFAULT_METADATA_TEMPLATE;
+  const template = opts.template;
+  if (template === undefined) throw new Error("没有 metadata 模板：请显式传入 template");
   const frontmatter = ["---", fmLines.join("\n"), "---"].join("\n");
   const filled = fillPlaceholders(template.text, (name) => {
     if (name === "frontmatter") return frontmatter;
@@ -382,11 +374,15 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
   const overwrite = opts.overwrite === true;
   const progress: Progress = opts.progress ?? ((): void => {});
 
-  const profiles = opts.profiles !== undefined && opts.profiles.length > 0 ? opts.profiles : DEFAULT_PROFILES;
+  // 没有候选 profile ⇒ 直接报错，不回退内置 DEFAULT_PROFILES：
+  // 模板必须由调用方显式给（插件给外部文件，CLI 给显式预设）。
+  const profiles = opts.profiles ?? [];
+  if (profiles.length === 0) throw new Error("没有可用的 profile：请显式传入 profiles");
   const ask: Record<string, string> = { ...(opts.ask ?? {}) };
   if (opts.sample !== undefined && opts.sample !== "" && !hasOwn(ask, "sample")) ask.sample = opts.sample;
 
-  const template = opts.template ?? DEFAULT_METADATA_TEMPLATE;
+  if (opts.template === undefined) throw new Error("没有 metadata 模板：请显式传入 template");
+  const template = opts.template;
   checkMetadataTemplate(template);
 
   const images = collectImages(dir);

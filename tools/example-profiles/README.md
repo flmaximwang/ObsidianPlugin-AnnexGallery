@@ -8,7 +8,10 @@
 | `plate-profile.json` | profile 本体（`id=platewell`）：正则 `^plate(?<plate>\d+)(?:_well(?<well>[A-Z]\d+))?_(?<magnification>\d+)x_(?<index>\d+)$`。 |
 | `two-profiles.json` | 两条带 `match` 的 profile（内置 TECNAI 的电镜版 + 多孔板版），用来演示 `pickProfile` 自动选择。 |
 | `verify-frontmatter.cjs` | 逐份断言产出的 frontmatter：键序列 == `keyOrder`（去掉取不到值的 `notes`）、number 裸值、text 双引号、`well` 缺段写空串。 |
-| `verify-plugin-load.cjs` | 用 `npm run smoke` 的桩环境加载 `main.js`，把 `platewell` 放进 data.json 的 `profiles` 数组，证明插件读得回且内置 TECNAI 没丢。 |
+| `verify-plugin-load.cjs` | 用 `npm run smoke` 的桩环境加载 `main.js`，把两条示例 profile 拆成**一份一个的外部 `.json`** 登记进设置，证明插件读得回、外部改动即时生效、重复 id / 坏 JSON / 文件丢失都会让操作停下、旧内联 profiles 不迁移不参与运行时。 |
+
+> **CLI 与插件的 profile 文件格式不同**：`--profiles-file` 吃**数组**（或 `{ "profiles": [...] }`）；
+> 插件设置里登记的是**一份一个对象**的 `.json`（顶层就是一条 `ParseProfile`），数组格式在插件里会被明确拒绝。
 
 一键复跑（在仓库根目录，需先 `npm run build`）：
 

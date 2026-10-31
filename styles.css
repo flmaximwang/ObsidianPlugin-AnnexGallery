@@ -2,9 +2,9 @@
  * Obsidian 会自动加载插件目录下的 styles.css，所以这个文件必须与 main.js / manifest.json
  * 一起被复制进 <vault>/.obsidian/plugins/annex-gallery/。
  *
- * 布局口径见 docs/setting-panel.md：标题 h1「Annex Gallery Settings」（下方无说明，标题本身
- * 不带 padding、与下面的设置项左对齐）→ 工具条（新模版 / 导入模版 / 添加预设）→ profile 卡片
- * → 分割线 → 缩略图边长。
+ * 布局口径（spec-774d7ee / ticket 2133603）：标题 h1「Annex Gallery Settings」（下方无说明，
+ * 标题本身不带 padding、与下面的设置项左对齐）→ remote 设置 → 分割线 → 文件名匹配模板
+ * （外部 .json 路径登记）→ metadata / 画廊模板（外部 .md / .base）→ 分割线 → 缩略图边长。
  */
 
 /* ── 标题 ──────────────────────────────────────────────────────────────────── */
@@ -24,13 +24,6 @@
   padding: 0;
   margin: 0 0 var(--size-4-4) 0;
   line-height: 1.2;
-}
-
-/* 工具条里的 h3 与卡片里的标题一律去 padding，与设置项左对齐。 */
-.annex-profiles h3,
-.annex-preview-title {
-  margin: 0;
-  padding: 0;
 }
 
 /* ── remote 设置（最上方的一项，可装多条）────────────────────────────────── */
@@ -140,11 +133,25 @@
   gap: 0.4em;
 }
 
+.annex-templates-empty {
+  color: var(--text-muted);
+}
+
 .annex-template-row,
 .annex-template-add-row {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 0.5em;
+}
+
+.annex-template-row {
+  padding: 0.3em 0.4em;
+  border-radius: var(--radius-s);
+}
+
+.annex-template-row[data-state="error"] {
+  background-color: var(--background-modifier-error);
 }
 
 .annex-template-name {
@@ -163,56 +170,80 @@
   white-space: nowrap;
 }
 
+.annex-template-error {
+  flex-basis: 100%;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
 .annex-template-add-row {
   margin-top: 0.8em;
 }
 
 .annex-template-path-input {
-  flex: 1 1 auto;
+  flex: 1 1 12em;
   min-width: 12em;
 }
 
+.annex-template-add-row select.annex-template-preset {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 18em;
+}
+
 .annex-template-row button,
-.annex-template-add-row button {
+.annex-template-add-row button,
+.annex-template-add-row select {
   flex: 0 0 auto;
   cursor: pointer;
 }
 
-.annex-template-view {
-  width: 100%;
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-}
-
-/* ── 多配置（profile）区 ─────────────────────────────────────────────────── */
+/* ── 文件名匹配模板区（外部 JSON 文件） ─────────────────────────────────── */
 
 .annex-profiles-section {
   margin: 0 0 1em 0;
 }
 
+/* 旧内联 profiles：可见、非阻塞的失效提示（不迁移、不导出、不 fallback）。 */
+.annex-legacy-profiles-warning {
+  margin: 0 0 1em 0;
+  padding: 0.5em 0.75em;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 4px solid var(--text-warning);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-legacy-profiles-warning-title {
+  margin-bottom: 0.2em;
+  font-weight: var(--font-semibold);
+  color: var(--text-warning);
+}
+
+.annex-legacy-profiles-warning-body {
+  color: var(--text-muted);
+}
+
 .annex-profiles-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  /* 三个控件（新模版 / 导入模版 / 添加预设）要在同一行，但**不是**整排靠右：
-     两个按钮贴左边缘，下拉选框贴右边缘（用户 2026-10-17 修正：整排靠右很丑）。
-     真机里「添加预设」下拉会按最长选项撑开（TECNAI 那条约 464px）把排挤到第二行，
-     所以：不换行 + 允许下拉收缩（min-width: 0）+ 宽度上限 + 下拉 margin-left: auto 顶到右边。 */
-  flex-wrap: nowrap;
-  justify-content: flex-start;
   gap: 0.5em;
   margin-bottom: 1em;
 }
 
-/* 选择器写到 (0,2,1)：要压掉 app.css 里 `.dropdown { max-width: 100% }`（同权重时靠插件
-   styles.css 在后才生效，太脆；写明更具体更稳），也要压掉 `.theme-dark .dropdown`。 */
+.annex-profile-path-input {
+  flex: 1 1 16em;
+  min-width: 12em;
+}
+
+/* 选择器写得比 app.css 的 `.dropdown { max-width: 100% }` 更具体，避免预设名撑破工具条。 */
 .annex-profiles-toolbar select.annex-profile-preset {
-  min-width: 0;
   flex: 0 1 auto;
-  /* 原生 select 会按**最长选项**定宽（TECNAI 那条 464px），但那只是打开后的列表；
-     收起时只会显示占位项「添加预设…」（选完立刻回到占位项），所以宽度收窄即可。 */
-  max-width: 14em;
-  /* 两个按钮靠左、这个下拉靠右：左侧 auto 外边距吃掉所有富余空间，把下拉顶到右边缘。 */
-  margin-left: auto;
+  min-width: 0;
+  max-width: 18em;
 }
 
 .annex-profiles-toolbar button,
@@ -220,50 +251,35 @@
   cursor: pointer;
 }
 
-.annex-hidden {
-  display: none;
-}
-
 .annex-profile-list {
   display: flex;
   flex-direction: column;
-  gap: 1em;
+  gap: 0.5em;
 }
 
 .annex-profiles-empty {
   color: var(--text-muted);
 }
 
-/* 卡片与下面普通设置项之间的分割线。 */
-.annex-settings-divider {
-  margin: 1.5em 0 1em 0;
-  border: none;
-  border-top: 1px solid var(--background-modifier-border);
+.annex-profiles-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
 }
 
-/* remote 区与模版区之间的那条分割线（用户 2026-10-17 追加）：
-   写在 .annex-settings-divider 之后，同权重时由它接管 margin。
-   上面那半留白会被 .annex-remotes-section 的 1em 底边距折叠（取大者），所以写 1.25em
-   才能让实测上下都是 18.75px（对称）。 */
-.annex-remotes-divider {
-  margin: 1.25em 0;
-}
-
-/* ── 一张 profile 卡片 ──────────────────────────────────────────────────── */
-
-.annex-profile-card {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  background-color: var(--background-secondary);
-  padding: 0.8em 1em 1em 1em;
-}
-
-.annex-profile-card-head {
+/* 一行 = 一条已登记的外部 JSON。坏文件仍保留这一行（路径 + 打开 + 删除）。 */
+.annex-profile-row {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.4em;
-  margin-bottom: 0.6em;
+  gap: 0.5em;
+  padding: 0.45em 0.6em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+}
+
+.annex-profile-row[data-state="error"] {
+  border-color: var(--text-error);
 }
 
 .annex-profile-name {
@@ -276,141 +292,42 @@
   color: var(--text-muted);
 }
 
-.annex-profile-sep {
-  color: var(--text-faint);
-}
-
-/* 状态胶囊：Saved / Unsaved changes / Syntax Error */
-.annex-profile-status {
-  margin-left: auto;
-  font-size: var(--font-ui-smaller);
-  padding: 0.1em 0.5em;
-  border-radius: var(--radius-s);
-  background-color: var(--background-modifier-border);
-  color: var(--text-muted);
-}
-
-.annex-profile-status[data-level="ok"] {
-  color: var(--text-success);
-}
-
-.annex-profile-status[data-level="warn"] {
-  color: var(--text-warning);
-}
-
-.annex-profile-status[data-level="error"] {
-  color: var(--text-error);
-}
-
-/* JSON 编辑框：默认 rows=2 太矮，这里给足高度并等宽字体 */
-.annex-profile-json {
-  width: 100%;
-  min-height: 20em;
+.annex-profile-path {
+  flex: 1 1 12em;
+  min-width: 0;
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
-  line-height: 1.45;
-  white-space: pre;
-  overflow-wrap: normal;
-  overflow-x: auto;
-  resize: vertical;
-}
-
-.annex-profile-messages {
-  margin: 0.4em 0 0 0;
-  font-size: var(--font-ui-smaller);
-}
-
-.annex-profile-msg-error {
-  color: var(--text-error);
-}
-
-.annex-profile-msg-warn {
-  color: var(--text-warning);
-}
-
-.annex-profile-msg-ok {
-  color: var(--text-success);
-}
-
-/* ── 解析预览 ───────────────────────────────────────────────────────────── */
-
-.annex-preview {
-  margin-top: 0.8em;
-  border-top: 1px dashed var(--background-modifier-border);
-  padding-top: 0.6em;
-}
-
-.annex-preview-title {
-  font-weight: var(--font-semibold);
-  font-size: var(--font-ui-smaller);
-  margin-bottom: 0.4em;
-}
-
-/* 第一行就是示例文件名，占满整宽（没有「相对 vault 路径」，也没有解析按钮）。 */
-.annex-preview-filename {
-  width: 100%;
-}
-
-/* 解析结果：带边框的一块，每行一条解析（`key = value`）。 */
-.annex-preview-result {
-  margin-top: 0.5em;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  padding: 0.5em 0.6em;
-  background-color: var(--background-primary);
-  font-size: var(--font-ui-smaller);
-  min-height: 2.4em;
-}
-
-.annex-preview-hint {
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.annex-preview-nomatch {
-  color: var(--text-warning);
-  margin-bottom: 0.3em;
-}
-
-.annex-preview-error {
-  color: var(--text-error);
-}
-
-.annex-preview-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1em;
-}
-
-.annex-preview-row {
-  font-family: var(--font-monospace);
-}
-
-.annex-preview-missing .annex-preview-key {
-  color: var(--text-faint);
-}
-
-.annex-preview-empty-value .annex-preview-value {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
-.annex-preview-missing-groups,
-.annex-preview-extra-groups {
-  margin-top: 0.35em;
-  color: var(--text-muted);
-}
-
-/* ── 卡片底部动作：右下角，从右往左读 = 保存、复制、打开、删除 ─────────────── */
-
-.annex-profile-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5em;
-  margin-top: 0.8em;
-}
-
-.annex-profile-actions button {
+.annex-profile-row button {
+  flex: 0 0 auto;
   cursor: pointer;
+}
+
+.annex-profile-error {
+  flex-basis: 100%;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+/* 卡片/模板区与下面普通设置项之间的分割线。 */
+.annex-settings-divider {
+  margin: 1.5em 0 1em 0;
+  border: none;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* remote 区与模版区之间的那条分割线（用户 2026-10-17 追加）：
+   写在 .annex-settings-divider 之后，同权重时由它接管 margin。
+   上面那半留白会被 .annex-remotes-section 的 1em 底边距折叠（取大者），所以写 1.25em
+   才能让实测上下都是 18.75px（对称）。 */
+.annex-remotes-divider {
+  margin: 1.25em 0;
 }
 
 /* ── 状态栏：未提交 / 未跟踪 / 未入库 largefiles（spec: docs/status-bar.md）───

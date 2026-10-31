@@ -26,8 +26,8 @@ import { GITATTRIBUTES_TEMPLATE, GITIGNORE_TEMPLATE } from "../src/core/rules";
 import { buildSidecarText, generateSidecars, planSidecarTargets } from "../src/core/sidecar";
 import { addGalleryTag, buildGalleryBase, galleryFilePath, orderProperties, planGallery } from "../src/core/gallery";
 import {
+  presetTemplates,
   readTemplateFile,
-  resolveTemplate,
   type ResolvedTemplate,
   type TemplateKind,
 } from "../src/core/templates";
@@ -113,25 +113,28 @@ function profileById(profiles: ParseProfile[], id: string): ParseProfile {
 }
 
 /**
- * `--template <id|file>`：值是一个存在的文件路径 ⇒ 直接读它；否则当模板 id 解析。
+ * `--template <id|file>`：值是一个存在的文件路径 ⇒ 直接读它；否则按 **CLI 内置预设 id** 取
+ * `src/defaults/` 里那份原文（`default`；metadata 另有 `embed`）。
  *
- * CLI 没有设置页，所以自定义模板只能走文件路径；id 只认内置模板（`default` / metadata 的 `embed`）。
- * 没给 `--template` ⇒ `fallbackId`（metadata / base 都是内置 `default`）。
+ * CLI 没有设置页，也**不读** `data.json` 里登记的外部模板，所以它不能走插件的
+ * `resolveTemplate(..., [], ...)` —— 运行时的外部登记表在这里恒为空，只会得到「找不到模板」。
+ * 这里的 id 分支是**显式的预设素材选择**：CLI 行为与改造前一致，但不会让插件运行时出现内置
+ * fallback。没给 `--template` ⇒ `fallbackId`（metadata / base 都是 `default`）。
  */
-function loadTemplate(
-  flags: Args["flags"],
-  kind: TemplateKind,
-  vaultRoot: string,
-  fallbackId = "default",
-): ResolvedTemplate {
+function loadTemplate(flags: Args["flags"], kind: TemplateKind, fallbackId = "default"): ResolvedTemplate {
   const value = opt(flags, "template") ?? fallbackId;
   const abs = path.resolve(value);
   try {
     if (fs.statSync(abs).isFile()) return readTemplateFile(abs, abs);
   } catch {
-    // 不是文件 ⇒ 下面按模板 id 解析（找不到会得到清楚的报错）。
+    // 不是文件 ⇒ 下面按 CLI 预设 id 解析（找不到会得到清楚的报错）。
   }
-  return resolveTemplate(kind, value, [], vaultRoot);
+  const preset = presetTemplates(kind).find((entry) => entry.id === value);
+  if (preset !== undefined) return { id: preset.id, label: `CLI 内置预设 ${preset.id}`, text: preset.text };
+  const available = presetTemplates(kind).map((entry) => entry.id).join(" / ");
+  throw new Error(
+    `--template「${value}」既不是文件路径，也不是 CLI 内置预设（可用：${available}）。CLI 不读插件设置里的外部模板；自定义模板请直接给文件路径。`,
+  );
 }
 
 /**
@@ -377,8 +380,9 @@ async function main(): Promise<void> {
       const sample = opt(flags, "sample");
       const ask: Record<string, string> = {};
       if (sample !== undefined && sample !== "") ask.sample = sample;
-      // 不给 --template 就不传（generate/build 内部用内置 default 模板，行为与改造前一致）。
-      const template = opt(flags, "template") === undefined ? undefined : loadTemplate(flags, "metadata", resolvedVault);
+      // 不给 --template 也要**显式**选出 CLI 内置预设 default 并传下去：
+      // 插件运行时没有内置 fallback，CLI 的既有默认行为由这里（而不是 core）承担。
+      const template = loadTemplate(flags, "metadata");
 
       if (flag(flags, "verify")) {
         runSidecarVerify(dir, {
@@ -387,7 +391,7 @@ async function main(): Promise<void> {
           ...(profile === undefined ? {} : { profile }),
           ask,
           ...(opt(flags, "tag") === undefined ? {} : { tag: opt(flags, "tag") }),
-          ...(template === undefined ? {} : { template }),
+          template,
           json,
         });
         return;
@@ -414,7 +418,7 @@ async function main(): Promise<void> {
         ...(profile === undefined ? {} : { profile }),
         profiles,
         tag: opt(flags, "tag"),
-        ...(template === undefined ? {} : { template }),
+        template,
         apply: flag(flags, "apply"),
         force: flag(flags, "force"),
         overwrite: flag(flags, "overwrite"),
@@ -459,7 +463,7 @@ async function main(): Promise<void> {
       if (fixTags && !apply) throw new Error("--fix-tags 只能和 --apply 一起用（dry-run 不写盘）");
 
       const profiles = loadProfiles(flags);
-      const template = loadTemplate(flags, "base", resolvedVault);
+      const template = loadTemplate(flags, "base");
       const plan = planGallery(dir);
       const properties = orderProperties(plan.keys, profiles.map((profile) => profile.keyOrder));
       const built = buildGalleryBase(template, { folder, cardSize: edge, properties });

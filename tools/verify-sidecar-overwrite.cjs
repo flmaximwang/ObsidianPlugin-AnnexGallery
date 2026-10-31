@@ -143,6 +143,30 @@ async function main() {
     stub.registry.savedData = null;
     const plugin = new PluginClass(stub.makeApp(vault), { id: "annex-gallery", version: "0.1.0" });
     await plugin.onload();
+    // 外部文件模型（spec-774d7ee）：设置里只登记路径，profile / metadata 模板都来自 vault 里的文件。
+    fs.mkdirSync(path.join(vault, "Profiles"), { recursive: true });
+    fs.mkdirSync(path.join(vault, "Templates"), { recursive: true });
+    fs.writeFileSync(
+      path.join(vault, "Profiles", "verify.json"),
+      JSON.stringify(
+        {
+          id: "verify",
+          name: "验证用（a/b）",
+          source: "stem",
+          regex: "^(?<stem>[a-z])$",
+          fields: [{ group: "stem", type: "text" }],
+          ask: ["sample"],
+          keyOrder: ["tags", "sample", "stem"],
+          onMismatch: "empty",
+        },
+        null,
+        2,
+      ),
+    );
+    fs.writeFileSync(path.join(vault, "Templates", "meta.md"), "{{frontmatter}}\n\n样本：{{sample}}\n缩略图：{{thumbnail}}\n");
+    plugin.settings.profileFiles = [{ path: "Profiles/verify.json" }];
+    plugin.settings.metadataTemplates = [{ id: "meta", name: "meta", path: "Templates/meta.md" }];
+    await plugin.saveSettings();
     const folderMenu = new stub.Menu();
     stub.registry.menus[0](folderMenu, new stub.TFolder("/"), "file-explorer");
     const items = folderMenu.items[0].submenu.items;

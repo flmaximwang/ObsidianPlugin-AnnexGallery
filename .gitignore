@@ -5,3 +5,4 @@ tools/annex-gallery.mjs
 data.json
 *.log
 .worktrees/
+__pycache__/
