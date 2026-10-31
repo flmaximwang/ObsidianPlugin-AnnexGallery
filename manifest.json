@@ -1,7 +1,7 @@
 {
   "id": "annex-gallery",
   "name": "Annex Gallery",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "minAppVersion": "1.14.4",
   "description": "Turn git-annex managed image folders into a gallery: initialize a gallery, generate thumbnails and sidecar Markdown metadata, run git-annex largefile operations, and track uncommitted or annex-missing files in the status bar.",
   "author": "flmaximwang",
