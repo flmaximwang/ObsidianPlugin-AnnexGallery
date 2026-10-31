@@ -308,6 +308,29 @@ function makeDropdownComponent(selectEl) {
   return component;
 }
 
+function makeToggleComponent(inputEl) {
+  const component = {
+    inputEl,
+    setValue(value) {
+      inputEl.checked = Boolean(value);
+      inputEl.value = String(Boolean(value));
+      return component;
+    },
+    getValue() {
+      return Boolean(inputEl.checked);
+    },
+    onChange(callback) {
+      component._onChange = callback;
+      inputEl.addEventListener("change", () => callback(Boolean(inputEl.checked)));
+      return component;
+    },
+    setTooltip() {
+      return component;
+    },
+  };
+  return component;
+}
+
 function makeButtonComponent(buttonEl) {
   const component = {
     buttonEl,
@@ -385,6 +408,12 @@ class Setting {
   }
   addDropdown(build) {
     const component = makeDropdownComponent(this.settingEl.createEl("select", { cls: "setting-dropdown" }));
+    this.components.push(component);
+    build(component);
+    return this;
+  }
+  addToggle(build) {
+    const component = makeToggleComponent(this.settingEl.createEl("input", { cls: "setting-toggle", type: "checkbox" }));
     this.components.push(component);
     build(component);
     return this;

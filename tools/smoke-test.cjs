@@ -240,7 +240,7 @@ writeText("Templates/broken.base", "views: [\n");
 
   const names = settingNames(tab.containerEl);
   console.log(`普通设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
-  assert(names.join(",") === "缩略图边长", "分割线以下只剩「缩略图边长」一个设置项");
+  assert(names.join(",") === "缩略图边长,调试日志", "分割线以下是「缩略图边长」与「调试日志」两个设置项（.gitattributes / .gitignore / 默认样品名 已删）");
   assert(byClass(tab.containerEl, "annex-settings-divider").length === 2, "两条分割线（remote/模板 之间 + 模板/普通设置项 之间）");
   assert(byClass(tab.containerEl, "annex-remotes-divider").length === 1, "上面那条标成 annex-remotes-divider");
 

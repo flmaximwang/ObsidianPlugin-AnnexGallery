@@ -67,13 +67,14 @@
 │ └───────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ────────────────── HR.annex-settings-divider（模板 ↔ 普通设置项）──────────────────
-缩略图边长  [<n>]                     ← app 自己的 .setting-item，唯一剩下的普通设置项
+缩略图边长  [<n>]                     ← app 自己的 .setting-item
+调试日志    [开/关]                    ← 默认关；打开后 git / git-annex 的进度才进控制台
 ```
 
 ### 必须成立的不变量
 
 - **顶层顺序**（离屏与真机必须逐字一致）：
-  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item`。
+  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item → DIV.setting-item`。
 - **标题**是内容区第一个子元素，是真正的 `<h1>`（`containerEl.createEl("h1", …)`），下方无说明文字；
   `display: block`、`padding: 0`、只保留一行底部外边距。标题左边缘 = 卡片左边缘 = 内容区左边缘。
 - **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
@@ -116,7 +117,7 @@
 - **模板区没有「保存」按钮**：改动即写 `data.json`，口径与 remote 区一致。
 - **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与文件名匹配模板区之间，两侧留白相等；
   下面那条在模板区与普通设置项之间。
-- **普通设置项只剩一条**「缩略图边长」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
+- **普通设置项只剩两条**「缩略图边长」与「调试日志」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
   这种东西 —— 那三行在设置页不出现。
 
 ## 4. 结构与落点
@@ -244,11 +245,12 @@
 
 ## 6. 字段与默认值（`data.json`）
 
-落进 `data.json` 的只有这些：
+落进 `data.json` 的只有十项：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
+| 调试日志（`debugLogging`） | `false` | 把 git / git-annex 的进度输出到开发者控制台；默认关闭，避免默认配置下刷屏。 |
 | remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；加载时扫当前仓库的 `git remote`，把设置里没有的补进来（同名不覆盖手改过的地址）；初始化时逐个 `git remote add`（同名已存在就 `set-url`，地址相同则一个字节都不碰）。 |
 | 已登记的文件名匹配模板（`profileFiles`） | `[]` | 一条 = `{ path }`：**vault 相对路径**，正斜杠；正文在 vault 的 `.json` 文件里（顶层一条 `ParseProfile` 对象）。 |
 | `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
@@ -295,7 +297,7 @@
 - profile JSON：顶层是数组 / { profiles: [...] } / 坏 JSON / 坏正则 / 文件丢失 / 跨文件 id 重复 ⇒ 行上可见错误
 - 运行时：坏文件、重复 id、空列表 ⇒ 弹窗都不开，更不写盘；外部改 id/name 后下一次生成读到新值
 - 旧内联 profiles：显示失效提示、不迁移、不参与运行时
-- 第二条分割线以下 data-name 列表 = ["缩略图边长"]
+- 第二条分割线以下 data-name 列表 = ["缩略图边长", "调试日志"]
 - remote 的增删改、落盘、读回
 ```
 
