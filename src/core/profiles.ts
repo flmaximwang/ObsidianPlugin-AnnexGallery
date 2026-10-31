@@ -65,6 +65,11 @@ export interface ParseProfile {
   /** 最终 frontmatter 的键顺序（不在表里的键不写）。 */
   keyOrder: string[];
   onMismatch?: "empty" | "skip";
+  /**
+   * 默认用哪份 metadata 模板（内置 `default` / `embed` 或设置里登记的自定义模板 id）。
+   * 不写 ⇒ `default`。「生成元数据」弹窗里可以临时换，并按文件夹记住。
+   */
+  metadataTemplate?: string;
 }
 
 /** 由插件自己算的键：派生（可被 pathFields 同名覆盖）。 */
@@ -298,6 +303,10 @@ export function validateProfile(profile: ParseProfile): ProfileIssue[] {
     const key = spec.key ?? spec.group;
     if (fieldKeys.has(key)) add("error", `fields 里的键 "${key}" 重复`);
     fieldKeys.add(key);
+  }
+
+  if (profile.metadataTemplate !== undefined && (typeof profile.metadataTemplate !== "string" || profile.metadataTemplate.trim() === "")) {
+    add("error", "metadataTemplate 必须是非空字符串（模板 id）");
   }
 
   const known = new Set(order);

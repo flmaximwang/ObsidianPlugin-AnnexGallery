@@ -1,5 +1,21 @@
 import * as path from "path";
-import { App, FileSystemAdapter, Menu, MenuItem, Modal, Notice, Plugin, Setting, TAbstractFile, TFolder, setIcon } from "obsidian";
+import * as fs from "fs";
+import {
+  App,
+  FileSystemAdapter,
+  Menu,
+  MenuItem,
+  Modal,
+  Notice,
+  Plugin,
+  Setting,
+  TAbstractFile,
+  TFile,
+  TFolder,
+  getLanguage,
+  normalizePath,
+  setIcon,
+} from "obsidian";
 import { git } from "./src/core/git";
 import {
   ANNEX_OP_TITLE,
@@ -12,7 +28,10 @@ import {
 } from "./src/core/annex";
 import { initGallery } from "./src/core/init";
 import { SidecarPlan, SidecarReport, generateSidecars, planSidecarTargets } from "./src/core/sidecar";
+import { checkMetadataTemplate } from "./src/core/templates";
 import { ThumbnailReport, generateThumbnails } from "./src/core/thumbnails";
+import { addGalleryTag, buildGalleryBase, galleryFilePath, orderProperties, planGallery, type GalleryPlan } from "./src/core/gallery";
+import { DEFAULT_TEMPLATE_ID, listTemplates, resolveTemplate, type ResolvedTemplate, type TemplateRef } from "./src/core/templates";
 import { progressPrefix } from "./src/core/types";
 import {
   STATUS_REFRESH_MS,
@@ -41,8 +60,102 @@ import {
   writeAsk,
 } from "./src/ui/settings";
 
-/** 弹窗提交时用的 profile 与其 ask 键 → 值。 */
-type PromptSubmit = (profile: ParseProfile, values: Record<string, string>) => void;
+/** 弹窗提交时用的 profile、其 ask 键 → 值、以及选中的 metadata 模板 id。 */
+type PromptSubmit = (profile: ParseProfile, values: Record<string, string>, templateId: string) => void;
+
+/**
+ * 「创建画廊」的标题跟 Obsidian 界面语言走（用户 2026-10-31 口径：只有这一项本地化）。
+ * `getLanguage()` 是 1.8+ 的公开 API；更老的 app 上不存在 ⇒ 退回 moment 的 locale，再不行用英文。
+ */
+export function galleryMenuTitle(): string {
+  let lang = "";
+  try {
+    if (typeof getLanguage === "function") lang = getLanguage();
+  } catch {
+    lang = "";
+  }
+  if (lang === "") {
+    const moment = (globalThis as { moment?: { locale?: () => string } }).moment;
+    lang = typeof moment?.locale === "function" ? moment.locale() : "";
+  }
+  return lang.toLowerCase().startsWith("zh") ? "创建画廊" : "Create Gallery";
+}
+
+/** 一个只有说明文字 + 一排按钮的弹窗（画廊流程里的「补标签？」「已存在？」都用它）。 */
+class ChoiceModal extends Modal {
+  constructor(
+    app: App,
+    private readonly heading: string,
+    private readonly paragraphs: string[],
+    private readonly buttons: Array<{ text: string; style?: "cta" | "warning"; run?: () => void }>,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(this.heading);
+    for (const text of this.paragraphs) this.contentEl.createEl("p", { text });
+    const row = new Setting(this.contentEl);
+    for (const spec of this.buttons) {
+      row.addButton((button) => {
+        button.setButtonText(spec.text);
+        if (spec.style === "cta") button.setCta();
+        if (spec.style === "warning") button.setWarning();
+        button.onClick(() => {
+          this.close();
+          spec.run?.();
+        });
+      });
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/** 画廊模板多于一份时，先问用哪份（默认 = 这个文件夹上次选的，否则 default）。 */
+class GalleryTemplateModal extends Modal {
+  private selected: string;
+
+  constructor(
+    app: App,
+    private readonly subject: string,
+    private readonly options: Array<{ id: string; name: string; builtin: boolean }>,
+    remembered: string | undefined,
+    private readonly onChoose: (id: string) => void,
+  ) {
+    super(app);
+    this.selected = options.some((option) => option.id === remembered) ? (remembered as string) : DEFAULT_TEMPLATE_ID;
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(`${galleryMenuTitle()} — 选画廊模板`);
+    this.contentEl.createEl("p", { text: `为 ${this.subject} 生成 .base；选一份模板（按文件夹记住）。` });
+    new Setting(this.contentEl).setName("画廊模板").addDropdown((dropdown) => {
+      for (const option of this.options) dropdown.addOption(option.id, `${option.name}（${option.id}${option.builtin ? " · 内置" : ""}）`);
+      dropdown.setValue(this.selected);
+      dropdown.onChange((value) => {
+        this.selected = value;
+      });
+    });
+    new Setting(this.contentEl)
+      .addButton((button) =>
+        button
+          .setButtonText(galleryMenuTitle())
+          .setCta()
+          .onClick(() => {
+            this.close();
+            this.onChoose(this.selected);
+          }),
+      )
+      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
 
 /**
  * `MenuItem.setSubmenu()` 是 Obsidian **内置但未进公开 typings** 的 API
@@ -86,6 +199,8 @@ class SamplePromptModal extends Modal {
   private selectedProfile: ParseProfile;
   private values: Record<string, string> = {};
   private askContainer!: HTMLElement;
+  private templateId: string;
+  private templateDropdown: { setValue(value: string): unknown } | null = null;
 
   constructor(
     app: App,
@@ -98,6 +213,18 @@ class SamplePromptModal extends Modal {
     super(app);
     this.profiles = host.settings.profiles.length > 0 ? host.settings.profiles : DEFAULT_PROFILES;
     this.selectedProfile = this.pickDefault();
+    const remembered = host.settings.folderMetadataTemplates[dir];
+    this.templateId = this.templateExists(remembered) ? (remembered as string) : this.profileTemplate(this.selectedProfile);
+  }
+
+  private templateExists(id: string | undefined): boolean {
+    return id !== undefined && listTemplates("metadata", this.host.settings.metadataTemplates).some((entry) => entry.id === id);
+  }
+
+  /** profile 自己声明的模板（不存在时退回 default —— 真用到时再报错，见 resolveTemplate）。 */
+  private profileTemplate(profile: ParseProfile): string {
+    const id = profile.metadataTemplate;
+    return id !== undefined && this.templateExists(id) ? id : DEFAULT_TEMPLATE_ID;
   }
 
   /** 记住的 → pickProfile 命中 → 第一条（引擎未实现/无命中时静默回退，列出全部让用户挑）。 */
@@ -134,8 +261,25 @@ class SamplePromptModal extends Modal {
         dropdown.onChange((value) => {
           const found = this.profiles.find((profile) => profile.id === value);
           if (found !== undefined) this.selectedProfile = found;
+          // 换 profile ⇒ 模板跟着换成这条 profile 声明的那份（仍可再手动改）。
+          this.templateId = this.profileTemplate(this.selectedProfile);
+          this.templateDropdown?.setValue(this.templateId);
           this.renderAskFields();
         });
+      });
+
+    new Setting(contentEl)
+      .setName("metadata 模板")
+      .setDesc("sidecar .md 的整份文本；默认取 profile 的 metadataTemplate，按文件夹记住。")
+      .addDropdown((dropdown) => {
+        for (const entry of listTemplates("metadata", this.host.settings.metadataTemplates)) {
+          dropdown.addOption(entry.id, `${entry.name}（${entry.id}${entry.builtin ? " · 内置" : ""}）`);
+        }
+        dropdown.setValue(this.templateId);
+        dropdown.onChange((value) => {
+          this.templateId = value;
+        });
+        this.templateDropdown = dropdown;
       });
 
     this.askContainer = contentEl.createDiv({ cls: "annex-ask-fields" });
@@ -180,6 +324,7 @@ class SamplePromptModal extends Modal {
       }
     }
     this.host.settings.folderProfiles[this.dir] = this.selectedProfile.id;
+    this.host.settings.folderMetadataTemplates[this.dir] = this.templateId;
     for (const key of ask) {
       writeAsk(this.host.settings, this.dir, key, (this.values[key] ?? "").trim());
     }
@@ -187,7 +332,7 @@ class SamplePromptModal extends Modal {
     const values: Record<string, string> = {};
     for (const key of ask) values[key] = (this.values[key] ?? "").trim();
     this.close();
-    this.onSubmit(this.selectedProfile, values);
+    this.onSubmit(this.selectedProfile, values, this.templateId);
   }
 
   onClose(): void {
@@ -334,7 +479,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
 
     // 入口 2–8：右键文件夹菜单 —— 所有选项收在一个顶层「Annex Gallery」子菜单里
     // （spec: docs/context-menu.md）；顺序与命名按用户 2026-10-17 口径：
-    // 生成元数据 · 生成缩略图 · Add largefiles to Annex · Unlock & unannex largefiles ·
+    // 生成元数据 · 生成缩略图 · 创建画廊/Create Gallery（2026-10-31 追加）· Add largefiles to Annex · Unlock & unannex largefiles ·
     // Lock largefiles · Unlock largefiles · Get largefiles · Drop largefiles
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
@@ -343,6 +488,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
           const entries: Array<{ title: string; icon: string; run: () => void }> = [
             { title: "生成元数据", icon: "file-text", run: () => void this.runSidecars(file) },
             { title: "生成缩略图", icon: "image", run: () => void this.runThumbnails(file) },
+            { title: galleryMenuTitle(), icon: "layout-grid", run: () => void this.runGallery(file) },
             { title: ANNEX_OP_TITLE.add, icon: "package-plus", run: () => void this.runAnnex("add", file) },
             { title: ANNEX_OP_TITLE.unannex, icon: "package-open", run: () => void this.runAnnex("unannex", file) },
             { title: ANNEX_OP_TITLE.lock, icon: "lock", run: () => void this.runAnnex("lock", file) },
@@ -503,6 +649,20 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     if (this.settings.folderSamples === null || typeof this.settings.folderSamples !== "object") {
       this.settings.folderSamples = {};
     }
+    // 模板登记与按文件夹的选择：旧 data.json 没这些键 ⇒ 空。
+    const refs = (value: unknown): TemplateRef[] =>
+      Array.isArray(value)
+        ? value
+            .filter((entry): entry is Record<string, unknown> => entry !== null && typeof entry === "object")
+            .map((entry) => ({ id: String(entry.id ?? ""), name: String(entry.name ?? entry.id ?? ""), path: String(entry.path ?? "") }))
+            .filter((entry) => entry.id !== "" && entry.path !== "")
+        : [];
+    this.settings.metadataTemplates = refs(this.settings.metadataTemplates);
+    this.settings.baseTemplates = refs(this.settings.baseTemplates);
+    for (const key of ["folderMetadataTemplates", "folderBaseTemplates"] as const) {
+      const value = this.settings[key] as unknown;
+      if (value === null || typeof value !== "object" || Array.isArray(value)) this.settings[key] = {};
+    }
     // remotes：必须是 { name, url } 数组；旧 data.json 没这个键 ⇒ 空数组。
     if (!Array.isArray(this.settings.remotes)) {
       this.settings.remotes = [];
@@ -522,6 +682,20 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const adapter = this.app.vault.adapter;
     if (adapter instanceof FileSystemAdapter) return adapter.getBasePath();
     throw new Error("Annex Gallery 只支持桌面版：拿不到 vault 的本地路径");
+  }
+
+  /** 设置页「复制为自定义」：在 vault 里新建文件（被占用就加 ` 2`、` 3`…），返回实际路径。 */
+  async createVaultFile(relPath: string, text: string): Promise<string> {
+    const target = normalizePath(relPath);
+    const dot = target.lastIndexOf(".");
+    const stem = dot > target.lastIndexOf("/") ? target.slice(0, dot) : target;
+    const ext = dot > target.lastIndexOf("/") ? target.slice(dot) : "";
+    let candidate = target;
+    for (let n = 2; fs.existsSync(path.join(this.vaultRoot(), candidate)); n += 1) candidate = `${stem} ${n}${ext}`;
+    const folder = candidate.includes("/") ? candidate.slice(0, candidate.lastIndexOf("/")) : "";
+    if (folder !== "" && this.app.vault.getAbstractFileByPath(folder) === null) await this.app.vault.createFolder(folder);
+    await this.app.vault.create(candidate, text);
+    return candidate;
   }
 
   /**
@@ -736,8 +910,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   private async runSidecars(folder: TFolder): Promise<void> {
     const dir = this.folderPath(folder);
     const relpath = folder.path === "/" ? "" : folder.path;
-    new SamplePromptModal(this.app, folder.path, this, dir, relpath, (profile, values) => {
-      void this.generateSidecarsWithPrompt(folder, dir, profile, values);
+    new SamplePromptModal(this.app, folder.path, this, dir, relpath, (profile, values, templateId) => {
+      void this.generateSidecarsWithPrompt(folder, dir, profile, values, templateId);
     }).open();
   }
 
@@ -750,7 +924,18 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     dir: string,
     profile: ParseProfile,
     values: Record<string, string>,
+    templateId: string,
   ): Promise<void> {
+    // 坏模板（文件没了 / 第一行不是 {{frontmatter}}）在任何写盘之前就停下，不静默回退。
+    let template: ResolvedTemplate;
+    try {
+      template = resolveTemplate("metadata", templateId, this.settings.metadataTemplates, this.vaultRoot());
+      checkMetadataTemplate(template);
+    } catch (error) {
+      new Notice(`生成元数据失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      console.error(error);
+      return;
+    }
     let plan: SidecarPlan;
     try {
       plan = planSidecarTargets(dir, this.gitTopOf(dir));
@@ -759,11 +944,11 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       plan = { images: 0, existing: 0, dirty: 0 };
     }
     if (plan.existing === 0) {
-      await this.executeSidecars(folder, dir, profile, values, false);
+      await this.executeSidecars(folder, dir, profile, values, template, false);
       return;
     }
     new OverwritePromptModal(this.app, folder.path, plan, (overwrite) => {
-      void this.executeSidecars(folder, dir, profile, values, overwrite);
+      void this.executeSidecars(folder, dir, profile, values, template, overwrite);
     }).open();
   }
 
@@ -772,6 +957,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     dir: string,
     profile: ParseProfile,
     values: Record<string, string>,
+    template: ResolvedTemplate,
     overwrite: boolean,
   ): Promise<void> {
     // profile 选择与 ask 值已由弹窗写进 folderProfiles / folderSamples 并落盘。
@@ -784,6 +970,11 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         vaultRoot: this.vaultRoot(),
         repoRoot: this.gitTopOf(dir),
         sample,
+        // 弹窗里选的 profile / 填的 ask / 选的模板都要传下去（之前漏传，弹窗的 profile 选择不生效）。
+        profile,
+        profiles: this.settings.profiles,
+        ask: values,
+        template,
         apply: true,
         overwrite,
         progress: (message) => console.log(progressPrefix(message)),
@@ -794,7 +985,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         `目录：${report.dir}`,
         `新建 ${count("created")} 份 · 覆盖 ${count("overwritten")} 份 · 跳过（已存在）${count("skipped-existing")} · 跳过（被改过）${count("skipped-dirty")} · 失败 ${count("failed")}`,
       ];
+      lines.push(`模板：${template.label}`);
       if (overwrite) lines.push("模式：覆盖重算（已存在的 sidecar 全部按当前 profile 重写）");
+      const templateNotes = report.entries.filter((entry) => (entry.detail ?? "").includes("模板里的"));
+      if (templateNotes.length > 0) lines.push(`${templateNotes.length} 份里有模板占位符取不到值（已留空，详见控制台）`);
       const collisions = Object.entries(report.duplicateStems);
       if (collisions.length > 0) lines.push(`重名 stem ${collisions.length} 个 —— 链接已按全 vault 路径写入`);
       const failed = report.entries.filter((entry) => entry.action === "failed");
@@ -805,6 +999,128 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       new Notice(`生成元数据失败：${String(error)}`, 10000);
       console.error(error);
     }
+  }
+
+  // ── 创建画廊 / Create Gallery（spec: docs/gallery.md）──────────────────────
+
+  /**
+   * 选模板（多于一份才问，按文件夹记住）→ 填模板（坏模板在这里就停）→ 只读盘点 →
+   * 有旧 sidecar 没标签就问「补标签 / 跳过 / 取消」→ 目标已存在就问「覆盖 / 打开已有 / 取消」→ 写 → 打开。
+   */
+  private async runGallery(folder: TFolder): Promise<void> {
+    const dir = this.folderPath(folder);
+    const options = listTemplates("base", this.settings.baseTemplates);
+    const go = (id: string): void => {
+      this.settings.folderBaseTemplates[dir] = id;
+      void this.saveSettings();
+      void this.prepareGallery(folder, dir, id);
+    };
+    if (options.length <= 1) {
+      go(options[0]?.id ?? DEFAULT_TEMPLATE_ID);
+      return;
+    }
+    new GalleryTemplateModal(this.app, folder.path, options, this.settings.folderBaseTemplates[dir], go).open();
+  }
+
+  private async prepareGallery(folder: TFolder, dir: string, templateId: string): Promise<void> {
+    const title = galleryMenuTitle();
+    const relFolder = folder.path === "/" ? "" : folder.path;
+    let plan: GalleryPlan;
+    let built: { text: string; missing: string[] };
+    let label: string;
+    try {
+      const template = resolveTemplate("base", templateId, this.settings.baseTemplates, this.vaultRoot());
+      label = template.label;
+      plan = planGallery(dir);
+      const properties = orderProperties(
+        plan.keys,
+        this.settings.profiles.map((profile) => profile.keyOrder),
+      );
+      built = buildGalleryBase(template, { folder: relFolder, cardSize: this.settings.thumbnailEdge, properties });
+    } catch (error) {
+      new Notice(`${title}失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      console.error(error);
+      return;
+    }
+
+    const target = galleryFilePath(relFolder, this.app.vault.getName());
+    const afterTags = (fixTags: boolean): void => {
+      const write = (): void => void this.writeGallery(title, target, built, plan, label, fixTags);
+      if (!fs.existsSync(path.join(this.vaultRoot(), target))) {
+        write();
+        return;
+      }
+      new ChoiceModal(this.app, `${title} — ${target} 已存在`, [`${target} 已经存在。覆盖会用模板重写整份文件（手改过的视图会丢）。`], [
+        { text: "覆盖", style: "warning", run: write },
+        { text: "打开已有", style: "cta", run: () => void this.openVaultFile(target) },
+        { text: "取消" },
+      ]).open();
+    };
+
+    if (plan.untagged.length === 0) {
+      afterTags(false);
+      return;
+    }
+    new ChoiceModal(
+      this.app,
+      `${title} — 有 ${plan.untagged.length} 份旧 sidecar 没有标签`,
+      [
+        `${folder.path} 下有 ${plan.untagged.length} 份 sidecar（带 tif）还没有 annex-gallery-metadata 标签，画廊只认这个标签，它们不会出现。`,
+        "补标签：只在 tags 里加这一项，别的内容一个字都不动。",
+      ],
+      [
+        { text: "补标签", style: "cta", run: () => afterTags(true) },
+        { text: "跳过", run: () => afterTags(false) },
+        { text: "取消" },
+      ],
+    ).open();
+  }
+
+  private async writeGallery(
+    title: string,
+    target: string,
+    built: { text: string; missing: string[] },
+    plan: GalleryPlan,
+    label: string,
+    fixTags: boolean,
+  ): Promise<void> {
+    try {
+      let fixed = 0;
+      if (fixTags) {
+        for (const file of plan.untagged) {
+          const text = fs.readFileSync(file, "utf8");
+          const next = addGalleryTag(text);
+          if (next !== null && next !== text) {
+            fs.writeFileSync(file, next, "utf8");
+            fixed += 1;
+          }
+        }
+      }
+      const existing = this.app.vault.getAbstractFileByPath(target);
+      if (existing instanceof TFile) await this.app.vault.modify(existing, built.text);
+      else if (fs.existsSync(path.join(this.vaultRoot(), target))) await this.app.vault.adapter.write(target, built.text); // 盘上有、索引还没跟上
+      else await this.app.vault.create(target, built.text);
+      await this.openVaultFile(target);
+
+      const lines = [
+        `画廊：${target}（模板：${label}）`,
+        `进画廊的 sidecar ${plan.tagged + fixed} 份${fixed > 0 ? `（其中补标签 ${fixed} 份）` : ""}${
+          !fixTags && plan.untagged.length > 0 ? ` · 没标签、不显示 ${plan.untagged.length} 份` : ""
+        }`,
+      ];
+      if (plan.missingSidecars > 0) lines.push(`${plan.missingSidecars} 张图还没有 sidecar —— 先跑「生成元数据」`);
+      if (plan.missingThumbnails > 0) lines.push(`${plan.missingThumbnails} 份 sidecar 缺缩略图 —— 先跑「生成缩略图」`);
+      if (built.missing.length > 0) lines.push(`模板占位符取不到值、已留空：${built.missing.map((name) => `{{${name}}}`).join(" ")}`);
+      this.notifyReport(`${title}完成`, lines);
+    } catch (error) {
+      new Notice(`${title}失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      console.error(error);
+    }
+  }
+
+  private async openVaultFile(relPath: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(relPath);
+    if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
   }
 
   // ── 入口 4：Drop largefiles（丢弃本地 annex 内容，腾硬盘）─────────────────

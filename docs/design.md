@@ -1,7 +1,7 @@
 # 设计原则
 
 这份文档回答一个问题：**为什么这个插件长成现在这样**。具体的入口语义见 `commands.md` /
-`context-menu.md` / `status-bar.md` / `setting-panel.md`，数据结构见 `metadata.md`。
+`context-menu.md` / `gallery.md` / `status-bar.md` / `setting-panel.md`，数据结构见 `metadata.md`。
 
 ## 插件的定位
 
@@ -18,8 +18,9 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
 
 ## 六条设计原则
 
-1. **一个派生文件只有一个 owner。** 缩略图只由「生成缩略图」写，sidecar 只由「生成元数据」写；
-   两者都必须可重跑、必须幂等 —— 重跑的结果要么与上次一致，要么明确告诉操作者改了什么。
+1. **一个派生文件只有一个 owner。** 缩略图只由「生成缩略图」写，sidecar 只由「生成元数据」写，
+   画廊 `.base` 只由「创建画廊」写（见 [`gallery.md`](gallery.md)）；
+   三者都必须可重跑、必须幂等 —— 重跑的结果要么与上次一致，要么明确告诉操作者改了什么。
 2. **派生文件必须不进 annex。** `.md` / `.thumbnail.png` / `.base` 靠 `.gitattributes` 的
    `annex.largefiles=nothing` 钉在 git 里 —— 否则一次 `git annex add` 会把它们变成软链，
    画廊会静默失效。
@@ -48,6 +49,9 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
 |---|---|
 | `/Users/<user>/Documents/Lab/<library>/Data_<library>` | 一个受 git-annex 管理的数据仓库（`Data_<library>` 是仓库根） |
 | `<vault>` | Obsidian vault 根目录 |
+| `<vault name>` | vault 根目录的名字（不含路径） |
+| `<folder>` | vault 内的一个文件夹（相对 vault 的路径） |
+| `<id>` | 一条 profile / 模板的稳定机器 id |
 | `<repo>` | 本插件仓库根 |
 | `<count>` | 任意数量（文件数、行数、字节数） |
 | `<ms>` | 任意耗时 |

@@ -26,9 +26,10 @@ git + git-annex 仓库（已经是仓库的不会重建，只补缺的步骤）�
 | 入口 | 你会看到 | 细节 |
 |---|---|---|
 | 命令面板 · **初始化 gallery** | 初始化/修正当前 vault 的仓库形态、规则文件与远端配置，可重复执行 | [`docs/commands.md`](docs/commands.md) |
-| 文件管理器右键 · **Annex Gallery** | 8 个动作：生成元数据 / 生成缩略图 / Add / Unlock & unannex / Lock / Unlock / Get / Drop | [`docs/context-menu.md`](docs/context-menu.md) |
+| 文件管理器右键 · **Annex Gallery** | 9 个动作：生成元数据 / 生成缩略图 / 创建画廊 / Add / Unlock & unannex / Lock / Unlock / Get / Drop | [`docs/context-menu.md`](docs/context-menu.md) |
+| 文件管理器右键 · **Annex Gallery → 创建画廊** | 生成 `<文件夹>/<文件夹名>.base`（vault 根 → `<vault name>.base`），成员 = 带 `annex-gallery-metadata` 标签的 sidecar，作用域递归、模板可换 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏（右下角） | **未提交 · 未跟踪 · 未入库 largefiles** 三个数，30 秒刷新、点一下立即刷新 | [`docs/status-bar.md`](docs/status-bar.md) |
-| 设置页 | profile（文件名解析规则）编辑器、缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
+| 设置页 | profile（文件名解析规则）编辑器、模板区（metadata / 画廊模板）、缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
 
 ## 开发入门
 
@@ -49,11 +50,11 @@ npm run layout     # 设置页布局（真实 app.css + headless Chromium）
 ### 仓库结构
 
 ```
-main.ts            插件入口：命令、状态栏、8 个右键菜单项、设置页接线
+main.ts            插件入口：命令、状态栏、9 个右键菜单项、设置页接线
 src/core/          核心逻辑（不依赖 Obsidian，插件与 CLI 共用）
-                   init · rules · thumbnails · sidecar · stems · annex · git · status · remotes
-src/ui/            设置页、profile 编辑器、remotes 编辑器、「打开」的外部编辑
-src/defaults/      内置的 .gitattributes / .gitignore 模板
+                   init · rules · thumbnails · sidecar · gallery · templates · stems · annex · git · status · remotes
+src/ui/            设置页、profile 编辑器、模板编辑器、remotes 编辑器、「打开」的外部编辑
+src/defaults/      内置规则文件与模板（.gitattributes / .gitignore / metadata / base）
 tools/             判据（桩层 / 真仓库层 / 真机层）、CLI、示例语料
 tests/             数据安全测试（npm test）
 docs/              设计与口径文档（见下）
@@ -72,6 +73,7 @@ docs/              设计与口径文档（见下）
 |---|---|
 | 初始化命令 / annex 设置收敛 | [`docs/commands.md`](docs/commands.md) |
 | 右键菜单的形状与语义 | [`docs/context-menu.md`](docs/context-menu.md) |
+| 画廊（`.base`）的成员、作用域与模板 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏的三个数 | [`docs/status-bar.md`](docs/status-bar.md) |
 | 设置页的布局与字段 | [`docs/setting-panel.md`](docs/setting-panel.md) |
 | 文件名解析 / sidecar 字段 | [`docs/metadata.md`](docs/metadata.md) |
@@ -84,7 +86,8 @@ docs/              设计与口径文档（见下）
 |---|---|
 | [`docs/design.md`](docs/design.md) | 设计原则、三条全局约定、文档里的占位符 |
 | [`docs/commands.md`](docs/commands.md) | 「初始化 gallery」的职责边界、7 步、幂等契约、规则文件合并 |
-| [`docs/context-menu.md`](docs/context-menu.md) | 右键菜单的形状原则、8 项语义、平台 API 边界与坑 |
+| [`docs/context-menu.md`](docs/context-menu.md) | 右键菜单的形状原则、9 项语义、平台 API 边界与坑 |
+| [`docs/gallery.md`](docs/gallery.md) | 画廊的成员资格（标签）、作用域、输出路径、`.base` / metadata 模板与命令行 |
 | [`docs/status-bar.md`](docs/status-bar.md) | 三个计数的口径、刷新与交互不变量、视觉不变量 |
 | [`docs/setting-panel.md`](docs/setting-panel.md) | 设置页的定位、不变量、结构落点、字段与默认值 |
 | [`docs/metadata.md`](docs/metadata.md) | profile 的 schema、五类值、`keyOrder`、三条硬规则 |

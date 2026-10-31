@@ -229,8 +229,8 @@ ${fragment}
   check(h1Left !== null && Math.abs(h1Left - contentLeft) < 0.5, "标题与左侧内容左对齐（padding 0，不是 app 的 16px）", `标题 left=${h1Left} vs 内容左=${contentLeft}`);
   check(rep.h1.pad.paddingLeft === "0px" && rep.h1.pad.paddingRight === "0px", "标题左右 padding 都是 0");
   check(rep.h1.marginTop === "0px", "标题没有上边距（贴住内容区顶部的 padding）");
-  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
-  check(rep.topLevel[5].display === "flex", "最后一项是 app 的 .setting-item（缩略图边长）");
+  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-templates-section,annex-settings-divider,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 模版设置 → 模板区 → 分割线 → 缩略图边长", rep.topLevel.map((t) => t.cls).join(" | "));
+  check(rep.topLevel[6].display === "flex", "最后一项是 app 的 .setting-item（缩略图边长）");
   const dividers = rep.topLevel.filter((t) => t.tag === "HR");
   check(dividers.length === 2, `两条分割线（remote/模版 之间 + 模版/普通设置项 之间）：${dividers.length} 条`);
   check(dividers.every((d) => d.display !== "none" && d.box.width > 100 && d.box.height > 0 && d.borderTopWidth === "1px"),

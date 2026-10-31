@@ -36,6 +36,7 @@
 | `tools/verify-init.cjs` | 真仓库层 | `npm run verify:init` | `commands.md` |
 | `tools/verify-annex-ops.cjs` | 真仓库层 | `npm run verify:annex` | `context-menu.md` |
 | `tools/verify-sidecar-overwrite.cjs` | 真仓库层 | `npm run verify:sidecar` | `metadata.md` |
+| `tools/verify-gallery.cjs` | 真仓库层 | `npm run verify:gallery` | `gallery.md` |
 | `tools/status-gui-check.py` | 真机层 | `npm run gui:status` | `status-bar.md` |
 | `tools/real-gui-check.py` | 真机层 | `npm run gui` | `setting-panel.md` |
 | `tools/cli.ts` → `tools/annex-gallery.mjs` | CLI | `npm run cli` | `cli.md` |

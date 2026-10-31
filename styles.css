@@ -105,6 +105,85 @@
   cursor: pointer;
 }
 
+/* ── 模板区（metadata 模板 / 画廊模板）：与 remote 设置同一套卡片口径 ───────── */
+
+.annex-templates-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  margin: 1em 0;
+}
+
+.annex-templates-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary);
+  padding: 0.8em 1em 1em 1em;
+}
+
+.vertical-tab-content h3.annex-templates-title {
+  margin: 0 0 0.2em 0;
+  padding: 0;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.annex-templates-hint {
+  margin: 0 0 0.8em 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.annex-template-row,
+.annex-template-add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.annex-template-name {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.annex-template-id,
+.annex-template-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annex-template-add-row {
+  margin-top: 0.8em;
+}
+
+.annex-template-path-input {
+  flex: 1 1 auto;
+  min-width: 12em;
+}
+
+.annex-template-row button,
+.annex-template-add-row button {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.annex-template-view {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
 /* ── 多配置（profile）区 ─────────────────────────────────────────────────── */
 
 .annex-profiles-section {

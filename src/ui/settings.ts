@@ -1,8 +1,10 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import { DEFAULT_PROFILES, type ParseProfile } from "../core/profiles";
 import type { RemoteEntry } from "../core/remotes";
+import type { TemplateRef } from "../core/templates";
 import { ProfileEditor, cloneProfile, cloneProfiles, type ProfileEditorHost } from "./profile-editor";
 import { RemotesEditor } from "./remotes-editor";
+import { TemplatesEditor, type TemplatesEditorHost } from "./templates-editor";
 
 export { cloneProfile, cloneProfiles };
 
@@ -23,6 +25,14 @@ export interface PluginSettings {
   profiles: ParseProfile[];
   /** 文件夹绝对路径 → 选中的 profile id（右键弹窗记住上次选择）。 */
   folderProfiles: Record<string, string>;
+  /** 自定义 metadata 模板（vault 里的 .md；内置的不在这里，见 src/core/templates.ts）。 */
+  metadataTemplates: TemplateRef[];
+  /** 自定义画廊模板（vault 里的 .base）。 */
+  baseTemplates: TemplateRef[];
+  /** 文件夹绝对路径 → 「生成元数据」上次选的 metadata 模板 id。 */
+  folderMetadataTemplates: Record<string, string>;
+  /** 文件夹绝对路径 → 「创建画廊」上次选的画廊模板 id。 */
+  folderBaseTemplates: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -32,6 +42,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   // 深拷贝：DEFAULT_SETTINGS 是模块级常量，绝不能被编辑操作就地改到。
   profiles: cloneProfiles(DEFAULT_PROFILES),
   folderProfiles: {},
+  metadataTemplates: [],
+  baseTemplates: [],
+  folderMetadataTemplates: {},
+  folderBaseTemplates: {},
 };
 
 /**
@@ -54,7 +68,7 @@ export function writeAsk(settings: PluginSettings, folderDir: string, key: strin
 }
 
 /** What the settings tab needs from the plugin (breaks the import cycle). */
-export interface SettingsHost extends ProfileEditorHost {
+export interface SettingsHost extends ProfileEditorHost, TemplatesEditorHost {
   settings: PluginSettings;
   saveSettings(): Promise<void>;
   vaultRoot(): string;
@@ -91,6 +105,10 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
     this.editor = new ProfileEditor(profilesSection, this.host);
     this.editor.render();
+
+    // 模板区：metadata 模板 + 画廊模板（内置只读、可复制；自定义 = vault 里登记的文件）。
+    const templatesSection = containerEl.createDiv({ cls: "annex-templates-section" });
+    new TemplatesEditor(templatesSection, this.host, this.app).render();
 
     // 分割线以下才是剩下的普通设置项（spec 只留「缩略图边长」）。
     containerEl.createEl("hr", { cls: "annex-settings-divider" });

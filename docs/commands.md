@@ -6,7 +6,7 @@
 > `<file>`），命令示例里的真实路径换成 `/Users/<user>/Documents/Lab/<library>/Data_<library>`。
 > 可复跑的判据：`npm run verify:init`（`tools/verify-init.cjs`，真 annex 仓库 + 构建产物）。
 >
-> 插件在命令面板里目前只注册 **1 条**命令（`init-gallery` / 「初始化 gallery」）；那 8 个文件管理器
+> 插件在命令面板里目前只注册 **1 条**命令（`init-gallery` / 「初始化 gallery」）；那 9 个文件管理器
 > 右键选项是另一套入口，口径在 [`docs/context-menu.md`](context-menu.md)。
 
 ## 职责边界

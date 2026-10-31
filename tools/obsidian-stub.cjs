@@ -8,7 +8,41 @@
  * tiny DOM (`FakeEl`) good enough to build and inspect the settings tab and the
  * right-click modal headlessly.
  */
-const registry = { commands: [], menus: [], tabs: [], notices: [], modals: [], savedData: null, statusBarItems: [], intervals: [], domEvents: [], windowIntervals: [] };
+const fs = require("fs");
+const path = require("path");
+
+const registry = {
+  commands: [],
+  menus: [],
+  tabs: [],
+  notices: [],
+  modals: [],
+  savedData: null,
+  statusBarItems: [],
+  intervals: [],
+  domEvents: [],
+  windowIntervals: [],
+  /** `getLanguage()` 的返回值（测试改它来验证「创建画廊」/「Create Gallery」两种标题）。 */
+  language: "zh",
+  /** 通过 workspace.getLeaf().openFile() 打开过的 vault 相对路径（按打开顺序）。 */
+  opened: [],
+};
+
+/**
+ * 与 Obsidian 的 `normalizePath` 同口径：反斜杠转正斜杠、去掉重复与首尾斜杠。
+ * 插件用它在 `createVaultFile` 里规整用户输入的模板路径。
+ */
+function normalizePath(p) {
+  return String(p ?? "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/+|\/+$/g, "");
+}
+
+/** 真实 API 的 `getLanguage()`：返回当前 Obsidian 界面语言（如 "zh" / "en"）。 */
+function getLanguage() {
+  return registry.language;
+}
 
 /** Minimal element: enough of the Obsidian HTMLElement API for the UI code. */
 class FakeEl {
@@ -158,6 +192,16 @@ class FileSystemAdapter {
   }
   getBasePath() {
     return this.base;
+  }
+  /**
+   * 真实 `FileSystemAdapter.write(relPath, data)`：按 vault 相对路径写盘。
+   * 桩里顺手补建父目录（真实 API 要求目录已存在；插件只在已存在的文件夹里走这条路，
+   * 补建只是让测试写模板更省事）。
+   */
+  async write(relPath, data) {
+    const target = path.join(this.base, normalizePath(relPath));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, String(data), "utf8");
   }
 }
 class Notice {
@@ -430,13 +474,66 @@ function setIcon(el, iconId) {
   if (el.children.length === 0) el.createEl("svg", { cls: `lucide-${String(iconId)}` });
 }
 
+/**
+ * `app`：vault 真的落在 `vaultPath` 那个目录上。
+ *
+ * 插件现在会自己写文件（「复制为自定义」模板、创建画廊时写 .base），所以 `vault.*`
+ * 必须与磁盘一致 —— 桩里直接转成 fs 调用，而不是只记一笔。`getAbstractFileByPath`
+ * 返回真实的 `TFile` / `TFolder` 实例，因为插件用 `instanceof TFile` 判断走哪条路。
+ */
 function makeApp(vaultPath) {
+  const base = vaultPath;
+  const absOf = (rel) => path.join(base, normalizePath(rel));
+  const adapter = new FileSystemAdapter(base);
+
+  const vault = {
+    adapter,
+    getName() {
+      return path.basename(base.replace(/[\\/]+$/, "")) || base;
+    },
+    getAbstractFileByPath(rel) {
+      const norm = normalizePath(rel);
+      if (norm === "" || norm === "/") return new TFolder("/");
+      let stat;
+      try {
+        stat = fs.statSync(absOf(norm));
+      } catch {
+        return null;
+      }
+      return stat.isDirectory() ? new TFolder(norm) : new TFile(norm);
+    },
+    async create(rel, text) {
+      const norm = normalizePath(rel);
+      const target = absOf(norm);
+      if (fs.existsSync(target)) throw new Error(`File already exists: ${norm}`);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, String(text), "utf8");
+      return new TFile(norm);
+    },
+    async modify(file, text) {
+      fs.writeFileSync(absOf(file.path), String(text), "utf8");
+    },
+    async createFolder(rel) {
+      const norm = normalizePath(rel);
+      fs.mkdirSync(absOf(norm), { recursive: true });
+      return new TFolder(norm);
+    },
+  };
+
   return {
-    vault: { adapter: new FileSystemAdapter(vaultPath) },
+    vault,
     workspace: {
       on(name, callback) {
         if (name === "file-menu") registry.menus.push(callback);
         return { name };
+      },
+      /** 真实 API 返回一个 leaf；测试只关心 `openFile()` 被调用（路径记进 registry.opened）。 */
+      getLeaf() {
+        return {
+          async openFile(file) {
+            registry.opened.push(file.path);
+          },
+        };
       },
     },
   };
@@ -482,6 +579,8 @@ module.exports = {
   Modal,
   Plugin,
   setIcon,
+  getLanguage,
+  normalizePath,
   FakeEl,
   walk,
   registry,

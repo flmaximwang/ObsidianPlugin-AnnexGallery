@@ -11,6 +11,26 @@ import {
   type ParseContext,
   type ParseProfile,
 } from "./profiles";
+import {
+  BUILTIN_METADATA_TEMPLATES,
+  checkMetadataTemplate,
+  fillPlaceholders,
+  type ResolvedTemplate,
+} from "./templates";
+
+/**
+ * 每份 sidecar 都带的标签：画廊（`.base`）只靠它认 sidecar，和文件夹里别的 `.md` 区分开。
+ * 总是 `tags` 列表的第一项，**不受 profile.keyOrder 约束**（keyOrder 里没有 `tags` 也照写）——
+ * 否则一条 profile 就能让它生成的 sidecar 悄悄从所有画廊里消失。
+ */
+export const GALLERY_TAG = "annex-gallery-metadata";
+
+/** 内置默认 metadata 模板（与改造前硬编码的正文逐字节相同）。 */
+export const DEFAULT_METADATA_TEMPLATE: ResolvedTemplate = {
+  id: BUILTIN_METADATA_TEMPLATES[0].id,
+  label: `内置模板 ${BUILTIN_METADATA_TEMPLATES[0].id}`,
+  text: BUILTIN_METADATA_TEMPLATES[0].text,
+};
 
 /**
  * Legacy default frontmatter key order (TECNAI). Kept as an exported constant
@@ -39,6 +59,8 @@ export interface BuildSidecarOptions {
   ask?: Record<string, string>;
   /** 覆盖 `tags`（默认取相对 vault 的第一段路径）。 */
   tag?: string;
+  /** metadata 模板；不给用内置 default。 */
+  template?: ResolvedTemplate;
 }
 
 export interface SidecarBuild {
@@ -66,6 +88,8 @@ export interface SingleSidecarOptions {
   profiles?: ParseProfile[];
   /** 覆盖 `tags`（默认取相对 vault 的第一段路径）。 */
   tag?: string;
+  /** metadata 模板；不给用内置 default。坏模板在第一张图之前就抛错，整批不动。 */
+  template?: ResolvedTemplate;
   /** Write to disk. Default false = dry run. */
   apply?: boolean;
   /** Overwrite / touch files that git reports as dirty. */
@@ -180,11 +204,20 @@ type RenderKind = "bare" | "quoted" | "list";
 interface Resolved {
   value: string;
   kind: RenderKind;
+  /** kind === "list" 时的各项。 */
+  items?: string[];
+}
+
+/** `tags` 的最终列表：GALLERY_TAG 打头，其余值（去空、去重）跟在后面。 */
+function tagList(value: string | undefined): string[] {
+  const items = [GALLERY_TAG];
+  if (value !== undefined && value !== "" && value !== GALLERY_TAG) items.push(value);
+  return items;
 }
 
 /** Render one frontmatter key the way the pre-change generator did. */
 function renderLine(key: string, r: Resolved): string {
-  if (r.kind === "list") return `${key}:\n  - ${r.value}`;
+  if (r.kind === "list") return `${key}:${(r.items ?? [r.value]).map((item) => `\n  - ${item}`).join("")}`;
   if (r.kind === "quoted") return `${key}: "${r.value}"`;
   return `${key}: ${r.value}`;
 }
@@ -232,6 +265,18 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
   for (const spec of profile.pathFields ?? []) typeByKey.set(spec.key ?? spec.group, spec.type);
 
   const resolve = (key: string): Resolved | undefined => {
+    if (key === "tags") {
+      // 任何来源给出的 tags 都排在 GALLERY_TAG 后面；没有来源也照样有 GALLERY_TAG。
+      const own = hasOwn(parsed.values, key)
+        ? parsed.values[key]
+        : hasOwn(constFields, key)
+          ? String(constFields[key])
+          : hasOwn(ask, key)
+            ? ask[key]
+            : derived.tags;
+      const items = tagList(own);
+      return { value: items.join(", "), kind: "list", items };
+    }
     if (hasOwn(parsed.values, key)) {
       const type = typeByKey.get(key);
       return { value: parsed.values[key], kind: type === "number" ? "bare" : "quoted" };
@@ -242,7 +287,6 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
     }
     if (hasOwn(ask, key)) return { value: ask[key], kind: "quoted" };
     if (hasOwn(derived, key)) {
-      if (key === "tags") return { value: derived.tags, kind: "list" };
       if (key === "date") return { value: derived.date, kind: "bare" };
       return { value: derived[key], kind: "quoted" }; // session
     }
@@ -266,6 +310,8 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
 
   const fmLines: string[] = [];
   const notes: string[] = [];
+  // keyOrder 里没有 tags ⇒ 仍在最前面写一行，只带 GALLERY_TAG（画廊靠它认 sidecar）。
+  if (!profile.keyOrder.includes("tags")) fmLines.push(renderLine("tags", { value: GALLERY_TAG, kind: "list", items: [GALLERY_TAG] }));
   for (const key of profile.keyOrder) {
     const resolved = resolve(key);
     if (resolved === undefined) {
@@ -277,16 +323,17 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
   if (!parsed.matched) notes.push(`stem "${stem}" 不符合 profile ${profile.id} 的正则`);
   if (parsed.missingGroups.length > 0) notes.push(`组没参与匹配：${parsed.missingGroups.join(",")}`);
 
-  const text = [
-    "---",
-    fmLines.join("\n"),
-    "---",
-    "",
-    `缩略图：[[${relThumb}]]`,
-    "",
-    `原图（用系统默认程序打开）：[[${relOrig}]]`,
-    "",
-  ].join("\n");
+  // 正文 = metadata 模板填完占位符：{{frontmatter}} / {{stem}} 由这里给，其余 {{<键>}} 与
+  // frontmatter 同一套取值（含不在 keyOrder 里的派生 / 自动值，例如 {{thumbnail}}、{{tif}}）。
+  const template = opts.template ?? DEFAULT_METADATA_TEMPLATE;
+  const frontmatter = ["---", fmLines.join("\n"), "---"].join("\n");
+  const filled = fillPlaceholders(template.text, (name) => {
+    if (name === "frontmatter") return frontmatter;
+    if (name === "stem") return stem;
+    return resolve(name)?.value;
+  });
+  for (const name of filled.missing) notes.push(`模板里的 {{${name}}} 取不到值，已留空`);
+  const text = filled.text;
 
   const detail = notes.length > 0 ? notes.join("；") : undefined;
   return detail === undefined
@@ -339,6 +386,9 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
   const ask: Record<string, string> = { ...(opts.ask ?? {}) };
   if (opts.sample !== undefined && opts.sample !== "" && !hasOwn(ask, "sample")) ask.sample = opts.sample;
 
+  const template = opts.template ?? DEFAULT_METADATA_TEMPLATE;
+  checkMetadataTemplate(template);
+
   const images = collectImages(dir);
   progress(`开始生成 sidecar：${dir}（${images.length} 张，${apply ? "写入" : "dry-run"}）`);
 
@@ -357,7 +407,12 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
       const profile = opts.profile ?? pickProfile(profiles, contextFor(image, opts.vaultRoot)) ?? profiles[0];
       if (profile === undefined) throw new Error("没有可用 profile");
       usedIds.add(profile.id);
-      const built = buildSidecarText(image, profile, { vaultRoot: opts.vaultRoot, ask, ...(opts.tag === undefined ? {} : { tag: opts.tag }) });
+      const built = buildSidecarText(image, profile, {
+        vaultRoot: opts.vaultRoot,
+        ask,
+        template,
+        ...(opts.tag === undefined ? {} : { tag: opts.tag }),
+      });
       if (!built.matched) mismatch += 1;
 
       if (!built.matched && (profile.onMismatch ?? "empty") === "skip") {

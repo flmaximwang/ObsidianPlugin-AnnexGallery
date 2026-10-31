@@ -15,7 +15,9 @@ CLI 负责**可脚本化的同一批动作**。这样「插件里点出来的结
 npm run cli -- init    <dir> [--dry-run] [--json]
 npm run cli -- thumbs  <dir> [--edge 256] [--dry-run] [--force] [--json]
 npm run cli -- sidecar <dir> --vault <vaultRoot> --sample <name> [--repo <root>] \
-                        [--apply] [--overwrite] [--force] [--plan] [--json]
+                        [--apply] [--overwrite] [--force] [--plan] [--json] [--template <id|file>]
+npm run cli -- gallery <dir> --vault <vaultRoot> [--template <id|file>] [--profiles-file <json>] \
+                        [--edge <n>] [--apply] [--overwrite] [--fix-tags] [--json]
 npm run cli -- stems   <dir> [--json]
 npm run cli -- drop    <dir> [--dry-run] [--force] [--json]
 npm run cli -- annex   <add|unlock|lock|get|unannex|drop> <dir> [--json]
@@ -24,6 +26,10 @@ npm run cli -- defaults          # 打印插件内置的 .gitattributes 模板
 ```
 
 （等价写法：`node tools/annex-gallery.mjs <子命令> …`。）
+
+`--template` 认内置模板 id 或模板文件路径（登记在 `data.json` 里的自定义模板 id 只在插件里可用 ——
+CLI 不读设置，自定义模板直接给文件）；`gallery` 默认 dry-run，`--fix-tags` / `--overwrite` 都必须与
+`--apply` 同用。画廊与模板的完整口径见 [`../gallery.md`](../gallery.md)。
 
 ## 四条 CLI 约定
 

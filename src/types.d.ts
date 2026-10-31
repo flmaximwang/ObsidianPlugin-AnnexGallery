@@ -9,3 +9,15 @@ declare module "*/gitignore" {
   const content: string;
   export default content;
 }
+
+// Built-in metadata (.md) and gallery (.base) templates under src/defaults/,
+// inlined as raw text by the same esbuild `defaults-text` plugin.
+declare module "*.md" {
+  const content: string;
+  export default content;
+}
+
+declare module "*.base" {
+  const content: string;
+  export default content;
+}

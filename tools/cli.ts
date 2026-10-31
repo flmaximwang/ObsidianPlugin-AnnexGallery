@@ -8,7 +8,10 @@
  *   node tools/annex-gallery.mjs init    <dir> [--dry-run] [--json]
  *   node tools/annex-gallery.mjs thumbs  <dir> [--edge 256] [--dry-run] [--force] [--json]
  *   node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> [--sample <name>]
- *                                        [--profile <id>] [--profiles-file <json>] [--verify] [--repo <root>] [--apply] [--force] [--json]
+ *                                        [--profile <id>] [--profiles-file <json>] [--template <id|file>]
+ *                                        [--verify] [--repo <root>] [--apply] [--force] [--json]
+ *   node tools/annex-gallery.mjs gallery <dir> --vault <root> [--template <id|file>] [--profiles-file <json>]
+ *                                        [--edge 256] [--apply] [--overwrite] [--fix-tags] [--json]
  *   node tools/annex-gallery.mjs profiles --list | --check | --parse <name> [--path <relpath>] [--profile <id>] [--profiles-file <json>]
  *   node tools/annex-gallery.mjs stems   <dir> [--json]
  *   node tools/annex-gallery.mjs drop    <dir> [--dry-run] [--force] [--json]   # 丢本地 annex 内容
@@ -21,6 +24,13 @@ import { initGallery } from "../src/core/init";
 import { ANNEX_OP_TITLE, AnnexOp, dropLargefiles, runAnnexOp } from "../src/core/annex";
 import { GITATTRIBUTES_TEMPLATE, GITIGNORE_TEMPLATE } from "../src/core/rules";
 import { buildSidecarText, generateSidecars, planSidecarTargets } from "../src/core/sidecar";
+import { addGalleryTag, buildGalleryBase, galleryFilePath, orderProperties, planGallery } from "../src/core/gallery";
+import {
+  readTemplateFile,
+  resolveTemplate,
+  type ResolvedTemplate,
+  type TemplateKind,
+} from "../src/core/templates";
 import { collectImages, duplicateStems, stemOf } from "../src/core/stems";
 import { generateThumbnails } from "../src/core/thumbnails";
 import { progressPrefix } from "../src/core/types";
@@ -103,6 +113,28 @@ function profileById(profiles: ParseProfile[], id: string): ParseProfile {
 }
 
 /**
+ * `--template <id|file>`：值是一个存在的文件路径 ⇒ 直接读它；否则当模板 id 解析。
+ *
+ * CLI 没有设置页，所以自定义模板只能走文件路径；id 只认内置模板（`default` / metadata 的 `embed`）。
+ * 没给 `--template` ⇒ `fallbackId`（metadata / base 都是内置 `default`）。
+ */
+function loadTemplate(
+  flags: Args["flags"],
+  kind: TemplateKind,
+  vaultRoot: string,
+  fallbackId = "default",
+): ResolvedTemplate {
+  const value = opt(flags, "template") ?? fallbackId;
+  const abs = path.resolve(value);
+  try {
+    if (fs.statSync(abs).isFile()) return readTemplateFile(abs, abs);
+  } catch {
+    // 不是文件 ⇒ 下面按模板 id 解析（找不到会得到清楚的报错）。
+  }
+  return resolveTemplate(kind, value, [], vaultRoot);
+}
+
+/**
  * 用给定的名字造一个解析 context。
  *
  * 名字带扩展名时按「文件名」处理（stem 去扩展名）；给了 `--path` 就以它的 basename 当文件名
@@ -180,6 +212,7 @@ interface VerifyOptions {
   profile?: ParseProfile;
   ask: Record<string, string>;
   tag?: string;
+  template?: ResolvedTemplate;
   json: boolean;
 }
 
@@ -203,7 +236,12 @@ function runSidecarVerify(dir: string, opts: VerifyOptions): void {
     const profile = opts.profile ?? pickProfile(opts.profiles, ctx) ?? opts.profiles[0];
     if (profile === undefined) throw new Error("没有可用 profile");
     usedIds.add(profile.id);
-    const built = buildSidecarText(image, profile, { vaultRoot: opts.vaultRoot, ask: opts.ask, ...(opts.tag === undefined ? {} : { tag: opts.tag }) });
+    const built = buildSidecarText(image, profile, {
+      vaultRoot: opts.vaultRoot,
+      ask: opts.ask,
+      ...(opts.tag === undefined ? {} : { tag: opts.tag }),
+      ...(opts.template === undefined ? {} : { template: opts.template }),
+    });
     const sidecar = path.join(path.dirname(image), `${stem}.md`);
     const rel = relPath(opts.vaultRoot, sidecar);
 
@@ -258,7 +296,10 @@ commands
   init     <dir>                                       初始化 gallery（git init + git annex init + annex.addunlocked=true + 合并 .gitattributes/.gitignore）
   thumbs   <dir> [--edge 256] [--dry-run] [--force]     为目录内所有图片生成 .thumbnail.png
   sidecar  <dir> --vault <root> [--sample <name>]       为目录内所有图片生成 <stem>.md（默认 dry-run，--apply 才写）
-           [--profile <id>] [--profiles-file <json>] [--verify] [--repo <root>] [--apply] [--force]
+           [--profile <id>] [--profiles-file <json>] [--template <id|file>] [--verify] [--repo <root>] [--apply] [--force]
+  gallery  <dir> --vault <root> [--template <id|file>]  盘点目录并生成 <文件夹>/<文件夹名>.base（默认 dry-run）
+           [--profiles-file <json>] [--edge 256] [--apply] [--overwrite] [--fix-tags]
+           --fix-tags（需 --apply）给旧 sidecar 只补 annex-gallery-metadata 标签
   profiles --list                                      列出每条 profile 的 id/name/source/键顺序
   profiles --check                                     对全部 profile 跑 validateProfile（有 error 退 1）
   profiles --parse <名字> [--path <相对路径>] [--profile <id>]   打印解析出的键值、标出没命中的组
@@ -336,6 +377,8 @@ async function main(): Promise<void> {
       const sample = opt(flags, "sample");
       const ask: Record<string, string> = {};
       if (sample !== undefined && sample !== "") ask.sample = sample;
+      // 不给 --template 就不传（generate/build 内部用内置 default 模板，行为与改造前一致）。
+      const template = opt(flags, "template") === undefined ? undefined : loadTemplate(flags, "metadata", resolvedVault);
 
       if (flag(flags, "verify")) {
         runSidecarVerify(dir, {
@@ -344,6 +387,7 @@ async function main(): Promise<void> {
           ...(profile === undefined ? {} : { profile }),
           ask,
           ...(opt(flags, "tag") === undefined ? {} : { tag: opt(flags, "tag") }),
+          ...(template === undefined ? {} : { template }),
           json,
         });
         return;
@@ -370,6 +414,7 @@ async function main(): Promise<void> {
         ...(profile === undefined ? {} : { profile }),
         profiles,
         tag: opt(flags, "tag"),
+        ...(template === undefined ? {} : { template }),
         apply: flag(flags, "apply"),
         force: flag(flags, "force"),
         overwrite: flag(flags, "overwrite"),
@@ -385,6 +430,80 @@ async function main(): Promise<void> {
         `duplicateStems=${JSON.stringify(report.duplicateStems)}`,
         ...report.entries.map((e) => `  ${e.action} ${path.basename(e.sidecar)}${e.detail === undefined ? "" : ` (${e.detail})`}`),
       ]);
+      return;
+    }
+    case "gallery": {
+      if (positional[1] === undefined) throw new Error("gallery 需要 <dir>");
+      const dir = path.resolve(positional[1]);
+      const vaultRoot = opt(flags, "vault");
+      if (vaultRoot === undefined) throw new Error("gallery 需要 --vault <vaultRoot>（文件夹/画廊路径都相对 vault 算）");
+      const resolvedVault = path.resolve(vaultRoot);
+      const vaultName = path.basename(resolvedVault);
+      const rel = toPosix(path.relative(resolvedVault, dir));
+      if (rel === ".." || rel.startsWith("../")) {
+        throw new Error(`gallery 的 <dir> 不在 --vault 里：${dir}（vault=${resolvedVault}）`);
+      }
+      const folder = rel === "" || rel === "." ? "" : rel;
+
+      const edgeRaw = opt(flags, "edge");
+      let edge = 256;
+      if (edgeRaw !== undefined) {
+        const parsed = Number.parseInt(edgeRaw, 10);
+        if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`--edge 需要正整数：${edgeRaw}`);
+        edge = parsed;
+      }
+
+      const apply = flag(flags, "apply");
+      const overwrite = flag(flags, "overwrite");
+      const fixTags = flag(flags, "fix-tags");
+      if (fixTags && !apply) throw new Error("--fix-tags 只能和 --apply 一起用（dry-run 不写盘）");
+
+      const profiles = loadProfiles(flags);
+      const template = loadTemplate(flags, "base", resolvedVault);
+      const plan = planGallery(dir);
+      const properties = orderProperties(plan.keys, profiles.map((profile) => profile.keyOrder));
+      const built = buildGalleryBase(template, { folder, cardSize: edge, properties });
+      const targetRel = galleryFilePath(folder, vaultName);
+      const targetAbs = path.join(resolvedVault, targetRel);
+
+      const fixedTags: string[] = [];
+      let wrote = false;
+      if (apply) {
+        // 先拦「已存在」再动手：不加 --overwrite 时连 --fix-tags 的改动都不该发生。
+        if (fs.existsSync(targetAbs) && !overwrite) {
+          throw new Error(`画廊文件已存在：${targetRel}（要重新生成请加 --overwrite）`);
+        }
+        if (fixTags) {
+          for (const sidecar of plan.untagged) {
+            const before = fs.readFileSync(sidecar, "utf8");
+            const after = addGalleryTag(before);
+            if (after === null || after === before) continue;
+            fs.writeFileSync(sidecar, after, "utf8");
+            fixedTags.push(relPath(resolvedVault, sidecar));
+          }
+        }
+        fs.mkdirSync(path.dirname(targetAbs), { recursive: true });
+        fs.writeFileSync(targetAbs, built.text, "utf8");
+        wrote = true;
+      }
+
+      say(
+        json,
+        { plan, properties, target: targetRel, text: built.text, missing: built.missing, wrote, fixedTags },
+        [
+          `dir=${dir} vault=${resolvedVault} folder=${folder === "" ? "(vault 根)" : folder}`,
+          `images=${plan.images} tagged=${plan.tagged} untagged=${plan.untagged.length} missingSidecars=${plan.missingSidecars} missingThumbnails=${plan.missingThumbnails}`,
+          `properties=${JSON.stringify(properties)}`,
+          `template=${template.label}`,
+          `target=${targetRel}`,
+          ...(built.missing.length === 0 ? [] : [`模板里取不到值的占位符：${built.missing.join(", ")}（已留空）`]),
+          ...(apply
+            ? [`wrote=${wrote}${fixTags ? ` fixedTags=${fixedTags.length === 0 ? "0" : fixedTags.join(", ")}` : ""}`]
+            : ["dry-run：没有写任何文件（加 --apply 才写画廊）"]),
+          "--- gallery 内容 ---",
+          built.text,
+        ],
+      );
       return;
     }
     case "profiles": {

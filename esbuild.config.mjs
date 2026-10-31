@@ -16,7 +16,7 @@ const production = process.argv[2] === "production";
 const defaultsTextLoader = {
   name: "defaults-text",
   setup(build) {
-    build.onLoad({ filter: /\/defaults\/(gitattributes|gitignore)$/ }, async (args) => ({
+    build.onLoad({ filter: /\/defaults\/(gitattributes|gitignore|metadata\/[^/]+\.md|base\/[^/]+\.base)$/ }, async (args) => ({
       contents: await fs.promises.readFile(args.path, "utf8"),
       loader: "text",
     }));
@@ -43,7 +43,15 @@ const cliOptions = {
   // No shebang here: tools/cli.ts carries its own first-line shebang, and
   // esbuild hoists it to line 1 — emitting one here too produced a *double*
   // shebang and `node tools/annex-gallery.mjs` died with SyntaxError on line 2.
-  banner: { js: banner },
+  //
+  // `yaml` (brought in by src/core/gallery.ts) is CJS and calls `require("process")`;
+  // in an ESM bundle esbuild's `__require` shim throws "Dynamic require … is not
+  // supported" unless a real `require` exists in scope. createRequire gives it one.
+  banner: {
+    js: `${banner}
+import { createRequire as __annexCreateRequire } from "node:module";
+const require = __annexCreateRequire(import.meta.url);`,
+  },
   entryPoints: ["tools/cli.ts"],
   bundle: true,
   external: [...nodeBuiltins],

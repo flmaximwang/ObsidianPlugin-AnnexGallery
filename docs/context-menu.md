@@ -11,8 +11,11 @@
 - **展开交给平台**：子菜单由平台的悬停展开（或键盘 `→`）触发，不自己算 hover 计时、不自造弹出层 ——
   计时和键盘可达性一旦自己实现，就会和系统其它菜单不一致。
 - **作用域只到文件夹**：右键**文件**不出现本插件任何选项。单文件的操作走命令面板或设置页，菜单入口只承诺「对一个目录做批量事」。
-- **顺序即契约**：顺序固定为「生成类 → 入库类 → 传输类 → 危险操作」，危险操作永远最后一项。
-  顺序变了就是行为变更，要能被一条断言抓住（见 §5）。
+- **顺序即契约**：顺序固定为「生成类 → 入库类 → 传输类 → 危险操作」，危险操作永远最后一项
+  （子菜单共 9 项）。顺序变了就是行为变更，要能被一条断言抓住（见 §6）。
+- **标题只有一项跟随界面语言**：「创建画廊」在 Obsidian 界面语言以 `zh` 开头时显示中文，其余语言显示
+  `Create Gallery`；另外 8 项固定英文。它们对应的是 `git annex` 的操作名，中文标题反而和命令行对不上；
+  而「创建画廊」是纯插件概念，跟随界面语言才读得顺。
 
 示例（右键一个文件夹看到的菜单树）：
 
@@ -21,6 +24,7 @@
 └─ Annex Gallery                     images
    ├─ 生成元数据                      file-text
    ├─ 生成缩略图                      image
+   ├─ 创建画廊 / Create Gallery       layout-grid
    ├─ Add largefiles to Annex         package-plus
    ├─ Unlock & unannex largefiles     package-open
    ├─ Lock largefiles                 lock
@@ -32,11 +36,13 @@
 ## 2. 每一项的设计意图
 
 标题用英文、图标用 Obsidian 内置的 Lucide 名，是为了在别人的菜单里也认得出、且不依赖自定义图标资源。
+唯一例外是「创建画廊」的标题跟随界面语言（见 §1）。
 
 | 选项 | 做什么 | 交互原则 |
 |---|---|---|
 | 生成元数据 | 按 profile 写 `<stem>.md` 侧车（`src/core/sidecar.ts`） | 先确认解析配置与 `ask` 字段；已有侧车时**二次确认**（覆盖重算 / 只补缺失 / 取消） |
 | 生成缩略图 | 写 `<stem>.thumbnail.png`（`src/core/thumbnails.ts`） | 直接跑，结束时报告新建 / 跳过 / 失败三类 |
+| 创建画廊 / Create Gallery | 写 `<folder>/<folder 名>.base`（vault 根 → `<vault name>.base`，`src/core/gallery.ts`） | 先只读盘点；旧 sidecar 未打标签时**三选一**（补标签 / 跳过 / 取消）；`.base` 已存在时**三选一**（覆盖 / 打开已有 / 取消）；多份模板时先选模板 |
 | Add largefiles to Annex | 对目录内**图片**分批 `git annex add` | 直接跑；候选集 = 图片（排除缩略图） |
 | Unlock & unannex largefiles | `annex unlock` → `annex unannex` → `git annex add --force-small` | 直接跑；结束提示「还需一次 commit」 |
 | Lock largefiles | `annex lock`（整棵子树） | 直接跑；结束提示软链的代价（见 §3.7） |
@@ -74,6 +80,9 @@
    因为确认弹窗会被无脑点掉，写进结果至少留下了证据。这条是取舍，可以反过来（点之前先确认），但不要两头都不做。
 8. **子菜单只是分组，不是能力**。平台没有可用的子菜单 API 时，选项退回顶层菜单：**功能不丢，只是不好看**。
    任何组织方式都不应该成为「某些操作在旧环境里消失」的理由。
+9. **派生文件的 owner 不重叠**。创建画廊只写 `<文件夹>/<文件夹名>.base`；它唯一会碰 sidecar 的动作是
+   「补标签」，且是文本级最小改动 —— 只把 `annex-gallery-metadata` 插进 `tags` 第一项，别的字节不动，
+   不按 profile 重算、不改正文。理由与完整口径见 [`gallery.md`](gallery.md)。
 
 ## 4. 与平台 API 的边界
 
@@ -102,9 +111,10 @@
 
 | 命令 | 钉住什么 |
 |---|---|
-| `npm run smoke` | 桩加载构建产物：逐项断言 8 个选项的**顺序与图标**、顶层项只 `preventDefault`、右键文件不出现选项 |
+| `npm run smoke` | 桩加载构建产物：逐项断言 9 个选项的**顺序与图标**（第 3 项是 `layout-grid` 的创建画廊）、顶层项只 `preventDefault`、右键文件不出现选项、标题随界面语言在 `创建画廊` / `Create Gallery` 之间切换 |
 | `npm test` | `tests/test-annex-functions.cjs`：多对本地/远程 annex 仓库上的 6 个命令，判「无异常」+「不丢数据」 |
 | `npm run verify:annex` | 6 个操作在真 annex 仓库上的行为与报告（含插件路径：菜单 → 弹窗 → 真丢） |
 | `npm run verify:sidecar` | 生成元数据重跑的四条路径：`--plan` / 只补缺失 / `--overwrite` / 脏文件保护，加插件侧覆盖提示弹窗 |
+| `npm run verify:gallery` | 创建画廊：预检计数、补标签的文本级最小改动、作用域合并、输出路径与 `.base` 落盘 |
 
 顶层入口的其它入口（命令面板、ribbon）各有自己的口径，见 [`docs/commands.md`](commands.md) 等文档。

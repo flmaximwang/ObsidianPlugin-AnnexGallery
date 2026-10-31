@@ -273,17 +273,21 @@ async function main() {
     const items = folderMenu.items[0].submenu.items;
     const titles = items.map((item) => item.title);
     console.log(`    子菜单 ${titles.length} 项：${titles.join(" | ")}`);
-    check(titles.length === 8, "插件注册了 8 个菜单项");
+    check(titles.length === 9, "插件注册了 9 个菜单项");
     check(
       titles.join("|") ===
-        ["生成元数据", "生成缩略图", "Add largefiles to Annex", "Unlock & unannex largefiles", "Lock largefiles", "Unlock largefiles", "Get largefiles", "Drop largefiles"].join("|"),
+        ["生成元数据", "生成缩略图", "创建画廊", "Add largefiles to Annex", "Unlock & unannex largefiles", "Lock largefiles", "Unlock largefiles", "Get largefiles", "Drop largefiles"].join("|"),
       "顺序与用户口径逐项一致",
     );
 
     const unlockItem = items.find((item) => item.title === "Unlock largefiles");
     check(unlockItem !== undefined && typeof unlockItem.callback === "function", "找到「Unlock largefiles」菜单项");
     unlockItem.callback();
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // 等完成报告出现（最多 15 秒）—— 固定睡 400ms 在机器忙时会读到「进行中」那条 Notice。
+    for (let waited = 0; waited < 15000; waited += 100) {
+      if (stub.registry.notices.some((n) => typeof n === "string" && /Unlock largefiles 完成/.test(n))) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     const unlockNotice = stub.registry.notices.filter((n) => typeof n === "string" && n.includes("Unlock largefiles")).pop() ?? "";
     console.log(`    「Unlock largefiles」→ ${unlockNotice.split("\n").join(" / ")}`);
     check(/Unlock largefiles 完成/.test(unlockNotice), "菜单项跑完给出完成报告");

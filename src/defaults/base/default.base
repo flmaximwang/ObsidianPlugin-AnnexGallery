@@ -1,0 +1,16 @@
+# Annex Gallery 内置画廊模板：一个卡片视图，只显示文件名 + 缩略图。
+# 可用占位符（两层花括号包住）：folder（画廊所在文件夹）· cardSize（= 设置里的缩略图边长）· properties（找到的元数据键）。
+# 顶层 filters 由插件生成：file.inFolder(<文件夹>) 且 file.hasTag("annex-gallery-metadata")；
+# 模板自己写的 filters 会被并进去，只能收窄、不能放宽。
+views:
+  - type: cards
+    name: Gallery
+    order:
+      - file.name
+    sort:
+      - property: file.name
+        direction: ASC
+    image: note.thumbnail
+    imageAspectRatio: 1
+    imageFit: contain
+    cardSize: {{cardSize}}

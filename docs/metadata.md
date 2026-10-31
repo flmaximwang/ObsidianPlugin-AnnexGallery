@@ -26,6 +26,12 @@ schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的�
 同时把它加进 `keyOrder`）。表里写了、但上面五种来源都取不到值的键**被省略**，并在这份 sidecar 的
 detail 里记一句「keyOrder 里的 "X" 取不到值，已省略」（例如下面示例里的 `notes`）。
 
+**唯一例外：`tags` 的第一项。** 每份 sidecar 的 `tags` 第一项永远是 `annex-gallery-metadata`
+（`GALLERY_TAG`，画廊靠它认 sidecar），不论 `keyOrder` 里有没有 `tags`：有 `tags` 时标签排在
+profile 给出的值前面；没有 `tags` 时仍会在最前面补一行 `tags:`，只带这一个标签。理由：成员资格若交给
+`keyOrder` 决定，改一次 profile 就能让一批 sidecar 悄悄从所有画廊里消失。完整口径见
+[`gallery.md`](gallery.md) §6。
+
 ## 三条硬规则
 
 1. `fields` 里**没列出的具名组 = 丢弃**。这是为了能把正则写成分支：两条路写进同一条正则，短的那条
@@ -90,6 +96,7 @@ detail 里记一句「keyOrder 里的 "X" 取不到值，已省略」（例如�
 ```
 ---
 tags:
+  - annex-gallery-metadata
   - 20260417-plate-run
 sample: "<specimen>"
 session: "20260417-plate-run"
@@ -113,7 +120,36 @@ tif: "[[20260417-plate-run/plate01_wellA3_4000x_007.png]]"
 ```
 
 （`notes` 没有任何来源 ⇒ 被省略，detail 记「keyOrder 里的 "notes" 取不到值，已省略」；同一批里
-`plate02_4000x_012` 没有孔位段 ⇒ 可选组未命中，`well: ""`。）
+`plate02_4000x_012` 没有孔位段 ⇒ 可选组未命中，`well: ""`。`tags` 第一项是强制标签
+`annex-gallery-metadata`，profile 派生的路径段跟在后面 —— 即使 `keyOrder` 里没有 `tags`，这一项也在。）
+
+## metadata 模板（`metadataTemplate`）
+
+profile 决定 frontmatter，**模板决定 sidecar 的整份文本**（frontmatter + 正文）。profile 的
+`metadataTemplate` 字段指定默认用哪份模板，不写等价于 `"default"`；「生成元数据」弹窗里还有一个模板
+下拉框，优先级是**按文件夹记住的 > `profile.metadataTemplate` > 内置 `default`**。
+
+模板的硬约束与占位符：
+
+- **第一行必须是 `{{frontmatter}}`，且只能出现一次** —— frontmatter 只能写在文件开头，由 profile
+  生成；模板决定不了里面有哪些键。不满足就让整批 sidecar 一份都不写（见下）。
+- 正文占位符：`{{thumbnail}}` / `{{tif}}` / `{{stem}}`，以及 `{{<任意键>}}`。取值与 frontmatter
+  同一套解析（解析 / 常量 / 询问 / 派生 / 自动），**包括不在 `keyOrder` 里的键** —— 例如一条 profile
+  为了少写字段把 `thumbnail` 从 `keyOrder` 里省掉，正文照样拿得到它。
+- 取不到值的占位符替换成空串，并在这份 sidecar 的 detail 里记「模板里的 `{{name}}` 取不到值，已留空」
+  （笔误 `{{fooo}}` 同样处理）。**模板本身**坏了（文件不存在、第一行不是 `{{frontmatter}}`）才整体停下，
+  不静默回退到内置默认。
+
+内置模板只有两份，源码在 `src/defaults/metadata/`（构建时内联，源码里只有这一份）：
+
+| id | 正文 |
+|---|---|
+| `default` | 与改造前硬编码的正文逐字节相同（缩略图链接 + 原图链接两行） |
+| `embed` | `!{{thumbnail}}` 直接嵌入缩略图 + 原图链接 |
+
+自定义模板是 vault 里的 `.md`，在设置页「模板」区登记（内置的可以「复制为自定义」，副本落在
+`Annex Gallery Templates/`）。选哪份、怎么登记、加画廊时怎么用，见 [`gallery.md`](gallery.md) §8 与
+[`setting-panel.md`](setting-panel.md)。
 
 ## 命令行
 
@@ -122,10 +158,11 @@ node tools/annex-gallery.mjs profiles --list
 node tools/annex-gallery.mjs profiles --check [--profiles-file <json>]
 node tools/annex-gallery.mjs profiles --parse <名字> [--path <相对路径>] [--profile <id>]
 node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> --profile <id> \
-  [--profiles-file <json>] [--apply|--verify]
+  [--profiles-file <json>] [--template <id|file>] [--apply|--verify]
 ```
 
 `--profiles-file` 传 profile 数组或 `{ "profiles": [ … ] }`，不给就用内置 `DEFAULT_PROFILES`。
+`--template` 认内置模板 id 或模板文件路径（CLI 不读设置，自定义模板直接给文件）。
 合成语料、两条 profile 与一键复跑脚本见 [`tools/cli.md`](tools/cli.md)。
 
 ## 判据
@@ -133,5 +170,6 @@ node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> -
 | 命令 | 钉住什么 |
 |---|---|
 | `npm run verify:sidecar` | 重跑语义：`--plan` 不写盘、默认只补缺失、`--overwrite` 覆盖重算、脏文件保护 |
-| `npm run smoke` | 设置页的 profile 编辑器、解析预览、右键弹窗与落盘 |
+| `npm run verify:gallery` | 标签：`tags` 第一项恒为 `annex-gallery-metadata`（含 `keyOrder` 没有 `tags` 的 profile）；metadata 模板：内置 `default` 与改造前逐字节相同、`embed`、占位符缺值留空、坏模板整体停下 |
+| `npm run smoke` | 设置页的 profile 编辑器、解析预览、右键弹窗与落盘；设置页「模板」区（内置只读 / 复制为自定义 / 登记 / 删除只取消登记） |
 | `npm test` | sidecar 与 annex 操作的组合场景（含内容逐字节不变的断言） |

@@ -7,7 +7,7 @@
 - 设置页的**顶层顺序**：从标题到最后一条普通设置项，各区块的落点与前后关系；
 - 区块内部的几何**关系式**：左边缘对齐、上下间隙相等、跨行同列、同一行不换行、撑满内容宽；
 - 控件的行为契约：工具条三个入口、卡片的编辑/保存/复制/打开/删除与状态胶囊、remote 行的增删与落盘、
-  「初始化 gallery」对 remote 的写入语义；
+  「模板」区的内置只读 / 复制为自定义 / 登记 / 删除（只取消登记）、「初始化 gallery」对 remote 的写入语义；
 - 每条契约由哪条命令钉住、钉到什么程度。
 
 **不管什么**
@@ -62,14 +62,27 @@
 │ └──────────────────────────────────────────────────────┘        │
 │                                     [删除] [打开] [复制] [保存]   │  ← 整排贴右下角
 └─────────────────────────────────────────────────────────────────┘
-────────────────── HR.annex-settings-divider（模版 ↔ 普通设置项）──────────────────
+┌ .annex-templates-card[data-kind=metadata] ──────────────────────┐
+│ metadata 模板                                                   │
+│ 一行说明：第一行必须是 {{frontmatter}}，正文可用 …              │
+│ 默认（缩略图链接 + 原图链接） id: default · 内置                │
+│                     [查看] [复制为自定义]                       │
+│ 嵌入缩略图（![[…]] + 原图链接） id: embed · 内置                │
+│                     [查看] [复制为自定义]                       │
+│ <名字>  id: <id>  <vault 路径>   [删除]                         │
+│ [vault 里的模板文件路径（.md）] [登记]                          │
+└─────────────────────────────────────────────────────────────────┘
+┌ .annex-templates-card[data-kind=base] ──────────────────────────┐
+│ 画廊模板（同上；内置只有 default，.base）                       │
+└─────────────────────────────────────────────────────────────────┘
+────────────────── HR.annex-settings-divider（模板 ↔ 普通设置项）──────────────────
 缩略图边长  [<n>]                     ← app 自己的 .setting-item，唯一剩下的普通设置项
 ```
 
 ### 必须成立的不变量
 
 - **顶层顺序**（离屏与真机必须逐字一致）：
-  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → HR.annex-settings-divider → DIV.setting-item`。
+  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item`。
 - **标题**是内容区第一个子元素，是真正的 `<h1>`（`containerEl.createEl("h1", …)`），下方无说明文字；
   `display: block`、`padding: 0`、只保留一行底部外边距。标题左边缘 = 卡片左边缘 = 内容区左边缘。
 - **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
@@ -91,10 +104,23 @@
   = ok / warn / error）；等宽 textarea 就地编辑；校验消息逐条列在文本框下方；解析预览由一个全宽的示例
   文件名输入框驱动，输入即解析，结果区带 1px 边框、每行一条 `key = value`；动作按钮整排贴卡片右下角，
   DOM 顺序 删除→打开→复制→保存。
+- **模板区**是 `.annex-templates-section` 里的**两张卡片**：`data-kind=metadata`（`metadata 模板`）与
+  `data-kind=base`（`画廊模板`）。卡片撑满内容宽、`h3` 标题左对齐内容左，标题下一行说明（metadata 模板
+  写清「第一行必须是 `{{frontmatter}}`」，画廊模板写清三个占位符与「作用域只能收窄」）。每行一行放下、
+  不换行：名字贴左、按钮组贴右，中间的 `id:` / vault 路径吃掉剩余宽度（过长省略号）；各行都撑满卡片
+  内容宽，按钮右缘互相对齐。内置行 = 名字 · `id: <id> · 内置` · 按钮组；自定义行 = 名字 · `id:` ·
+  vault 路径 · 删除。每张卡片最后一行是登记行，输入框吃掉剩余宽度、按钮贴右。
+- **模板区的行为**：内置模板以**只读**方式展示 —— 「查看」开一个只读弹窗，正文就是 `src/defaults/` 里
+  那一份；「复制为自定义」把原文写进 vault 的 `Annex Gallery Templates/`（路径被占用时自动加后缀），
+  并登记成一条自定义模板。自定义行的「删除」**只取消登记、不删文件**（`aria-label` 写明这一点）。
+  登记行接受 vault 相对路径：扩展名必须是 `.md`（metadata）/ `.base`（画廊）、文件必须存在、同一路径
+  不能重复登记，否则只弹 Notice、不落盘。登记成功时 `id` 由文件名生成（小写、ASCII 非字母数字转 `-`，
+  中文保留；与已有 id 去重，重名依次加 `-2` / `-3`），`name` 取文件名。模板区的保存口径与 remote 区一致：
+  **改动即写 `data.json`，没有「保存」按钮**。
 - **状态胶囊只有三个词**：`Saved` / `Unsaved changes` / `Syntax Error`。校验的 error/warn 逐条列在文本框
   下方，不占用这三个词。
-- **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与工具条之间，两侧留白相等；下面那条在卡片与
-  普通设置项之间。
+- **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与工具条之间，两侧留白相等；下面那条在
+  模板区与普通设置项之间。
 - **普通设置项只剩一条**「缩略图边长」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
   这种东西 —— 那三行在设置页不出现。
 
@@ -102,14 +128,18 @@
 
 | 落点 | 内容 |
 |---|---|
-| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`display()` 负责顶层顺序与标题/两条分割线的创建；`PluginSettings` / `DEFAULT_SETTINGS`；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()`；`hide()` 收摊 |
+| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`display()` 负责顶层顺序与标题/两条分割线/两个区块的创建；`PluginSettings` / `DEFAULT_SETTINGS`（含 `metadataTemplates` / `baseTemplates` / 两个按文件夹记住的模板字段）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()`；`hide()` 收摊 |
 | `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：`.annex-remotes-card`、`.annex-remote-list`、`.annex-remote-row`、`.annex-remote-note(-warn)`、`.annex-remote-add` |
 | `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-card`、`-head` / `-name` / `-id` / `-status` / `-json` / `-messages`、`.annex-preview` / `-title` / `-filename` / `-result` / `-actions`；示例名到 stem 的换算 |
+| `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-view-btn` / `-copy` / `-del`、`.annex-template-add-row` / `-path-input` / `-add`；`TEMPLATE_FOLDER`（`Annex Gallery Templates/`）、`uniqueTemplateId()`；只读查看弹窗 |
+| `src/core/templates.ts` | 模板 id / 内置清单 / `TemplateRef`（`id` · `name` · vault 相对 `path`）/ `resolveTemplate()` / 占位符填充 / metadata 模板的 `{{frontmatter}}` 硬约束 |
+| `src/defaults/metadata/*.md`、`src/defaults/base/*.base` | 内置模板正文 —— 源码里的唯一一份，构建时由 `defaults-text` 内联（与 `.gitattributes` 同一条路） |
 | `src/ui/external-edit.ts` | 外部编辑通道：临时缓冲文件、`openWithDefaultApp()`、mtime+size 轮询与回灌 |
 | `src/core/profiles.ts` | `FieldType`、`ParseProfile`、`TEMPLATE_PROFILE`（新模版用的通用模板）、`TECNAI_TEM_PROFILE`、`DEFAULT_PROFILES` |
 | `src/core/remotes.ts` | `scanRemotes()` / `mergeScannedRemotes()` / `applyRemotes()` |
 | `src/core/stems.ts` | `stemOf()` —— 全插件唯一的 stem 实现 |
 | `styles.css` | 本页全部选择器；与 app.css 的对抗关系写在注释里 |
+| `esbuild.config.mjs` | `defaults-text` 插件把 `src/defaults/metadata/*.md`、`src/defaults/base/*.base` 内联成字符串（内置模板只有源码这一份） |
 | `tools/layout-check.cjs` | 离屏几何（`npm run layout`） |
 | `tools/real-gui-check.py` | 真机结构（`npm run gui`） |
 | `tools/smoke-test.cjs` / `tools/remotes-check.cjs` | 无头结构与落盘、remote 写入语义 |
@@ -120,6 +150,7 @@
 |---|---|---|
 | `.vertical-tab-content h1.annex-settings-title` | (0,2,1) | app.css 的 `.vertical-tab-content h1`（隐藏 + 行内 padding，约 (0,1,1)） |
 | `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | 同一批给 h3 的行内 padding |
+| `.vertical-tab-content h3.annex-templates-title` | (0,2,1) | 同上（模板区两张卡片的标题） |
 | `.annex-profiles-toolbar select.annex-profile-preset` | (0,2,1) | `.dropdown { max-width: 100% }` 与 `.theme-dark .dropdown`（(0,1,0)；同权重靠顺序太脆） |
 | `.annex-remotes-divider` | 与 `.annex-settings-divider` 同权重，按出现顺序接管 `margin` | 共用外观类 + 自己的类：外观复用，位置与留白单独可测 |
 
@@ -188,6 +219,12 @@
 16. **`.gitattributes` / `.gitignore` 不暴露路径，没有默认样品名。** 合并目标固定为 `<vault>/.gitattributes`
     与 `<vault>/.gitignore`；旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample`
     在 `loadSettings()` 里删掉。样品名每次生成 metadata 都在弹窗里填（仍按文件夹记住上次的值，只是预填）。
+17. **内置模板以源码文件为唯一一份。** 设置页只读展示 + 「复制为自定义」，模板文本不抄进 `data.json`、
+    也不另存一份设置页常量：两份文本一旦分叉，判据就不知道以哪一份为准。「复制为自定义」是拿到可改副本
+    的唯一路径，副本是 vault 里受 git 管理的普通文件。
+18. **「删除」只取消登记，不删文件。** 模板文件是 vault 里的数据，插件只持有 `{ id, name, path }` 这三项
+    指针；删文件不可撤销，而取消登记随时可以再登记回来。这与 remote 区「只写配置、不代做网络动作」是同一
+    种取舍：设置页只承诺它真的能负责的那一段。
 
 ### 示例名到 stem 的换算
 
@@ -228,7 +265,7 @@
 
 ## 6. 字段与默认值（`data.json`）
 
-落进 `data.json` 的只有五项：
+落进 `data.json` 的只有九项：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
@@ -237,6 +274,10 @@
 | `profiles` | 内置 TECNAI 电镜 | metadata 解析配置；工具条的「新模版 / 导入模版 / 添加预设」增，卡片上的「保存 / 复制 / 打开 / 删除」改。 |
 | `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（内置默认只有 `sample`）。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
 | `folderProfiles` | `{}` | 按文件夹记住上次选的 profile id。 |
+| 自定义 metadata 模板（`metadataTemplates`） | `[]` | 一条 = `{ id, name, path }`；`path` 是 vault 相对路径。内置模板不在这里（见 `src/defaults/metadata/`）。 |
+| 自定义画廊模板（`baseTemplates`） | `[]` | 同上，文件扩展名是 `.base`。 |
+| 按文件夹记住的 metadata 模板（`folderMetadataTemplates`） | `{}` | 文件夹绝对路径 → 模板 id；「生成元数据」弹窗的模板下拉框预选它。 |
+| 按文件夹记住的画廊模板（`folderBaseTemplates`） | `{}` | 文件夹绝对路径 → 模板 id；「创建画廊」的模板选择预选它。 |
 
 两条规则文件（`.gitattributes` / `.gitignore`）不在设置里，见 [`commands.md`](commands.md)。
 
@@ -245,7 +286,7 @@
 | 命令 | 钉住什么 | 钉不住什么 |
 |---|---|---|
 | `npm run build` | 产物 `main.js` / `styles.css` 可生成 | 任何版式 |
-| `npm run smoke` | 无头加载构建产物：设置页结构（remote 区、两条分割线、三态胶囊、无解析按钮、无 relpath 格）、导入 `.json`、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
+| `npm run smoke` | 无头加载构建产物：设置页结构（remote 区、模板区、两条分割线、三态胶囊、无解析按钮、无 relpath 格）、导入 `.json`、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
 | `npm run layout` | 离屏几何：真实 app.css + 真实 DOM + headless Chromium，只回答「结构没塌」 | 下拉宽度、控件外观、运行时行为 |
 | `npm run remotes` | 真 git 仓库上的 add / set-url / 幂等 / dry-run / 扫描合并 / 非仓库不报错 | 设置页 UI |
 | `npm run gui` | 真机：原生 select 的宽度与外观、`openPath` 的路径语义、popout 分治、重载后的 CSS、外部编辑回灌 | 配色与审美 |
@@ -258,13 +299,18 @@
 无头加载构建产物，断言的是结构与落盘，例如：
 
 ```
-- 顶层 children 顺序；children[2] 就是 annex-remotes-divider
+- 顶层 children 顺序；children[2] 就是 annex-remotes-divider，children[4] 就是 annex-templates-section
 - 标题是一条 h1，且 styles.css 里 .annex-settings-title 的 margin / padding 都被清零
 - 状态胶囊三态：改一个字符 → Unsaved changes，敲坏 JSON → Syntax Error，存回去 → Saved
 - annex-preview-relpath 数 = 0（没有相对路径那一格）
 - annex-preview-run 数 = 0（没有解析按钮）
 - 「新模版」来自通用模板 TEMPLATE_PROFILE（不是电镜预设）
 - 导入一个 .json 后卡片数 +1 且落盘
+- 模板区：两张卡片（data-kind = metadata / base）；内置行数 = 内置清单（metadata 2 条、画廊 1 条）
+- 内置行「查看」开只读 textarea，内容是内置模板原文（含 {{frontmatter}}）
+- 「复制为自定义」写出一个文件到 Annex Gallery Templates/，并登记成一条自定义行、落进 data.json
+- 登记一个不存在的路径 ⇒ 只多一条 Notice，不新增行、data.json 不变
+- 自定义行「删除」只取消登记（data.json 里也去掉），文件仍在盘上
 - 第二条分割线以下 data-name 列表 = ["缩略图边长"]
 - remote 的增删改、落盘、读回
 ```
@@ -284,6 +330,7 @@
 - 示例文件名输入框宽度 = 卡片内宽
 - 解析结果: border=1px solid；命中时行数 = 解析出的字段数
 - 动作按钮 L→R = 删除/打开/复制/保存，最右「保存」贴住卡片内容右边缘
+- 模板区: 两张卡片撑满内容宽；每行不换行、按钮右缘对齐；登记行输入框吃掉剩余宽度、按钮贴右
 ```
 
 remote 区同一套量法（装两条时）：
@@ -359,4 +406,7 @@ ANNEX_SHOT=<shot-path> npm run gui     # 真机判据 + 截图
 - **状态胶囊只覆盖三个词。** 校验 error/warn 仍逐条列在文本框下方，不并入胶囊。
 - **`keyOrder` 之外的键一律不写。** `constFields.eagleId` 因此在，但不进 frontmatter；要写得改 `keyOrder`。
 - **remote 的写入是配置层面的。** 只 `add` / `set-url`，不 fetch、不 push、不改工作区；`dry-run` 只报不写。
+- **模板登记只是指针，不复制内容。** 自定义模板文件被移走 / 改名 / 改坏之后，下次生成时按「模板读不了 /
+  第一行不是 `{{frontmatter}}` / 不是合法 YAML」整体停下，不退回内置默认；Notice 指名 vault 路径，
+  按路径修文件或重新登记即可。内置模板文本只读，要改就「复制为自定义」。
 - **配色与观感没有自动判据。** 最终要人眼看那张真机截图（skill `inspect-obsidian-gui-with-maxim`）。
