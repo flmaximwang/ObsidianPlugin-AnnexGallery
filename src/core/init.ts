@@ -125,11 +125,6 @@ function readLocalSetting(root: string, key: string): string | null {
   return readConfigValue(["config", "--local", "--get", key], root);
 }
 
-/** `git config --get <key>`：**git 配置那层**的值（本机 > 全局 > 系统）；都没设 → `null`。 */
-function readEffectiveSetting(root: string, key: string): string | null {
-  return readConfigValue(["config", "--get", key], root);
-}
-
 /**
  * 全局 / 系统那层的值（本机那条不算）。
  *
@@ -233,7 +228,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
       clearLocalSetting(
         root,
         ADD_UNLOCKED_KEY,
-        localAddUnlocked as string,
+        localAddUnlocked,
         `本机覆盖是 ${localAddUnlocked}，优先于分支、会把新文件压成 locked`,
         dryRun,
         progress,
@@ -248,7 +243,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
   const localThinOn = localThin !== null && isTruthyValue(localThin);
   if (localThinOn) {
     localRepairs.push(
-      clearLocalSetting(root, THIN_KEY, localThin as string, "本机开着 thin（hardlink 模式），口径是不 thin", dryRun, progress),
+      clearLocalSetting(root, THIN_KEY, localThin, "本机开着 thin（hardlink 模式），口径是不 thin", dryRun, progress),
     );
   } else if (localThin !== null) {
     progress(`${THIN_KEY}（本机）是 ${localThin}，已经是「不 thin」，未改动`);

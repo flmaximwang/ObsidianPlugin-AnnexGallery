@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
+import type { SettingDefinitionControl, SettingDefinitionItem, SettingDefinitionRender } from "obsidian";
 import type { ProfileFileRef } from "../core/profile-files";
 import type { RemoteEntry } from "../core/remotes";
 import type { TemplateRef } from "../core/templates";
@@ -118,70 +119,173 @@ export interface SettingsHost extends ProfileEditorHost, TemplatesEditorHost {
 
 export class AnnexGallerySettingTab extends PluginSettingTab {
   private readonly host: SettingsHost;
+  /** 本次「打开设置页」是否已经扫过仓库 remote；hide() 重置。 */
+  private remotesScanDone = false;
+  /** 扫描在途：update() 重渲染时不再并发触发。 */
+  private remotesScanInFlight = false;
 
-  constructor(app: App, host: SettingsHost) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    super(app, host as any);
-    this.host = host;
+  constructor(app: App, plugin: Plugin & SettingsHost) {
+    super(app, plugin);
+    this.host = plugin;
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
+  /**
+   * Obsidian 1.13+ 的声明式设置页：整页由定义生成，`display()` 不再被调用。
+   *
+   * 顺序与旧版一致：remote 编辑器 → 文件名匹配模板（旧内联提示 + ProfileEditor）→
+   * 模板区（TemplatesEditor）→ 两个普通设置项。两条 `<hr>` 分割线换成 group 的 heading；
+   * 三个编辑器用 render 项挂载（name/desc 只用于设置搜索，编辑器自带卡片标题）。
+   */
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        // 没有 heading：RemotesEditor 卡片自带「remote 设置」标题，避免重复。
+        type: "group",
+        cls: "annex-editors-group",
+        items: [this.remotesDefinition()],
+      },
+      {
+        type: "group",
+        heading: "文件名匹配模板与模板",
+        cls: "annex-editors-group",
+        items: [this.profilesDefinition(), this.templatesDefinition()],
+      },
+      {
+        type: "group",
+        heading: "常规",
+        items: [this.thumbnailEdgeDefinition(), this.debugLoggingDefinition()],
+      },
+    ];
+  }
 
-    // 标题：没有说明文字（spec「标题下方无说明」）。
-    containerEl.createEl("h1", { cls: "annex-settings-title", text: "Annex Gallery Settings" });
+  /**
+   * 默认实现写 `this.plugin.settings` 后直接 `plugin.saveData()`；这里统一走
+   * `host.saveSettings()`，并保证「缩略图边长」读出来一定是合法正整数。
+   */
+  getControlValue(key: string): unknown {
+    if (key === "thumbnailEdge") {
+      const edge = this.host.settings.thumbnailEdge;
+      return Number.isInteger(edge) && edge > 0 ? edge : DEFAULT_SETTINGS.thumbnailEdge;
+    }
+    if (key === "debugLogging") return this.host.settings.debugLogging;
+    return undefined;
+  }
 
-    // 最上方、profile 卡片之前：remote 设置（一个 item 装多条 remote）。
-    const remotesSection = containerEl.createDiv({ cls: "annex-remotes-section" });
-    new RemotesEditor(remotesSection, this.host).render();
+  /** 覆写持久化路径：先落到 `host.settings`，再走插件自己的 `saveSettings()`。 */
+  setControlValue(key: string, value: unknown): void | Promise<void> {
+    if (key === "thumbnailEdge") {
+      const edge = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+      this.host.settings.thumbnailEdge =
+        Number.isInteger(edge) && edge > 0 ? edge : DEFAULT_SETTINGS.thumbnailEdge;
+      return this.host.saveSettings();
+    }
+    if (key === "debugLogging") {
+      this.host.settings.debugLogging = Boolean(value);
+      return this.host.saveSettings();
+    }
+    return undefined;
+  }
 
-    // remote 设置与模版设置之间也来一条分割线（用户 2026-10-17 追加）。
-    containerEl.createEl("hr", { cls: "annex-remotes-divider annex-settings-divider" });
+  /** 关闭设置页后允许下一次打开再扫一遍仓库 remote（口径与旧 `display()` 一致）。 */
+  hide(): void {
+    this.remotesScanDone = false;
+    super.hide();
+  }
 
-    // 多配置编辑器：路径登记 / 从预设创建 + 每行一条已登记的外部 JSON。
-    // ProfileEditor 会清空自己的容器，所以旧配置提示和编辑器各用一个子容器。
-    const profilesSection = containerEl.createDiv({ cls: "annex-profiles-section" });
-    this.renderLegacyInlineProfilesWarning(profilesSection);
-    const profilesEditor = profilesSection.createDiv({ cls: "annex-profiles-editor" });
-    new ProfileEditor(profilesEditor, this.host).render();
+  private remotesDefinition(): SettingDefinitionRender {
+    return {
+      name: "remote 设置",
+      desc: "「初始化 gallery」会逐个执行 git remote add（同名已存在就 git remote set-url）；只写配置、不 fetch 也不 push。名称与地址都填了才生效。",
+      render: (setting) => {
+        const container = this.mountEditor(setting, "annex-remotes-section");
+        new RemotesEditor(container, this.host).render();
+        this.scheduleRemoteScan();
+      },
+    };
+  }
 
-    // 模板区：metadata 模板 + 画廊模板（登记外部文件 / 从预设创建 / 打开 / 取消登记）。
-    const templatesSection = containerEl.createDiv({ cls: "annex-templates-section" });
-    new TemplatesEditor(templatesSection, this.host).render();
+  private profilesDefinition(): SettingDefinitionRender {
+    return {
+      name: "文件名匹配模板",
+      desc: "每条文件名匹配模板是 vault 里的一个 .json 文件；在这里登记路径，或从预设创建。",
+      render: (setting) => {
+        // ProfileEditor 会清空自己的容器，所以旧配置提示和编辑器各用一个子容器。
+        const container = this.mountEditor(setting, "annex-profiles-section");
+        this.renderLegacyInlineProfilesWarning(container);
+        const editor = container.createDiv({ cls: "annex-profiles-editor" });
+        new ProfileEditor(editor, this.host).render();
+      },
+    };
+  }
 
-    // 分割线以下才是剩下的普通设置项（spec 只留「缩略图边长」）。
-    containerEl.createEl("hr", { cls: "annex-settings-divider" });
+  private templatesDefinition(): SettingDefinitionRender {
+    return {
+      name: "metadata 与画廊模板",
+      desc: "metadata 模板是 vault 里的 .md，画廊模板是 vault 里的 .base；在这里登记或从预设创建。",
+      render: (setting) => {
+        const container = this.mountEditor(setting, "annex-templates-section");
+        new TemplatesEditor(container, this.host).render();
+      },
+    };
+  }
 
-    new Setting(containerEl)
-      .setName("缩略图边长")
-      .setDesc("生成 .thumbnail.png 时的边长（px）。建议与 .base 的 cardSize 保持一致，默认 256。")
-      .addText((text) =>
-        text.setValue(String(this.host.settings.thumbnailEdge)).onChange(async (value) => {
-          const edge = Number.parseInt(value, 10);
-          this.host.settings.thumbnailEdge = Number.isFinite(edge) && edge > 0 ? edge : DEFAULT_SETTINGS.thumbnailEdge;
-          await this.host.saveSettings();
-        }),
-      );
+  private thumbnailEdgeDefinition(): SettingDefinitionControl<"thumbnailEdge"> {
+    return {
+      name: "缩略图边长",
+      desc: "生成 .thumbnail.png 时的边长（px）。建议与 .base 的 cardSize 保持一致，默认 256。",
+      control: {
+        type: "number",
+        key: "thumbnailEdge",
+        defaultValue: DEFAULT_SETTINGS.thumbnailEdge,
+        min: 1,
+        step: 1,
+        validate: (value) => (Number.isInteger(value) && value > 0 ? undefined : "请输入正整数（px）"),
+      },
+    };
+  }
 
-    new Setting(containerEl)
-      .setName("调试日志")
-      .setDesc("把 git / git-annex 的进度输出到开发者控制台。默认关闭。")
-      .addToggle((toggle) =>
-        toggle.setValue(this.host.settings.debugLogging).onChange(async (value) => {
-          this.host.settings.debugLogging = value;
-          await this.host.saveSettings();
-        }),
-      );
+  private debugLoggingDefinition(): SettingDefinitionControl<"debugLogging"> {
+    return {
+      name: "调试日志",
+      desc: "把 git / git-annex 的进度输出到开发者控制台。默认关闭。",
+      control: {
+        type: "toggle",
+        key: "debugLogging",
+        defaultValue: DEFAULT_SETTINGS.debugLogging,
+      },
+    };
+  }
 
-    // 每次打开设置页也扫一遍仓库里的 remote（在 Obsidian 外面加过 remote 时能立刻看到）；
-    // 只有真的补进了新条目才重渲染，避免无限循环。
+  /**
+   * render 项挂到框架给的 `.setting-item-control`：框架在每次重渲染前会 `Setting.clear()`
+   * 清空这个容器，不会叠加旧卡片；`settingEl` 则要留给框架的 name/desc。
+   */
+  private mountEditor(setting: Setting, cls: string): HTMLElement {
+    setting.settingEl.addClass("annex-editor-row");
+    return setting.controlEl.createDiv({ cls });
+  }
+
+  /**
+   * 打开设置页时扫一遍仓库 remote（口径与旧 `display()` 末尾一致）；补进新条目才 `update()`。
+   *
+   * 递归保护：本次打开只扫一轮（`remotesScanDone`），在途时不再触发；`hide()` 后才允许下一次。
+   * 因此 `update()` → 重渲染 → render 回调不会再次发起扫描。
+   */
+  private scheduleRemoteScan(): void {
+    if (this.remotesScanDone || this.remotesScanInFlight) return;
+    this.remotesScanInFlight = true;
     void this.host
       .scanVaultRemotes()
       .then((added) => {
-        if (added > 0) this.display();
+        this.remotesScanInFlight = false;
+        this.remotesScanDone = true;
+        if (added > 0) this.update();
       })
-      .catch((error) => console.error(error));
+      .catch((error) => {
+        this.remotesScanInFlight = false;
+        this.remotesScanDone = true;
+        console.error(error);
+      });
   }
 
   /**

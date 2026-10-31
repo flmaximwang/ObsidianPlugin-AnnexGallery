@@ -182,21 +182,42 @@ writeText("Templates/broken.base", "views: [\n");
   stub.registry.menus[0](fileMenu, new stub.TFile("TEM/TEM 图库.md"), "file-explorer");
   assert(fileMenu.items.length === 0, "右键文件不出现任何菜单项（只对文件夹生效）");
 
-  // ── 2. 设置页骨架：h1 / remote / 两条分割线 / 普通设置项 ─────────────────
+  // ── 2. 设置页骨架：声明式定义 / remote / 编辑器挂载 / 普通设置项 ───────────
   const tab = stub.registry.tabs[0];
-  tab.display();
-  const titleEl = one(tab.containerEl, "annex-settings-title");
-  console.log(`设置页标题：${titleEl === undefined ? "(缺)" : JSON.stringify(titleEl.textContent)}`);
-  assert(titleEl !== undefined && titleEl.tagName === "H1", "设置页顶部是一个 h1");
-  assert(titleEl.textContent === "Annex Gallery Settings", "h1 文本 = 「Annex Gallery Settings」");
-  assert(tab.containerEl.children[0] === titleEl, "h1 是内容区的第一个元素");
-  assert(/margin:\s*0[^;]*;/.test(rule(".annex-settings-title")) && /padding:\s*0/.test(rule(".annex-settings-title")), "styles.css：标题没有 padding/margin（与左侧设置项对齐）");
-  assert(byClass(tab.containerEl, "annex-profiles-head").length === 0, "标题下方没有说明文字");
+  const defs = tab.getSettingDefinitions();
+  console.log(`设置定义：${defs.map((d) => (d.type === "group" ? `group(${d.heading ?? "无标题"})` : d.name)).join(" | ")}`);
+  assert(defs.length === 3, "设置页顶层 = 3 个区块（remote / 文件名匹配模板与模板 / 常规）");
+  assert(defs[0].type === "group" && defs[0].items?.[0]?.name === "remote 设置", "第一个区块是 remote 设置（render 项）");
+  assert(
+    defs[1].type === "group" &&
+      defs[1].heading === "文件名匹配模板与模板" &&
+      defs[1].items?.map((d) => d.name).join(",") === "文件名匹配模板,metadata 与画廊模板",
+    "第二个区块 = 文件名匹配模板 + 模板（两个 render 项）",
+  );
+  const controlDefs = defs[2].type === "group" ? defs[2].items ?? [] : [];
+  assert(
+    controlDefs.map((d) => d.control?.key).join(",") === "thumbnailEdge,debugLogging",
+    "第三个区块的两个普通设置项 = control 定义（thumbnailEdge / debugLogging）",
+  );
+  assert(
+    controlDefs.every(
+      (d) =>
+        typeof d.name === "string" &&
+        d.name.trim() !== "" &&
+        typeof d.desc === "string" &&
+        d.desc.trim() !== "" &&
+        d.searchable !== false,
+    ),
+    "两个普通设置项都有非空 name/desc，且参与设置搜索",
+  );
+  assert(controlDefs.every((d) => d.render === undefined), "普通设置项走 control，不靠 render 手搓");
+
+  tab.update();
+  assert(one(tab.containerEl, "annex-settings-title") === undefined, "设置页不再有「Annex Gallery Settings」标题（h1 已删除）");
+  assert(byClass(tab.containerEl, "annex-settings-divider").length === 0 && byClass(tab.containerEl, "annex-remotes-divider").length === 0, "旧的 hr 分割线已删除（改用 group heading）");
 
   const remotesSection = one(tab.containerEl, "annex-remotes-section");
   assert(remotesSection !== undefined, "设置页有「remote 设置」这一项");
-  assert(tab.containerEl.children[1] === remotesSection, "它在 h1 之后、模板区之前（列表最上方）");
-  assert(tab.containerEl.children[2].hasClass("annex-remotes-divider"), "紧接着一条分割线（remote 设置与模板区之间）");
   assert(one(tab.containerEl, "annex-remotes-title").textContent === "remote 设置", "这一项的标题 = 「remote 设置」");
   assert(byClass(tab.containerEl, "annex-remote-row").length === 0, "默认 0 条 remote");
   assert(byClass(tab.containerEl, "annex-remotes-empty").length === 1, "空列表给一句提示");
@@ -239,22 +260,20 @@ writeText("Templates/broken.base", "views: [\n");
   assert(stub.registry.savedData.remotes.length === 1, "删除也落盘");
 
   const names = settingNames(tab.containerEl);
-  console.log(`普通设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
-  assert(names.join(",") === "缩略图边长,调试日志", "分割线以下是「缩略图边长」与「调试日志」两个设置项（.gitattributes / .gitignore / 默认样品名 已删）");
-  assert(byClass(tab.containerEl, "annex-settings-divider").length === 2, "两条分割线（remote/模板 之间 + 模板/普通设置项 之间）");
-  assert(byClass(tab.containerEl, "annex-remotes-divider").length === 1, "上面那条标成 annex-remotes-divider");
+  console.log(`渲染出的设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
+  assert(names.includes("缩略图边长") && names.includes("调试日志"), "「缩略图边长」与「调试日志」两个设置项都渲染出来了");
 
   // ── 3. 新外部模型：没有内联编辑器、没有内置可用行 ─────────────────────────
   const templatesSection = one(tab.containerEl, "annex-templates-section");
-  const topChildren = tab.containerEl.children;
-  const profilesIndex = topChildren.findIndex((el) => el.hasClass("annex-profiles-section"));
-  const templatesIndex = topChildren.findIndex((el) => el.hasClass("annex-templates-section"));
-  const lowerDividerIndex = topChildren.findIndex(
-    (el) => el.tagName === "HR" && el.hasClass("annex-settings-divider") && !el.hasClass("annex-remotes-divider"),
-  );
-  assert(profilesIndex >= 0 && templatesIndex === profilesIndex + 1, "模板区紧跟在文件名匹配模板区之后");
-  assert(lowerDividerIndex === templatesIndex + 1, "模板区在下面那条分割线之前");
   assert(templatesSection !== undefined, "设置页有「模板」区");
+  const walkOrder = stub.walk(tab.containerEl);
+  const indexOfClass = (cls) => walkOrder.findIndex((el) => el.hasClass(cls));
+  assert(
+    indexOfClass("annex-remotes-section") >= 0 &&
+      indexOfClass("annex-remotes-section") < indexOfClass("annex-profiles-section") &&
+      indexOfClass("annex-profiles-section") < indexOfClass("annex-templates-section"),
+    "DOM 顺序 = remote → 文件名匹配模板 → 模板区",
+  );
 
   assert(byClass(tab.containerEl, "annex-profile-card").length === 0, "没有旧的内联 profile 卡片");
   assert(byClass(tab.containerEl, "annex-profile-json").length === 0, "没有内联 JSON textarea");
@@ -372,11 +391,11 @@ writeText("Templates/broken.base", "views: [\n");
   tecEdited.id = "tec-live";
   tecEdited.name = "TECNAI 外部改名";
   writeJson("Profiles/tecnaitem.json", tecEdited);
-  tab.display();
+  tab.update();
   rowTec = profileRows().find((row) => row.getAttr("data-profile-path") === "Profiles/tecnaitem.json");
   assert(one(rowTec, "annex-profile-id").textContent === "id: tec-live" && one(rowTec, "annex-profile-name").textContent === "TECNAI 外部改名", "外部改 id/name 后设置页重新读取并显示新值");
   writeJson("Profiles/tecnaitem.json", tec);
-  tab.display();
+  tab.update();
 
   // ── 6. 坏 profile 文件：单对象约束 / JSON / 正则 / 丢失 / 重复 id ─────────
   writeJson("Profiles/array.json", [minimal]);
@@ -393,7 +412,7 @@ writeText("Templates/broken.base", "views: [\n");
   await registerProfile("Profiles/duplicate.json");
   await registerProfile("Profiles/vanishing.json");
   fs.rmSync(rel("Profiles/vanishing.json"));
-  tab.display();
+  tab.update();
   const rowOf = (relPath) => profileRows().find((row) => row.getAttr("data-profile-path") === relPath);
   console.log(`  array 行错误：${one(rowOf("Profiles/array.json"), "annex-profile-error").textContent}`);
   assert(/顶层必须是单条 ParseProfile 对象/.test(one(rowOf("Profiles/array.json"), "annex-profile-error").textContent), "数组 JSON 被拒绝：每条模板必须一个独立对象文件");
@@ -560,7 +579,7 @@ writeText("Templates/broken.base", "views: [\n");
   const savedProfiles = [...plugin.settings.profileFiles];
   plugin.settings.profileFiles = [{ path: "Profiles/smoke.json" }];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
 
   modalsBefore = stub.registry.modals.length;
   submenuAction(runtimeDir, "生成元数据").callback();
@@ -594,7 +613,7 @@ writeText("Templates/broken.base", "views: [\n");
   // 外部改 profile 的 id/name：下一次打开生成弹窗读新内容（不沿用内存旧值）。
   const smokeEdited = { ...minimal, id: "smoke-live", name: "Smoke 实时改名" };
   writeJson("Profiles/smoke.json", smokeEdited);
-  tab.display();
+  tab.update();
   submenuAction(runtimeDir, "生成元数据").callback();
   await settle();
   modal = lastModal();
@@ -611,7 +630,7 @@ writeText("Templates/broken.base", "views: [\n");
   writeText(`${badDir}/002.tif`, "fake-tif");
   plugin.settings.metadataTemplates = [{ id: "broken", name: "broken", path: "Templates/broken.md" }];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
   modalsBefore = stub.registry.modals.length;
   submenuAction(badDir, "生成元数据").callback();
   await settle();
@@ -633,7 +652,7 @@ writeText("Templates/broken.base", "views: [\n");
     { id: "default-2", name: "默认（副本）", path: "AnnexGalleryTemplates/default 2.md" },
   ];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
 
   // 旧内置引用：profile 声明 "embed" 但只登记了外部 meta/default ⇒ 可见错误，不回退。
   const oldRef = { ...minimal, id: "old-ref", name: "旧内置引用", metadataTemplate: "embed" };
@@ -663,7 +682,7 @@ writeText("Templates/broken.base", "views: [\n");
   // 空 metadata 列表：生成在弹窗前停下并引导登记。
   plugin.settings.metadataTemplates = [];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
   modalsBefore = stub.registry.modals.length;
   submenuAction(runtimeDir, "生成元数据").callback();
   await settle();
@@ -678,14 +697,14 @@ writeText("Templates/broken.base", "views: [\n");
     { id: "default", name: "默认（从预设）", path: "AnnexGalleryTemplates/default.md" },
   ];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
 
   // 空的画廊模板列表：创建画廊在写盘前停下。
   const emptyBaseDir = "GalleryBroken/empty-base";
   fs.mkdirSync(rel(emptyBaseDir), { recursive: true });
   plugin.settings.baseTemplates = [];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
   modalsBefore = stub.registry.modals.length;
   const galleryMenuFor = (folderPath) => {
     const menu = new stub.Menu();
@@ -702,7 +721,7 @@ writeText("Templates/broken.base", "views: [\n");
     { id: "default", name: "默认（从预设）", path: "AnnexGalleryTemplates/default.base" },
   ];
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
 
   // ── 9. 创建画廊：外部模板 + 旧 sidecar + 已存在 + 坏模板 + 坏 profile ────
   const galleryFolder = "GallerySmoke";
@@ -801,7 +820,7 @@ writeText("Templates/broken.base", "views: [\n");
   writeText(`${rereadFolder}/x.tif`, "fake-tif");
   await registerProfile("Profiles/smoke.json");
   writeJson("Profiles/smoke.json", { ...minimal, regex: "(" });
-  tab.display();
+  tab.update();
   const rereadBaseRel = `${rereadFolder}/${rereadFolder}.base`;
   modalsBefore = stub.registry.modals.length;
   noticesBefore = stub.registry.notices.length;
@@ -818,7 +837,7 @@ writeText("Templates/broken.base", "views: [\n");
   plugin.settings.baseTemplates = [{ id: "base", name: "base", path: "Templates/base.base" }];
   plugin.settings.folderBaseTemplates[rel(rereadFolder)] = "default";
   await plugin.saveSettings();
-  tab.display();
+  tab.update();
   modalsBefore = stub.registry.modals.length;
   galleryMenuFor(rereadFolder).callback();
   await settle(12);
@@ -847,7 +866,7 @@ writeText("Templates/broken.base", "views: [\n");
   await legacyPlugin.onload();
   instances += 1;
   const legacyTab = stub.registry.tabs[stub.registry.tabs.length - 1];
-  legacyTab.display();
+  legacyTab.update();
   const legacyWarning = one(legacyTab.containerEl, "annex-legacy-profiles-warning");
   console.log(`  旧内联 profiles 提示：${legacyWarning === undefined ? "(缺)" : legacyWarning.getAttr("data-count")}`);
   assert(legacyWarning !== undefined && legacyWarning.getAttr("data-count") === "1", "检测到旧内联 profiles 时显示提示");

@@ -7,11 +7,12 @@
  *
  * 为什么能信：三样东西都是真的 ——
  *   ① 真实 app.css：从本机 `~/Library/Application Support/obsidian/obsidian-<ver>.asar` 里抽出来的
- *      官方样式表（规格里那些 `--size-4-*` / `.setting-item` / `.vertical-tab-content h1` 规则都来自它）；
- *   ② 真实 DOM：用 tools/obsidian-stub.cjs 跑构建产物 main.js，`tab.display()` 出来的那棵树；
+ *      官方样式表（规格里那些 `--size-4-*` / `.setting-item` / `.setting-group` 规则都来自它）；
+ *   ② 真实 DOM：用 tools/obsidian-stub.cjs 跑构建产物 main.js，`tab.update()` 出来的那棵树；
  *   ③ 真实引擎：headless Chromium（本机 Chrome）算的几何。
  *
- * 验证的是 spec-774d7ee 里能变成数字的那些：标题可见且与左侧对齐；remote 设置在最上方；
+ * 验证的是声明式设置页里能变成数字的那些：没有 h1 / hr，顶层是三个 .setting-group
+ * （remote → 文件名匹配模板与模板 → 常规）；remote 设置在最上方；
  * 文件名匹配模板工具条 = 路径输入 + 登记 + 从预设创建；每条已登记 JSON 一行（name/id/path/打开/删除）；
  * metadata / 画廊模板各一张卡片、一行一个外部文件；没有内置可用行、没有内联编辑器/预览/旧动作排；
  * 所有内容没有横向溢出。观感（配色、间距好不好看）仍要人眼在真机上看一眼。
@@ -142,7 +143,7 @@ function renderFragment() {
       { name: "origin", url: "ssh://nas.example/volume1/Data_lab_10" },
       { name: "backup", url: "/Volumes/Backup/Data_lab_10" },
     ];
-    tab.display();
+    tab.update();
     const out = [];
     for (const child of tab.containerEl.children) serialize(child, out);
     return out.join("\n");
@@ -152,12 +153,12 @@ function renderFragment() {
 const MEASURE = String.raw`(function () {
   const num = (n) => Math.round(n * 100) / 100;
   const box = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { left: num(b.left), right: num(b.right), top: num(b.top), bottom: num(b.bottom), width: num(b.width), height: num(b.height) }; };
-  const cs = (el, props) => { if (!el) return null; const s = getComputedStyle(el); const o = {}; for (const p of props) o[p] = s[p]; return o; };
   const text = (el) => (el ? el.textContent.trim().replace(/\s+/g, " ").slice(0, 40) : null);
   const visible = (el) => el !== null && getComputedStyle(el).display !== "none";
   const pane = document.getElementById("pane");
-  const h1 = document.querySelector(".annex-settings-title");
-  const settingRow = document.querySelector(".setting-item");
+  const settingRows = [...document.querySelectorAll(".setting-item:not(.setting-item-heading)")];
+  const rowName = (row) => text(row.querySelector(":scope > .setting-item-info > .setting-item-name"));
+  const settingRow = settingRows.find((row) => rowName(row) === "缩略图边长") ?? settingRows[0];
   const toolbar = document.querySelector(".annex-profiles-toolbar");
   const toolbarBox = box(toolbar);
   const profileRows = [...document.querySelectorAll(".annex-profile-row")];
@@ -194,8 +195,21 @@ const MEASURE = String.raw`(function () {
     contentLeft: num(pane.getBoundingClientRect().left + parseFloat(getComputedStyle(pane).paddingLeft)),
     paneScrollWidth: pane.scrollWidth,
     paneClientWidth: pane.clientWidth,
-    h1: { box: box(h1), display: h1 ? getComputedStyle(h1).display : null, text: text(h1), pad: cs(h1, ["paddingLeft", "paddingRight"]), marginTop: h1 ? getComputedStyle(h1).marginTop : null },
-    settingRow: { box: box(settingRow), innerPadLeft: settingRow ? getComputedStyle(settingRow).paddingLeft : null },
+    h1Count: document.querySelectorAll(".annex-settings-title").length,
+    hrCount: pane.querySelectorAll("hr").length,
+    settingRow: { name: settingRow ? rowName(settingRow) : null, box: box(settingRow), innerPadLeft: settingRow ? getComputedStyle(settingRow).paddingLeft : null },
+    groups: [...pane.children].filter((c) => c.classList.contains("setting-group")).map((g) => {
+      const header = g.querySelector(":scope > .setting-item-heading > .setting-item-name");
+      const items = [...g.querySelectorAll(":scope > .setting-items > .setting-item")];
+      return {
+        cls: g.className,
+        heading: text(header),
+        display: getComputedStyle(g).display,
+        box: box(g),
+        items: items.map((s) => rowName(s)),
+        renderRows: items.filter((s) => s.classList.contains("annex-editor-row")).length,
+      };
+    }),
     topLevel: [...pane.children].map((c) => ({ tag: c.tagName, cls: c.className, display: getComputedStyle(c).display, box: box(c), borderTopWidth: getComputedStyle(c).borderTopWidth })),
     toolbar: toolbar ? [...toolbar.children].filter(visible).map((c) => ({
       tag: c.tagName,
@@ -296,30 +310,26 @@ ${fragment}
   if (showJson) console.log(JSON.stringify(rep, null, 1));
 
   const contentLeft = rep.contentLeft;
-  const h1Left = rep.h1.box === null ? null : rep.h1.box.left;
 
   console.log("\n设置页布局检查（真实 app.css + 真实 DOM + headless Chromium）");
-  console.log(`  内容左边缘=${contentLeft}  标题左=${h1Left}  「缩略图边长」行左=${rep.settingRow.box.left}（行内 padding ${rep.settingRow.innerPadLeft}）`);
+  console.log(`  内容左边缘=${contentLeft}  「缩略图边长」行左=${rep.settingRow.box.left}（行内 padding ${rep.settingRow.innerPadLeft}）  顶层 group=${rep.groups.length}`);
 
-  // ── 标题 / 顶层顺序 / 分割线 ───────────────────────────────────────────────
-  check(rep.h1.display !== "none" && rep.h1.box.height > 0, "标题 h1 真的可见（app.css 有 .vertical-tab-content h1{display:none}，必须被压掉）", `display=${rep.h1.display}`);
-  check(rep.h1.text === "Annex Gallery Settings", "标题文本 = Annex Gallery Settings");
-  check(h1Left !== null && Math.abs(h1Left - contentLeft) < 0.5, "标题与左侧内容左对齐（padding 0，不是 app 的 16px）", `标题 left=${h1Left} vs 内容左=${contentLeft}`);
-  check(rep.h1.pad.paddingLeft === "0px" && rep.h1.pad.paddingRight === "0px", "标题左右 padding 都是 0");
-  check(rep.h1.marginTop === "0px", "标题没有上边距（贴住内容区顶部的 padding）");
-  check(rep.topLevel.map((t) => t.cls.split(" ")[0]).join(",") === "annex-settings-title,annex-remotes-section,annex-remotes-divider,annex-profiles-section,annex-templates-section,annex-settings-divider,setting-item,setting-item", "顶层顺序 = 标题 → remote 设置 → 分割线 → 文件名匹配模板 → 模板区 → 分割线 → 缩略图边长 → 调试日志", rep.topLevel.map((t) => t.cls).join(" | "));
-  const plainSettings = rep.topLevel.filter((t) => t.cls.split(" ")[0] === "setting-item");
-  check(plainSettings.length === 2 && plainSettings.every((t) => t.display === "flex"), "分割线以下是两个 app 的 .setting-item（缩略图边长 / 调试日志）");
-  const dividers = rep.topLevel.filter((t) => t.tag === "HR");
-  check(dividers.length === 2, `两条分割线（remote/模板 之间 + 模板/普通设置项 之间）：${dividers.length} 条`);
-  check(dividers.every((d) => d.display !== "none" && d.box.width > 100 && d.box.height > 0 && d.borderTopWidth === "1px"),
-    "两条分割线都可见、撑满内容宽、1px 上边框", JSON.stringify(dividers.map((d) => ({ w: d.box.width, h: d.box.height, bt: d.borderTopWidth }))));
-  check(rep.remotes.card.bottom <= dividers[0].box.top && dividers[0].box.top + dividers[0].box.height <= rep.toolbarBox.box.top,
-    "上面那条分割线真的夹在 remote 卡片与工具条之间", `card 底=${rep.remotes.card.bottom} 线=${dividers[0].box.top} 工具条=${rep.toolbarBox.box.top}`);
+  // ── 声明式顶层：没有 h1 / hr，三个 group ───────────────────────────────────
+  check(rep.h1Count === 0, "设置页没有旧的 h1 标题（声明式 API 不再渲染页面标题）");
+  check(rep.hrCount === 0, "设置页没有 hr 分割线（改用 group heading）");
+  check(rep.topLevel.length === 3 && rep.groups.length === 3, `顶层 = 3 个 .setting-group：${rep.topLevel.length}`, rep.topLevel.map((t) => t.cls).join(" | "));
+  check(rep.groups.every((g) => g.display !== "none" && g.box.height > 0), "三个 group 都可见");
+  check(rep.groups[0].heading === null || rep.groups[0].heading === "", "第一个 group 没有 heading（remote 卡片自带标题）", String(rep.groups[0].heading));
+  check(rep.groups[1].heading === "文件名匹配模板与模板", "第二个 group 的 heading = 文件名匹配模板与模板", String(rep.groups[1].heading));
+  check(rep.groups[2].heading === "常规", "第三个 group 的 heading = 常规", String(rep.groups[2].heading));
+  check(rep.groups[2].items.join(",") === "缩略图边长,调试日志", "常规 group 里是两个普通设置项（缩略图边长 / 调试日志）", rep.groups[2].items.join(" | "));
+  check(rep.groups[0].renderRows === 1 && rep.groups[1].renderRows === 2, "三个编辑器都挂在 render 行里（remote 1 + 模板 2）", JSON.stringify(rep.groups.map((g) => g.renderRows)));
+  check(rep.settingRow.box !== null && Math.abs(rep.settingRow.box.left - rep.groups[2].box.left) < 2, "「缩略图边长」行贴住所属 group 的左边缘", `行=${rep.settingRow.box.left} group=${rep.groups[2].box.left}`);
 
   // ── remote 设置：一个 item 装多条 ─────────────────────────────────────────
   const remotes = rep.remotes;
   check(remotes !== null && remotes.title.text === "remote 设置", "最上方那一项的标题 = remote 设置", remotes === null ? "(缺)" : remotes.title.text);
+  check(remotes !== null && Math.abs(remotes.card.left - rep.groups[0].box.left) < 2, "remote 卡片与第一个 group 左对齐", remotes === null ? "(缺)" : `卡片=${remotes.card.left} group=${rep.groups[0].box.left}`);
   check(remotes.rows === 2, "同一个 item 里装了 2 条 remote");
   check(remotes.title.pad === "0px", "remote 设置的标题自己不带 padding（不做无谓缩进）");
   const cardInnerLeft = remotes.card.left + parseFloat(remotes.cardBorderLeft) + parseFloat(remotes.cardPadLeft);

@@ -4,7 +4,7 @@
 
 **管什么**
 
-- 设置页的**顶层顺序**：从标题到最后一条普通设置项，各区块的落点与前后关系；
+- 设置页的**顶层顺序**：从第一个 group 到最后一条普通设置项，各区块的落点与前后关系；
 - 区块内部的几何**关系式**：左边缘对齐、上下间隙相等、跨行同列、撑满内容宽、不横向溢出；
 - 控件的行为契约：工具条三个入口、每行（外部文件）的打开 / 取消登记、remote 行的增删与落盘、
   「模板」区的登记 / 从预设创建 / 打开 / 取消登记、「初始化 gallery」对 remote 的写入语义；
@@ -24,8 +24,9 @@
 
 1. **版式只写关系，不写绝对值。** 任何「某元素该多宽」都表述成它与容器或相邻元素的关系；绝对值只出现在
    一次性防护上（如宽度上限），且要能说清上限防的是什么。
-2. **app 的默认值必须显式压掉。** `.vertical-tab-content` 里的 h1/h3 被隐藏、带行内边距，是核心设置页的
-   假设，不是本页的意图；每一处都要在本页样式里显式写回，并且写在能赢过它的特异度上。
+2. **app 的默认值必须显式压掉。** `.vertical-tab-content` 里的 h3 带行内边距、`.setting-group`
+   自带卡片底/边框，都是核心设置页的假设，不是本页的意图；每一处都要在本页样式里显式写回，
+   并且写在能赢过它的特异度上。
 3. **一行控件靠自身伸缩规则分配空间。** 富余空间交给 auto 外边距吸收，收窄交给 `min-width: 0` +
    宽度上限；不写死像素宽度，也不靠容器宽度算术。
 4. **特异度写在选择器里，不靠加载顺序。** 与 app.css 同权重时谁在样式表后面谁赢 —— 那是构建产物与
@@ -36,10 +37,11 @@
 
 ## 3. 设想的运行状态
 
-打开设置页（`AnnexGallerySettingTab.display()`），内容区自上而下恰好是这一段：
+打开设置页（`AnnexGallerySettingTab.getSettingDefinitions()`，由 Obsidian 1.13+ 声明式渲染），
+内容区自上而下是三个 `.setting-group`；旧版的两条 `<hr>` 分割线由 group heading 取代：
 
 ```
-<h1 class="annex-settings-title">Annex Gallery Settings</h1>        ← 内容区第一个元素，下方无说明
+.setting-group（无 heading）
 ┌ .annex-remotes-card ────────────────────────────────────────────┐
 │ remote 设置                                                      │
 │ 「初始化 gallery」会逐个 git remote add / set-url…                 │
@@ -47,7 +49,7 @@
 │ [名称: <remote>] [地址: /Volumes/<volume>/<path>]     [删除]      │
 │ [添加 remote]                                                     │
 └─────────────────────────────────────────────────────────────────┘
-─────────────────── HR.annex-remotes-divider（remote ↔ 模版）───────────────────
+.setting-group（heading「文件名匹配模板与模板」）
 ┌ .annex-profiles-section ─────────────────────────────────────────┐
 │ [.annex-profile-path-input（vault 相对 .json 路径）] [登记]        │  ← 工具条：输入 + 登记 + 从预设创建
 │ [.annex-profile-preset ▾]                                        │
@@ -66,17 +68,26 @@
 │ │ 画廊模板（同上，扩展名 .base）                                 │ │
 │ └───────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
-────────────────── HR.annex-settings-divider（模板 ↔ 普通设置项）──────────────────
-缩略图边长  [<n>]                     ← app 自己的 .setting-item
-调试日志    [开/关]                    ← 默认关；打开后 git / git-annex 的进度才进控制台
+.setting-group（heading「常规」）
+缩略图边长  [<n>]                     ← control（number，key = thumbnailEdge）
+调试日志    [开/关]                    ← control（toggle，key = debugLogging）；默认关
 ```
 
 ### 必须成立的不变量
 
 - **顶层顺序**（离屏与真机必须逐字一致）：
-  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item → DIV.setting-item`。
-- **标题**是内容区第一个子元素，是真正的 `<h1>`（`containerEl.createEl("h1", …)`），下方无说明文字；
-  `display: block`、`padding: 0`、只保留一行底部外边距。标题左边缘 = 卡片左边缘 = 内容区左边缘。
+  `.setting-group（remote render）→ .setting-group（heading「文件名匹配模板与模板」：profiles render → templates render）→ .setting-group（heading「常规」：thumbnailEdge control → debugLogging control）`。
+  顶层只有 `.setting-group`，没有 h1、没有 hr。
+- **页面没有标题。** 侧栏已经显示 tab 名，`Annex Gallery Settings` 那个 h1 连同对抗
+  `.vertical-tab-content h1{display:none}` 的样式一起删除。
+- **三个编辑器是 render 项**：框架为每条定义建 `.setting-item`，name/desc 用于设置搜索；
+  editor 挂在 `.setting-item-control`（框架重渲染前会 `Setting.clear()` 清空它，不会叠加），
+  行上带 `annex-editor-row`，CSS 隐藏 info 列并让 control 占满整行，让编辑器卡片成为唯一视觉层。
+- **两个普通设置项是 control 定义**：`缩略图边长`（number，`key: "thumbnailEdge"`，`validate`
+  拒绝非正整数，非法值回落 `DEFAULT_SETTINGS`）与 `调试日志`（toggle，`key: "debugLogging"`）。
+  两项的 name/desc 非空且 `searchable` 不为 false，设置搜索能按「缩略图」「调试」命中。
+- **`getControlValue()` / `setControlValue()` 被覆写**，读写 `host.settings` 后统一走
+  `host.saveSettings()`（不依赖框架默认的 `plugin.saveData()` 路径）。
 - **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
   N 行 `.annex-remote-row`（名称 / 地址 / 删除）+ 一个「添加 remote」。行内三列跨行同列对齐；名称列定宽，
   地址列吃掉剩余宽度。输入即写 `data.json` 的 `remotes`。名称或地址缺一半 ⇒ 行尾红字提示
@@ -115,8 +126,9 @@
   vault 内时，才退回 `app.openWithDefaultApp(<vault 相对路径>)`（那个 API 只认相对路径）。
   打开前重新做路径与存在性检查，失败 ⇒ Notice 指名 vault 路径与原因，**绝不自动创建文件**。
 - **模板区没有「保存」按钮**：改动即写 `data.json`，口径与 remote 区一致。
-- **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与文件名匹配模板区之间，两侧留白相等；
-  下面那条在模板区与普通设置项之间。
+- **区块之间不再有分割线**：旧的两条 `<hr>`（remote ↔ 模板、模板 ↔ 普通设置项）删掉，改用
+  `.setting-group` 的 heading（「文件名匹配模板与模板」「常规」）；第一个 group 的 remote 卡片自带标题，
+  所以不设 heading。间距由 app.css 的 `.setting-group + .setting-group { margin-top: … }` 提供。
 - **普通设置项只剩两条**「缩略图边长」与「调试日志」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
   这种东西 —— 那三行在设置页不出现。
 
@@ -124,7 +136,7 @@
 
 | 落点 | 内容 |
 |---|---|
-| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`display()` 负责顶层顺序与标题/两条分割线/两个区块的创建；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `metadataTemplates` / `baseTemplates` / 两个按文件夹记住的模板字段）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()`；`hide()` 收摊 |
+| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → 文件名匹配模板与模板 render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`hide()` 重置 remote 扫描守卫；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `metadataTemplates` / `baseTemplates` / 两个按文件夹记住的模板字段）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()` |
 | `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：`.annex-remotes-card`、`.annex-remote-list`、`.annex-remote-row`、`.annex-remote-note(-warn)`、`.annex-remote-add` |
 | `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-row`、`-name` / `-id` / `-path` / `-open` / `-del` / `-error`；登记 / 从预设创建 / 打开 / 取消登记 |
 | `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-open` / `-del`、`.annex-template-add-row` / `-path-input` / `-add` / `-preset`；`TEMPLATE_FOLDER`（`AnnexGalleryTemplates/`）、`uniqueTemplateId()` |
@@ -145,11 +157,12 @@
 
 | 选择器 | 特异度 | 压掉谁 |
 |---|---|---|
-| `.vertical-tab-content h1.annex-settings-title` | (0,2,1) | app.css 的 `.vertical-tab-content h1`（隐藏 + 行内 padding，约 (0,1,1)） |
-| `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | 同一批给 h3 的行内 padding |
+| `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | app.css 给 h3 的行内 padding |
 | `.vertical-tab-content h3.annex-templates-title` | (0,2,1) | 同上（模板区两张卡片的标题） |
+| `.setting-item.annex-editor-row` | (0,2,0) | app 给 `.setting-item` 的内边距 / 背景 / 边框；render 项整行交给编辑器卡片 |
+| `.setting-item.annex-editor-row > .setting-item-info` | (0,2,0) | 隐藏只用于设置搜索的 name/desc（编辑器自带标题） |
+| `.setting-group.annex-editors-group .setting-items` | (0,3,0) | 去掉框架给 group 的卡片底/边框，避免卡片套卡片 |
 | `.annex-profiles-toolbar select.annex-profile-preset` | (0,2,1) | `.dropdown { max-width: 100% }` 与 `.theme-dark .dropdown`（(0,1,0)；同权重靠顺序太脆） |
-| `.annex-remotes-divider` | 与 `.annex-settings-divider` 同权重，按出现顺序接管 `margin` | 共用外观类 + 自己的类：外观复用，位置与留白单独可测 |
 
 工具条与下拉的伸缩规则是成套的，不能拆开用：
 
@@ -163,17 +176,16 @@
 }
 ```
 
-分割线的留白同样是一个成套的写法：`.annex-remotes-divider { margin: 1.25em 0 }`，且**上边距必须大于相邻
-容器的底边距**（`.annex-remotes-section` 的 `1em`）。相邻块的外边距会折叠并取大者，上边距写小了就只有
-下面那半生效，视觉上大下小。
+区块之间不再自己画分割线：`.setting-group + .setting-group` 的间距由 app.css 提供；本页只负责把
+编辑器组的框架卡片底去掉（`.setting-group.annex-editors-group .setting-items`），避免「卡片套卡片」。
 
 ## 5. 约束与取舍
 
 取舍逐条列出，每条都写清另一条为什么不取：
 
-1. **标题用显式 `<h1>`，不用 `Setting.setHeading()`。** 后者产出的是 `.setting-item` 骨架里的一行标题，
-   既不在「内容区第一个子元素」这个位置，也不落在 `.vertical-tab-content h1.annex-settings-title` 这条
-   规则上；`display`、`padding`、左缘对齐都得重新论证一遍，还会让「顶层第一个元素是 h1」这条断言失效。
+1. **整页声明式，不保留 `display()` 回退。** `SettingTab.display()` 在 `getSettingDefinitions()` 返回
+   非空数组时根本不会被调用；`minAppVersion` 已是 1.14.4，没有旧版本要兼容。页面标题也一起删掉 ——
+   侧栏已有 tab 名，硬造一个 h1 只会和 `.vertical-tab-content h1{display:none}` 对抗。
 2. **工具条允许换行，但控件都收着。** 折行优于把内容顶出内容区；输入框 `flex: 1 1 16em` 吃掉剩余宽度，
    下拉有 `max-width` 上限 —— 长预设名不会把整排挤成两行。
 3. **下拉收窄，不跟随最长选项。** 原生 `<select>` 按**最长选项文字**定宽，不是当前显示项；预设名一长，
@@ -221,15 +233,12 @@
 
 ### 六条只有量过才成立的约束
 
-1. **`app.css` 在 `.vertical-tab-content` 里隐藏 h1**（`.vertical-tab-content h1 { display: none }`），
-   并给它 `padding: 0 var(--size-4-4)`。核心设置页的标题由 app 自己的 `.setting-page-titlebar` 提供，
-   所以内容里的 h1 被隐掉；插件设置页走旧 API，`containerEl` 就是一个 `.vertical-tab-content`，
-   **没有 titlebar**。因此这个 `<h1>` 必须自带 `display: block` 并把 padding 压掉，
-   选择器写到 `.vertical-tab-content h1.annex-settings-title`（0,2,1）才盖得住 app 的 (0,1,1)。
-   只看代码会以为 h1 正常显示 —— 这条只能量。
+1. **声明式设置在 `.vertical-tab-content` 里生成 `.setting-group`，外层自带卡片底/边框。**
+   `.setting-group { width: 100%; max-width: 700px; margin-inline: auto }`，编辑器行又被包进
+   `.setting-items`；不去掉这两层背景，编辑器自己的卡片就会变成「卡片套卡片」。这一层只能量。
 2. **app 的 `.setting-item` 自带内边距**（`padding: var(--size-4-4)`）。所以「缩略图边长」那一行的**文字**
-   比卡片左边缘再右移一个间距。标题与卡片按「无 padding」贴内容左缘；若要让标题也与设置项文字对齐，
-   把 `.annex-settings-title` 的 padding 改成同一个变量即可（一行）。
+   比 group 左边缘再右移一个间距；编辑器行把 padding 压成 0，卡片才与 group 左缘对齐。
+   render 行的 name/desc 只服务于设置搜索，视觉上由编辑器自己的标题承担。
 3. **原生 `<select>` 的宽度由最长选项决定**，而离屏桩里的 `<option>` 没有文字 ⇒ 永远量成收窄态，看着完全
    正常。真机上预设名一长就要靠 `max-width` 收着。约束是上面那条收缩链：`flex-wrap: wrap` +
    `min-width: 0` + `max-width`，三者缺一都会回到撑破。
@@ -270,7 +279,7 @@
 | 命令 | 钉住什么 | 钉不住什么 |
 |---|---|---|
 | `npm run build` | 产物 `main.js` / `styles.css` 可生成 | 任何版式 |
-| `npm run smoke` | 无头加载构建产物：设置页结构（remote 区、文件名匹配模板区、模板区、两条分割线）、三类模板的登记 / 从预设创建 / 打开 / 取消登记、profile JSON 的各种坏法、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
+| `npm run smoke` | 无头加载构建产物：设置定义（3 个 group、两个 control key）、remote 区、文件名匹配模板区、模板区、三类模板的登记 / 从预设创建 / 打开 / 取消登记、profile JSON 的各种坏法、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
 | `npm run layout` | 离屏几何：真实 app.css + 真实 DOM + headless Chromium，只回答「结构没塌」 | 下拉宽度、控件外观、运行时行为 |
 | `npm run verify:core` | 核心层契约：缺 `template` / `profiles` 时直接报错，不回退内置默认 | UI 与几何 |
 | `npm run remotes` | 真 git 仓库上的 add / set-url / 幂等 / dry-run / 扫描合并 / 非仓库不报错 | 设置页 UI |
@@ -284,8 +293,10 @@
 无头加载构建产物，断言的是结构与落盘，例如：
 
 ```
-- 顶层 children 顺序；children[2] 就是 annex-remotes-divider，children[4] 就是 annex-templates-section
-- 标题是一条 h1，且 styles.css 里 .annex-settings-title 的 margin / padding 都被清零
+- 设置定义：顶层 3 个 group（remote / 文件名匹配模板与模板 / 常规）；第三个 group 的两项是
+  control 定义，key = thumbnailEdge / debugLogging，name/desc 非空且参与设置搜索
+- 设置页没有 h1（annex-settings-title）也没有 hr 分割线；三个编辑器仍挂在 render 行里
+- 顶层 DOM 顺序 = remote → 文件名匹配模板 → 模板区
 - 没有内联编辑器：annex-profile-card / annex-profile-json / annex-preview-* / annex-profile-status /
   annex-profile-actions 的数量都是 0
 - 工具条 = 路径输入 + 登记 + 从预设创建（下拉），没有「新模版 / 导入模版 / 添加预设」
@@ -297,7 +308,7 @@
 - profile JSON：顶层是数组 / { profiles: [...] } / 坏 JSON / 坏正则 / 文件丢失 / 跨文件 id 重复 ⇒ 行上可见错误
 - 运行时：坏文件、重复 id、空列表 ⇒ 弹窗都不开，更不写盘；外部改 id/name 后下一次生成读到新值
 - 旧内联 profiles：显示失效提示、不迁移、不参与运行时
-- 第二条分割线以下 data-name 列表 = ["缩略图边长", "调试日志"]
+- 常规 group 里渲染出「缩略图边长」「调试日志」两个 setting-item
 - remote 的增删改、落盘、读回
 ```
 
@@ -305,13 +316,13 @@
 
 用真实 app.css（从本机 Obsidian 安装包的 `obsidian-*.asar` 抽出，macOS 默认在
 `~/Library/Application Support/obsidian/`，缓存在 `TMPDIR`）+ 真实 DOM（桩模块跑构建产物 `main.js` 的
-`tab.display()`）+ headless Chromium。断言全是关系式：
+`tab.update()`）+ headless Chromium。断言全是关系式：
 
 ```
-- 内容左边缘 = 标题左 = 卡片左；「缩略图边长」那一行的盒子左也 = 内容左（文字另带 app 的行内 padding）
-- h1: display=block、paddingLeft=0、marginTop=0
-- 顶层顺序 与真机一致
-- 两条分割线都可见、1px、撑满内容宽；上面那条真的夹在卡片与工具条之间
+- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 文件名匹配模板与模板 / 常规）
+- 三个编辑器都挂在 render 行里（annex-editor-row：remote 1 + 模板 2）
+- 「缩略图边长」行贴住常规 group 的左边缘（行内文字另带 app 的 padding）
+- remote 卡片与第一个 group 左对齐
 - 文件名匹配工具条: 输入框 + 登记 + 从预设创建，三个控件从左往右、垂直居中，输入框吃掉剩余宽度
 - 每条已登记 profile 一行：name → path → 打开 → 删除，行有 1px 边框，允许换行且不溢出
 - 模板区: 两张卡片撑满内容宽；每行一行放下；登记行 = 路径输入 + 登记 + 从预设创建
@@ -333,8 +344,8 @@ remote 区同一套量法（装两条时）：
 在真实窗口上量，断言同样是关系式：
 
 ```
-- h1: display=block、paddingLeft=0，左边缘 = 内容区左边缘
-- 顶层顺序 = 上面列的那一串（顺序错即 FAIL）
+- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 文件名匹配模板与模板 / 常规）
+- 设置搜索能按「缩略图」「调试」命中两个普通设置项
 - 工具条: 输入 + 登记 + 从预设创建，三个控件从左往右；预设下拉宽度受 CSS max-width 约束
 - 已登记行数 = data.json 里 profileFiles 的条数，且每行 path 一一对应
 - 模板区两张卡片：每张的行数 = data.json 里对应登记项的条数，id 一一对应
@@ -350,7 +361,7 @@ remote 区同一套量法（装两条时）：
 
 ```bash
 npm run build     # 出 main.js / styles.css
-npm run smoke     # 无头加载构建产物：设置页结构（含 remote 设置 + 两条分割线）+ 右键菜单 + 弹窗 + 落盘 + 状态栏
+npm run smoke     # 无头加载构建产物：设置定义（3 个 group）+ remote 设置 + 右键菜单 + 弹窗 + 落盘 + 状态栏
 npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并
 npm run layout    # 离屏布局几何：真实 app.css + 真实 DOM + headless Chromium
 node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来（看字段齐不齐，别拿数值当断言）
@@ -383,4 +394,7 @@ ANNEX_SHOT=<shot-path> npm run gui     # 真机判据 + 截图
 - **模板 / profile 登记只是指针，不复制内容。** 文件被移走 / 改名 / 改坏之后，下次操作时整体停下，
   Notice 指名 vault 路径；没有「退回内置默认」这条出路。
 - **旧内联 profiles 只提示、不迁移。** 用户要自己把每条配置拆成 vault 里的 `.json` 再逐条登记。
+- **设置页是声明式渲染的**（Obsidian 1.13+ `getSettingDefinitions()`）：DOM 外层是 `.setting-group`，
+  三个编辑器作为 render 项挂在框架的 `.setting-item-control` 里。按旧结构（h1 / hr / 顶层 section）
+  量的脚本必须一起改。
 - **配色与观感没有自动判据。** 最终要人眼看那张真机截图（skill `inspect-obsidian-gui-with-maxim`）。

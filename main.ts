@@ -82,7 +82,7 @@ export function galleryMenuTitle(): string {
     lang = "";
   }
   if (lang === "") {
-    const moment = (globalThis as { moment?: { locale?: () => string } }).moment;
+    const moment = (window as Window & { moment?: { locale?: () => string } }).moment;
     lang = typeof moment?.locale === "function" ? moment.locale() : "";
   }
   return lang.toLowerCase().startsWith("zh") ? "创建画廊" : "Create Gallery";
@@ -107,7 +107,7 @@ class ChoiceModal extends Modal {
       row.addButton((button) => {
         button.setButtonText(spec.text);
         if (spec.style === "cta") button.setCta();
-        if (spec.style === "warning") button.setWarning();
+        if (spec.style === "warning") button.setDestructive();
         button.onClick(() => {
           this.close();
           spec.run?.();
@@ -352,7 +352,8 @@ class SamplePromptModal extends Modal {
         });
         text.inputEl.addClass("annex-ask-input");
         text.inputEl.setAttr("data-ask-key", key);
-        setTimeout(() => text.inputEl.focus(), 0);
+        // 弹窗（popout window）里用输入框自己所属窗口的定时器，避免焦点跳到主窗口。
+        text.inputEl.win.setTimeout(() => text.inputEl.focus(), 0);
       });
     }
   }
@@ -417,7 +418,7 @@ class OverwritePromptModal extends Modal {
       .addButton((button) =>
         button
           .setButtonText("覆盖重算")
-          .setWarning()
+          .setDestructive()
           .onClick(() => {
             this.close();
             this.onChoose(true);
@@ -474,7 +475,7 @@ class DropConfirmModal extends Modal {
       .addButton((button) =>
         button
           .setButtonText("丢弃")
-          .setWarning()
+          .setDestructive()
           .onClick(() => {
             this.close();
             this.onConfirm();
@@ -709,11 +710,23 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       this.settings.folderSamples = {};
     }
     // 模板登记与按文件夹的选择：旧 data.json 没这些键 ⇒ 空。
+    // 值是 unknown：只接受 string/number/boolean，其它（对象、数组…）一律当空串 ——
+    // String(obj) 会变成 "[object Object]"，混进设置里只会更难排查。
+    const asText = (value: unknown): string =>
+      typeof value === "string"
+        ? value
+        : typeof value === "number" || typeof value === "boolean"
+          ? String(value)
+          : "";
     const refs = (value: unknown): TemplateRef[] =>
       Array.isArray(value)
         ? value
             .filter((entry): entry is Record<string, unknown> => entry !== null && typeof entry === "object")
-            .map((entry) => ({ id: String(entry.id ?? ""), name: String(entry.name ?? entry.id ?? ""), path: String(entry.path ?? "") }))
+            .map((entry) => ({
+              id: asText(entry.id),
+              name: asText(entry.name ?? entry.id),
+              path: asText(entry.path),
+            }))
             .filter((entry) => entry.id !== "" && entry.path !== "")
         : [];
     this.settings.metadataTemplates = refs(this.settings.metadataTemplates);
@@ -780,15 +793,18 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    * 失败时返回原因）；只有当路径确实落在 vault 内时才退回 Obsidian 那个 API。
    */
   async openWithDefaultApp(filePath: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    let electron: { shell?: { openPath(target: string): Promise<string> } } | undefined;
+    type ElectronModule = typeof import("electron");
+    let electron: ElectronModule | undefined;
     try {
-      electron = require("electron") as typeof electron;
+      // 桌面端由 Obsidian 提供 electron（esbuild 里是 external）；无头自检环境里没有它，
+      // import 失败就落回 vault 内那条路（app.openWithDefaultApp 只认 vault 相对路径）。
+      electron = await import("electron");
     } catch {
       electron = undefined; // 无头自检环境里没有 electron：往下走 vault 内那条路
     }
-    if (electron?.shell?.openPath !== undefined) {
-      const failure = await electron.shell.openPath(filePath);
+    const shell = electron?.shell;
+    if (shell !== undefined) {
+      const failure = await shell.openPath(filePath);
       if (failure === "") return;
       throw new Error(`系统默认应用没能打开它：${failure}`);
     }
@@ -802,7 +818,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         return;
       }
       throw new Error(
-        `拿不到系统默认应用：require("electron").shell.openPath 不可用，而 ${filePath} 不在 vault 内（app.openWithDefaultApp 只认 vault 相对路径）`,
+        `拿不到系统默认应用：electron.shell.openPath 不可用，而 ${filePath} 不在 vault 内（app.openWithDefaultApp 只认 vault 相对路径）`,
       );
     }
     throw new Error("拿不到系统默认应用：既没有 electron.shell.openPath，也没有 app.openWithDefaultApp");
@@ -845,7 +861,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    * 需要看 git / git-annex 的实时输出时在设置里打开「调试日志」。
    */
   private logProgress(message: string): void {
-    if (this.settings.debugLogging) console.log(progressPrefix(message));
+    if (this.settings.debugLogging) console.debug(progressPrefix(message));
   }
 
   private notifyReport(title: string, lines: string[]): void {
@@ -1145,7 +1161,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     }
     // 记住的 id 仍有效就用它；无效（旧内置 default 之类）⇒ 用第一条已登记的。
     const remembered = this.settings.folderBaseTemplates[dir];
-    const defaultId = options.some((entry) => entry.id === remembered) ? (remembered as string) : options[0].id;
+    const defaultId = options.some((entry) => entry.id === remembered) ? remembered : options[0].id;
     const go = (id: string): void => {
       this.settings.folderBaseTemplates[dir] = id;
       void this.saveSettings();

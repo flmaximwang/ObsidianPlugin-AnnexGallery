@@ -104,6 +104,7 @@ PROBE = r"""JSON.stringify((() => {
   const bar = pane.querySelector('.annex-profiles-toolbar');
   const remotes = pane.querySelector('.annex-remotes-card');
   const h1 = pane.querySelector('.annex-settings-title');
+  const groups = [...pane.children].filter(c => c.classList.contains('setting-group'));
   const profileRows = [...pane.querySelectorAll('.annex-profile-row')];
   const templateCards = [...pane.querySelectorAll('.annex-templates-card')];
   return {
@@ -111,6 +112,15 @@ PROBE = r"""JSON.stringify((() => {
     contentRight: +((pane.getBoundingClientRect().right) - parseFloat(cs(pane,'paddingRight'))).toFixed(1),
     topLevel: [...pane.children].map(c => c.tagName + '.' + c.className),
     h1: h1 ? {text: h1.textContent.trim(), display: cs(h1,'display'), left: box(h1).left, padL: cs(h1,'paddingLeft'), height: box(h1).height} : null,
+    h1Count: pane.querySelectorAll('.annex-settings-title').length,
+    hrCount: pane.querySelectorAll('hr').length,
+    groups: groups.map(g => ({
+      cls: g.className,
+      heading: text(g.querySelector(':scope > .setting-item-heading > .setting-item-name')),
+      items: [...g.querySelectorAll(':scope > .setting-items > .setting-item')].map(s => text(s.querySelector(':scope > .setting-item-info > .setting-item-name'))),
+      renderRows: [...g.querySelectorAll(':scope > .setting-items > .setting-item')].filter(s => s.classList.contains('annex-editor-row')).length,
+      box: box(g),
+    })),
     toolbar: bar ? {justify: cs(bar,'justifyContent'), wrap: cs(bar,'flexWrap'), box: box(bar),
       controls: [...bar.children].filter(c => cs(c,'display') !== 'none').map(c => ({
         tag: c.tagName,
@@ -219,16 +229,26 @@ def main():
         print(f"✗ {rep['error']}")
         return 1
 
-    print("\n真机结构判据（外部文件模型）：")
-    check(rep["h1"] is not None and rep["h1"]["display"] != "none" and rep["h1"]["height"] > 0,
-          f"标题可见（app.css 有 .vertical-tab-content h1{{display:none}}，必须被压掉）：{rep['h1']}")
-    check(rep["h1"] is not None and abs(rep["h1"]["left"] - rep["contentLeft"]) < 0.5,
-          f"标题与内容左边缘对齐：{rep['h1']['left'] if rep['h1'] else '?'} vs {rep['contentLeft']}")
-    expected_order = ["annex-settings-title", "annex-remotes-section", "annex-remotes-divider",
-                      "annex-profiles-section", "annex-templates-section", "annex-settings-divider", "setting-item"]
+    print("\n真机结构判据（声明式设置页 · 外部文件模型）：")
+    check(rep["h1Count"] == 0, f"设置页没有旧的 h1 标题：{rep['h1Count']} 个")
+    check(rep["hrCount"] == 0, f"设置页没有 hr 分割线（改用 group heading）：{rep['hrCount']} 条")
+    groups = rep["groups"]
+    check(len(groups) == 3, f"顶层 = 3 个 .setting-group：{[g['cls'] for g in groups]}")
+    if len(groups) == 3:
+        headings = [g["heading"] for g in groups]
+        check(headings == [None, "文件名匹配模板与模板", "常规"],
+              f"三个 group 的 heading = 无 → 文件名匹配模板与模板 → 常规：{headings}")
+        item_names = [g["items"] for g in groups]
+        check(item_names == [["remote 设置"], ["文件名匹配模板", "metadata 与画廊模板"], ["缩略图边长", "调试日志"]],
+              f"每个 group 的设置项：{item_names}")
+        render_rows = [g["renderRows"] for g in groups]
+        check(render_rows == [1, 2, 0],
+              f"render 项（三个编辑器）只出现在前两个 group：{render_rows}")
+        check(rep["remotes"] is not None and abs(rep["remotes"]["card"]["left"] - groups[0]["box"]["left"]) < 1.5,
+              f"remote 卡片与第一个 group 左对齐：{rep['remotes']['card']['left'] if rep['remotes'] else '?'} vs {groups[0]['box']['left']}")
     got = [c.split(".", 1)[1].split(" ")[0] for c in rep["topLevel"]]
-    check(got == expected_order,
-          f"顶层顺序 = 标题 → remote 设置 → 分割线 → 文件名匹配模板 → 模板区 → 分割线 → 缩略图边长：{rep['topLevel']}")
+    check(all(c == "setting-group" for c in got),
+          f"顶层全部是 .setting-group（没有散的 h1 / hr / setting-item）：{rep['topLevel']}")
 
     # ── 文件名匹配模板：路径输入 + 登记 + 从预设创建（只有外部文件） ──────────
     bar = rep["toolbar"] or {}

@@ -168,7 +168,7 @@ export function fillPlaceholders(text: string, lookup: (name: string) => string 
  * 只能在文件开头），且只出现一次。不满足 ⇒ 抛错（带 label）。
  */
 export function checkMetadataTemplate(template: ResolvedTemplate): void {
-  const first = template.text.replace(/^﻿/, "").split(/\r?\n/, 1)[0].trim();
+  const first = template.text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0].trim();
   if (!/^\{\{\s*frontmatter\s*\}\}$/.test(first)) {
     throw new Error(`metadata 模板 ${template.label} 的第一行必须是 {{frontmatter}}（frontmatter 只能写在文件开头）`);
   }

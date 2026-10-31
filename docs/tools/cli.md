@@ -6,8 +6,8 @@
 CLI 负责**可脚本化的同一批动作**。这样「插件里点出来的结果」和「命令行跑出来的结果」可以用同一条
 判据对照，也让批量处理不必打开 Obsidian。
 
-源码是 `tools/cli.ts`，`npm run build` 顺带把它打成 `tools/annex-gallery.mjs`
-（构建产物，**不入库**，和 `main.js` 一样）。
+源码是 `scripts/cli.ts`（社区目录扫描忽略 `scripts/`，CLI 的 console 输出因此不会触发审核告警），
+`npm run build` 顺带把它打成 `tools/annex-gallery.mjs`（构建产物，**不入库**，和 `main.js` 一样）。
 
 ## 命令面
 

@@ -224,7 +224,7 @@ metadata 模板是 sidecar 的**整份文件文本**，不是「正文片段」�
 | `src/ui/templates-editor.ts` | 设置页「模板」区：登记外部文件 / 从预设创建（写 `AnnexGalleryTemplates/<id>.<ext>`）/ 打开 / 取消登记 |
 | `src/ui/settings.ts` | `metadataTemplates` / `baseTemplates` / `folderMetadataTemplates` / `folderBaseTemplates` 与「模板」区的顶层落点 |
 | `main.ts` | 子菜单第 3 项、标题本地化、预检 → 弹窗 → 写 `.base` → 打开 |
-| `tools/cli.ts` | `gallery` 子命令（同一套 core；dry-run 默认；`--template` 认 CLI 自带预设或文件） |
+| `scripts/cli.ts` | `gallery` 子命令（同一套 core；dry-run 默认；`--template` 认 CLI 自带预设或文件） |
 | `tools/verify-gallery.cjs` | 判据侧，不是运行时 |
 | `esbuild.config.mjs` | `defaults-text` 插件把 `defaults/metadata/*.md`、`defaults/base/*.base` 内联成字符串（与 `.gitattributes` 同一条路） |
 

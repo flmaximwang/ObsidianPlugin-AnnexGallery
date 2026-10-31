@@ -187,7 +187,7 @@ function identifyGeometry(image: string): { width: string; height: string } {
 }
 
 function hasOwn(obj: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(obj, key);
+  return Object.prototype.hasOwnProperty.call(obj, key) === true;
 }
 
 type RenderKind = "bare" | "quoted" | "list";

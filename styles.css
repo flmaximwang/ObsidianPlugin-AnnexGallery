@@ -2,28 +2,41 @@
  * Obsidian 会自动加载插件目录下的 styles.css，所以这个文件必须与 main.js / manifest.json
  * 一起被复制进 <vault>/.obsidian/plugins/annex-gallery/。
  *
- * 布局口径（spec-774d7ee / ticket 2133603）：标题 h1「Annex Gallery Settings」（下方无说明，
- * 标题本身不带 padding、与下面的设置项左对齐）→ remote 设置 → 分割线 → 文件名匹配模板
- * （外部 .json 路径登记）→ metadata / 画廊模板（外部 .md / .base）→ 分割线 → 缩略图边长。
+ * 布局口径：Obsidian 1.13+ 的声明式设置页（getSettingDefinitions）生成
+ * remote 设置 → 文件名匹配模板与模板 → 常规（缩略图边长 / 调试日志）。
+ * 页面没有标题 h1，也没有 hr 分割线：区块之间由 group 的 heading 分开。
  */
 
-/* ── 标题 ──────────────────────────────────────────────────────────────────── */
-
-/*
- * Obsidian 1.14.4 的 app.css 里有两条会套在插件设置页标题上的规则：
- *   .vertical-tab-content h1 { display: none; }                  ← 内容区 h1 被隐藏
- *   .vertical-tab-content h1…{ padding: 0 var(--size-4-4); }      ← 并带 16px 左右内边距
- * （核心设置页的标题由 app 自己的 `.setting-page-titlebar` 提供，所以内容里的 h1 被隐掉；
- *  插件设置页走的是旧 API，containerEl 就是一个 `.vertical-tab-content`，没有 titlebar。）
- *
- * 所以这里两件事都得压在 app 之上：显式打开标题、并把那 16px padding 抹平。选择器写成
- * `.vertical-tab-content h1.annex-settings-title`（0,2,1）才盖得住 app 的 (0,1,1)。
- */
-.vertical-tab-content h1.annex-settings-title {
-  display: block;
+/* ── 声明式设置页的 render 项（三个编辑器）─────────────────────────────────
+ * 框架为每条定义建一个 .setting-item：name/desc 在 .setting-item-info 里，render
+ * 回调挂进 .setting-item-control。三个编辑器自带卡片标题，所以隐藏 info 列，并把
+ * 这一行的背景 / 边框 / 内边距清掉，让编辑器自己的卡片成为唯一的视觉层。
+ * 编辑器组的外层 .setting-items 同样去掉框架的卡片底，避免卡片套卡片。 */
+.setting-group .setting-item.annex-editor-row:not(.setting-item-heading) {
   padding: 0;
-  margin: 0 0 var(--size-4-4) 0;
-  line-height: 1.2;
+  background-color: transparent;
+  border: none;
+}
+
+.setting-group .setting-item.annex-editor-row:not(.setting-item-heading)::before {
+  content: none;
+}
+
+.setting-group .setting-item.annex-editor-row > .setting-item-info {
+  display: none;
+}
+
+.setting-group .setting-item.annex-editor-row > .setting-item-control {
+  width: 100%;
+  justify-content: flex-start;
+  /* app.css 给 .setting-item-control 写了 text-align:end；不压掉的话，卡片里的
+   * 行内按钮（如「添加 remote」）会被推到右边缘。 */
+  text-align: start;
+}
+
+.setting-group.annex-editors-group .setting-items {
+  background-color: transparent;
+  border: none;
 }
 
 /* ── remote 设置（最上方的一项，可装多条）────────────────────────────────── */
@@ -39,7 +52,7 @@
   padding: 0.8em 1em 1em 1em;
 }
 
-/* 与 h1 同口径：抹掉 app 给 h3 的 16px 内边距（`.vertical-tab-content h3 { padding: 0 16px }`）。 */
+/* app 给 .vertical-tab-content h3 加了行内边距；卡片标题贴住卡片内容边缘，所以抹掉。 */
 .vertical-tab-content h3.annex-remotes-title {
   margin: 0 0 0.2em 0;
   padding: 0;
@@ -313,21 +326,6 @@
   color: var(--text-error);
   font-size: var(--font-ui-smaller);
   overflow-wrap: anywhere;
-}
-
-/* 卡片/模板区与下面普通设置项之间的分割线。 */
-.annex-settings-divider {
-  margin: 1.5em 0 1em 0;
-  border: none;
-  border-top: 1px solid var(--background-modifier-border);
-}
-
-/* remote 区与模版区之间的那条分割线（用户 2026-10-17 追加）：
-   写在 .annex-settings-divider 之后，同权重时由它接管 margin。
-   上面那半留白会被 .annex-remotes-section 的 1em 底边距折叠（取大者），所以写 1.25em
-   才能让实测上下都是 18.75px（对称）。 */
-.annex-remotes-divider {
-  margin: 1.25em 0;
 }
 
 /* ── 状态栏：未提交 / 未跟踪 / 未入库 largefiles（spec: docs/status-bar.md）───

@@ -58,7 +58,7 @@ export function loadProfileFile(vaultRoot: string, rawPath: string): LoadedProfi
   let data: unknown;
   try {
     // JSON 文件常带 UTF-8 BOM（Windows 编辑器）；先剥掉再 parse。
-    data = JSON.parse(file.text.replace(/^﻿/, ""));
+    data = JSON.parse(file.text.replace(/^\uFEFF/, ""));
   } catch (error) {
     throw new Error(`${LABEL} ${file.relPath} 不是合法 JSON：${errText(error)}`);
   }

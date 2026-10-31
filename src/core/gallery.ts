@@ -51,9 +51,21 @@ function collectMarkdown(dir: string): string[] {
   return out.sort();
 }
 
+/** `Object.prototype.hasOwnProperty` 的 boolean 版本（原生返回 any）。 */
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key) === true;
+}
+
+/** frontmatter 里的标量值 → 字符串；对象 / undefined 在 tags 里不合法，按空处理。 */
+function tagText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
 /** 文件开头 `---` … `---` 之间的那段（没有 frontmatter ⇒ null）。 */
 function frontmatterBlock(text: string): { body: string; start: number; end: number } | null {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text.replace(/^﻿/, ""));
+  const m = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text.replace(/^\uFEFF/, ""));
   if (m === null) return null;
   return { body: m[1], start: 4, end: 4 + m[1].length };
 }
@@ -96,7 +108,7 @@ export function planGallery(dir: string): GalleryPlan {
     const fm = readFrontmatter(file);
     if (fm === null) continue;
     const isTagged = tagsOf(fm).includes(GALLERY_TAG);
-    const isOld = !isTagged && Object.prototype.hasOwnProperty.call(fm, "tif");
+    const isOld = !isTagged && hasOwn(fm, "tif");
     if (!isTagged && !isOld) continue;
     if (isTagged) tagged += 1;
     else untagged.push(file);
@@ -138,7 +150,7 @@ export function orderProperties(keys: string[], keyOrders: string[][]): string[]
  * 没有 frontmatter ⇒ 返回 null（不是 sidecar，不碰）。
  */
 export function addGalleryTag(text: string): string | null {
-  const bom = text.startsWith("﻿") ? "﻿" : "";
+  const bom = text.startsWith("\uFEFF") ? "\uFEFF" : "";
   const raw = bom === "" ? text : text.slice(1);
   const block = frontmatterBlock(raw);
   if (block === null) return null;
@@ -168,10 +180,11 @@ export function addGalleryTag(text: string): string | null {
       let values: string[];
       try {
         const parsed: unknown = parseYaml(rest);
-        values = Array.isArray(parsed) ? parsed.map(String) : parsed === null ? [] : [String(parsed)];
+        values = Array.isArray(parsed) ? parsed.map(tagText) : parsed === null ? [] : [tagText(parsed)];
       } catch {
         values = [rest];
       }
+      values = values.filter((value) => value !== "");
       values = values.map((value) => value.replace(/^#/, ""));
       if (values.includes(GALLERY_TAG)) return text;
       lines.splice(keyIndex, 1, "tags:", item("  "), ...values.map((value) => `  - ${value}`));

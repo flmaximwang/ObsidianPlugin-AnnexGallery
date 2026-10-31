@@ -39,7 +39,7 @@
 | `tools/verify-gallery.cjs` | 真仓库层 | `npm run verify:gallery` | `gallery.md` |
 | `tools/status-gui-check.py` | 真机层 | `npm run gui:status` | `status-bar.md` |
 | `tools/real-gui-check.py` | 真机层 | `npm run gui` | `setting-panel.md` |
-| `tools/cli.ts` → `tools/annex-gallery.mjs` | CLI | `npm run cli` | `cli.md` |
+| `scripts/cli.ts` → `tools/annex-gallery.mjs` | CLI | `npm run cli` | `cli.md` |
 | `tools/example-profiles/` | 语料 | — | `cli.md` |
 | `tools/example-profiles/verify-plugin-load.cjs` | 桩层（语料 + 插件加载） | — （手工跑） | `metadata.md` |
 

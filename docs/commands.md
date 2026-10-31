@@ -207,7 +207,7 @@ CLI（`node tools/annex-gallery.mjs init <dir>`）连跑两次的差别 —— �
 |---|---|
 | `src/core/init.ts` | 7 步的编排；第 4 步是 `applyAnnexShape()` —— 读分支值、读本机/全局值、合成生效值、按标准状态决定 set / unset / 兜底，并把「做了什么、为什么」写进报告 |
 | `src/core/rules.ts` | 两条规则文件的内置模板与**合并**实现（`mergeRuleText` / `ensureRulesFile` / `writeIfChanged`）—— 幂等语义在这里，不在调用点 |
-| `tools/cli.ts` | 同名子命令（`node tools/annex-gallery.mjs init <dir>`），与命令面板共用 `init.ts` 的同一条路径，带 `--dry-run` |
+| `scripts/cli.ts` | 同名子命令（`node tools/annex-gallery.mjs init <dir>`），与命令面板共用 `init.ts` 的同一条路径，带 `--dry-run` |
 | `tools/verify-init.cjs` | 判据侧，不是运行时的一部分 |
 
 ## 判据：`npm run verify:init` 钉什么

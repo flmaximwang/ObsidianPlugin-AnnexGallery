@@ -22,6 +22,6 @@
   "include": [
     "main.ts",
     "src/**/*.ts",
-    "tools/**/*.ts"
+    "scripts/**/*.ts"
   ]
 }

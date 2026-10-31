@@ -57,7 +57,10 @@ class FakeEl {
     this._value = "";
     this.placeholder = "";
     this._type = opts.type || "";
+    this.checked = false;
     this.parentElement = null;
+    /** 真实 DOM 的 `el.win`：弹窗（popout）里代码用 `inputEl.win.setTimeout` 定时器。 */
+    this.win = globalThis;
   }
 
   get type() {
@@ -342,7 +345,7 @@ function makeButtonComponent(buttonEl) {
       buttonEl.addClass("mod-cta");
       return component;
     },
-    setWarning() {
+    setDestructive() {
       buttonEl.addClass("mod-warning");
       return component;
     },
@@ -365,18 +368,31 @@ class Setting {
     this.containerEl = containerEl;
     this.settingEl =
       containerEl && typeof containerEl.createDiv === "function" ? containerEl.createDiv({ cls: "setting-item" }) : new FakeEl("div");
+    // 与真实 API 的 DOM 层级一致：info(name/desc) + control。
+    this.infoEl = this.settingEl.createDiv({ cls: "setting-item-info" });
+    this.nameEl = this.infoEl.createDiv({ cls: "setting-item-name" });
+    this.descEl = this.infoEl.createDiv({ cls: "setting-item-description" });
+    this.controlEl = this.settingEl.createDiv({ cls: "setting-item-control" });
     this.components = [];
   }
   setName(name) {
     this.name = name;
+    this.nameEl.setText(String(name));
     this.settingEl.setAttr("data-name", String(name));
     return this;
   }
   setDesc(desc) {
     this.desc = desc;
+    this.descEl.setText(String(desc));
     return this;
   }
   setHeading() {
+    this.settingEl.addClass("setting-item-heading");
+    return this;
+  }
+  /** 框架在每次重渲染前清空 controlEl（见真实 Obsidian 的 `Setting.clear()`）。 */
+  clear() {
+    this.controlEl.empty();
     return this;
   }
   setClass(cls) {
@@ -395,34 +411,117 @@ class Setting {
     return this;
   }
   addText(build) {
-    const component = makeTextComponent(this.settingEl.createEl("input", { cls: "setting-text", type: "text" }));
+    const component = makeTextComponent(this.controlEl.createEl("input", { cls: "setting-text", type: "text" }));
     this.components.push(component);
     build(component);
     return this;
   }
   addTextArea(build) {
-    const component = makeTextComponent(this.settingEl.createEl("textarea", { cls: "setting-textarea" }));
+    const component = makeTextComponent(this.controlEl.createEl("textarea", { cls: "setting-textarea" }));
     this.components.push(component);
     build(component);
     return this;
   }
   addDropdown(build) {
-    const component = makeDropdownComponent(this.settingEl.createEl("select", { cls: "setting-dropdown" }));
+    const component = makeDropdownComponent(this.controlEl.createEl("select", { cls: "setting-dropdown" }));
     this.components.push(component);
     build(component);
     return this;
   }
   addToggle(build) {
-    const component = makeToggleComponent(this.settingEl.createEl("input", { cls: "setting-toggle", type: "checkbox" }));
+    const component = makeToggleComponent(this.controlEl.createEl("input", { cls: "setting-toggle", type: "checkbox" }));
     this.components.push(component);
     build(component);
     return this;
   }
   addButton(build) {
-    const component = makeButtonComponent(this.settingEl.createEl("button", { cls: "setting-button" }));
+    const component = makeButtonComponent(this.controlEl.createEl("button", { cls: "setting-button" }));
     this.components.push(component);
     build(component);
     return this;
+  }
+}
+
+/**
+ * 声明式设置页的渲染器：`getSettingDefinitions()` 的返回值 → DOM。
+ *
+ * 只实现插件用到的三种定义：group / render / control（number、toggle）。DOM 形状
+ * 与真实 Obsidian 一致，因为 layout-check 按这些选择器量尺寸：
+ *   .setting-group > .setting-item-heading > .setting-item-name
+ *   .setting-group > .setting-items > .setting-item > .setting-item-info > .setting-item-name
+ */
+function renderSettingDefinitions(root, defs, tab) {
+  root.empty();
+  let loose = null;
+  for (const def of defs || []) {
+    if (def === null || def === undefined) continue;
+    if (def.type === "page") continue;
+    if (def.type === "group" || def.type === "list") {
+      loose = renderSettingGroup(root, def, tab);
+    } else {
+      // 顶层散项：真实实现会包进一个无标题的 group。
+      if (loose === null) loose = renderSettingGroup(root, { type: "group" }, tab);
+      renderSettingItem(loose.listEl, def, tab);
+    }
+  }
+}
+
+function renderSettingGroup(root, def, tab) {
+  const groupEl = root.createDiv({ cls: "setting-group" });
+  if (def.cls !== undefined) groupEl.addClass(...String(def.cls).split(/\s+/).filter(Boolean));
+  if (def.heading !== undefined && def.heading !== "") {
+    const headingEl = groupEl.createDiv({ cls: "setting-item setting-item-heading" });
+    headingEl.createDiv({ cls: "setting-item-name", text: String(def.heading) });
+  }
+  const listEl = groupEl.createDiv({ cls: "setting-items" });
+  for (const item of def.items || []) renderSettingItem(listEl, item, tab);
+  return { groupEl, listEl };
+}
+
+function renderSettingItem(listEl, def, tab) {
+  const setting = new Setting(listEl);
+  if (def.name !== undefined) setting.setName(def.name);
+  if (def.desc !== undefined) setting.setDesc(def.desc);
+  if (typeof def.render === "function") {
+    def.render(setting, listEl);
+    return;
+  }
+  if (def.control !== undefined) renderSettingControl(setting, def.control, tab);
+}
+
+function renderSettingControl(setting, control, tab) {
+  const key = control.key;
+  const stored = tab.getControlValue(key);
+  const seed = stored === undefined || stored === null ? control.defaultValue : stored;
+
+  if (control.type === "toggle") {
+    const input = setting.controlEl.createEl("input", { cls: "setting-toggle", type: "checkbox" });
+    input.checked = Boolean(seed);
+    input.addEventListener("change", () => {
+      void tab.setControlValue(key, Boolean(input.checked));
+    });
+    return;
+  }
+
+  if (control.type === "number" || control.type === "text") {
+    const input = setting.controlEl.createEl("input", { cls: `setting-${control.type}`, type: control.type });
+    input.value = seed === undefined ? "" : String(seed);
+    const commit = async () => {
+      const next = control.type === "number" ? Number.parseInt(input.value, 10) : input.value;
+      const value = control.type === "number" && !Number.isFinite(next) ? control.defaultValue : next;
+      const message = typeof control.validate === "function" ? await control.validate(value) : undefined;
+      if (typeof message === "string" && message !== "") {
+        input.addClass("is-invalid");
+        input.setAttr("aria-invalid", "true");
+        return;
+      }
+      input.removeClass("is-invalid");
+      input.setAttr("aria-invalid", null);
+      await tab.setControlValue(key, value);
+    };
+    input.addEventListener("change", () => {
+      void commit();
+    });
   }
 }
 
@@ -431,8 +530,34 @@ class PluginSettingTab {
     this.app = app;
     this.plugin = plugin;
     this.containerEl = new FakeEl("div");
+    this.settingItems = [];
   }
-  display() {}
+  getSettingDefinitions() {
+    return [];
+  }
+  /** 真实实现：存下定义并（重新）渲染当前 tab。 */
+  update() {
+    this.settingItems = this.getSettingDefinitions();
+    renderSettingDefinitions(this.containerEl, this.settingItems, this);
+  }
+  /** 1.13+ 的声明式页面里 display() 不再被框架调用；保留它只为兼容旧测试。 */
+  display() {
+    this.update();
+  }
+  refreshDomState() {}
+  hide() {}
+  getControlValue(key) {
+    const settings = this.plugin === undefined ? undefined : this.plugin.settings;
+    return settings === undefined ? undefined : settings[key];
+  }
+  setControlValue(key, value) {
+    const settings = this.plugin === undefined ? undefined : this.plugin.settings;
+    if (settings !== undefined) settings[key] = value;
+    if (this.plugin !== undefined && typeof this.plugin.saveData === "function") {
+      return this.plugin.saveData(settings);
+    }
+    return undefined;
+  }
 }
 
 class Modal {

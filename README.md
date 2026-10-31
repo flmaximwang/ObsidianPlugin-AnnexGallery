@@ -21,6 +21,16 @@ To start, run **Initialize gallery** from the command palette. It turns the curr
 - **Network.** The plugin makes no network requests of its own. Traffic happens only when you run an annex operation such as **Get** or **Drop** and git-annex contacts the remotes you configured.
 - **No telemetry.** There is no analytics, tracking or remote logging.
 
+### Why direct filesystem access and subprocess execution
+
+Obsidian's vault API does not expose a git + git-annex repository, and thumbnails must exist as real files next to their sources. The plugin therefore uses Node's `fs` and `child_process` directly, but only for three bounded jobs:
+
+- **Repository state.** It reads and merges the vault repository's own `.gitattributes` / `.gitignore`, and runs annex actions through the local `git` and `git-annex` binaries. Every command is anchored with `git -C <vault folder>`.
+- **Thumbnails and sidecars.** It walks the gallery folder you invoked and writes `<stem>.thumbnail.png` and `<stem>.md` beside the source image.
+- **Registered templates.** It reads the profile, metadata and gallery template files you registered; their paths are validated as vault-relative, and absolute paths or `..` are rejected.
+
+External programs invoked: `git`, `git-annex` (through `git annex`), and ImageMagick 7 (`magick`, for thumbnails and image dimensions). Commands are passed as argument arrays and never through a shell. No files outside the vault are read or written, apart from the system git configuration and the SSH/GPG credentials that `git` / `git-annex` use for the remotes you configure, plus existence checks for the `magick` binary in Homebrew's standard locations. The bundled CLI (`scripts/cli.ts`, built to `tools/annex-gallery.mjs`) reads and writes only the directories and template files you pass on its command line.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -96,7 +106,8 @@ src/core/          核心逻辑（不依赖 Obsidian，插件与 CLI 共用）
                    init · rules · thumbnails · sidecar · gallery · templates · external-files · profile-files · stems · annex · git · status · remotes
 src/ui/            设置页、文件名匹配模板编辑器、模板编辑器、remotes 编辑器
 src/defaults/      内置规则文件与预设素材（.gitattributes / .gitignore / metadata / base）
-tools/             判据（桩层 / 真仓库层 / 真机层）、CLI、示例语料
+tools/             判据（桩层 / 真仓库层 / 真机层）、示例语料
+scripts/           CLI 源码（构建产物仍是 tools/annex-gallery.mjs）
 tests/             数据安全测试（npm test）
 docs/              设计与口径文档（见下）
 ```
