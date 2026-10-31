@@ -32,7 +32,7 @@ gh api "repos/obsidianmd/obsidian-releases/commits?path=community-plugins.json&p
 | 3 | 用了 Node/Electron API ⇒ `manifest.json` 的 `isDesktopOnly: true` | 声明不实会在移动端崩，是最常见的打回原因 | 查 `manifest.json`；再 grep 代码里的 `child_process` / `fs` / `TMPDIR` |
 | 4 | `id` 全目录唯一，且不含 `obsidian` | 目录按 `id` 认插件，重名即冲突 | 见下方「id 唯一性」命令 |
 | 5 | 命令 `id` 不带插件 `id`、命令 `name` 不带插件名 | 命令面板已经按插件分组，前缀是重复信息 | grep `addCommand`：应为 `id: "init-gallery"` 这种，而不是 `annex-gallery:init-gallery` |
-| 6 | `description` ≤250 字符、**以英文句点 `.` 结尾**、无 emoji、专有名词大小写正确 | 自动审查按英文 style guide 判句末标点 | `python3 -c "import json;print(len(json.load(open('manifest.json'))['description']))"` + 看末字符 |
+| 6 | `description` ≤250 字符、**以英文句点 `.` 结尾**、无 emoji、专有名词大小写正确；目录的 Short description 输入框上限 **200**，manifest 的值会被灌进去，所以取 ≤200 更省事 | 自动审查按英文 style guide 判句末标点；站点表单超限会显示 `193/200` 这类红色计数，改一次要回站点再存一次 | `python3 -c "import json;print(len(json.load(open('manifest.json'))['description']))"` + 看末字符 + 目录 Edit listing 页的计数器 |
 | 7 | `minAppVersion` 取真正需要的最低版本 | 报高了没人能装，报低了在旧版本上崩 | manifest vs 用到的 API 首次出现的版本；不知道就用当前 stable |
 | 8 | 不收捐款就不要 `fundingUrl` | 没有的键胜过多余的键 | 看 `manifest.json` 没有这个键 |
 | 9 | 有 tag == `version` 的 release，附 `main.js` / `manifest.json` / `styles.css` | 装上的就是它 | `gh release list -R <owner>/<repo>`；下载 asset 核对 `manifest.json` 里的 `version` |
