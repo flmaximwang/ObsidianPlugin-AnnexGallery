@@ -1,6 +1,6 @@
 {
   "name": "obsidian-annex-gallery",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Obsidian plugin: git + git-annex backed image gallery (thumbnails + sidecar md + .base)",
   "main": "main.js",
   "scripts": {
