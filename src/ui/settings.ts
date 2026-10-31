@@ -33,6 +33,8 @@ export interface PluginSettings {
   folderMetadataTemplates: Record<string, string>;
   /** 文件夹绝对路径 → 「创建画廊」上次选的画廊模板 id。 */
   folderBaseTemplates: Record<string, string>;
+  /** 把 git / git-annex 的进度写进开发者控制台；默认关闭（社区插件审核要求默认只显示错误）。 */
+  debugLogging: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   baseTemplates: [],
   folderMetadataTemplates: {},
   folderBaseTemplates: {},
+  debugLogging: false,
 };
 
 /**
@@ -120,6 +123,16 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
         text.setValue(String(this.host.settings.thumbnailEdge)).onChange(async (value) => {
           const edge = Number.parseInt(value, 10);
           this.host.settings.thumbnailEdge = Number.isFinite(edge) && edge > 0 ? edge : DEFAULT_SETTINGS.thumbnailEdge;
+          await this.host.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("调试日志")
+      .setDesc("把 git / git-annex 的进度输出到开发者控制台。默认关闭。")
+      .addToggle((toggle) =>
+        toggle.setValue(this.host.settings.debugLogging).onChange(async (value) => {
+          this.host.settings.debugLogging = value;
           await this.host.saveSettings();
         }),
       );

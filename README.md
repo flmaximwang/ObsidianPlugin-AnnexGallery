@@ -1,4 +1,33 @@
-# ObsidianPlugin-AnnexGallery
+# Annex Gallery
+
+Turn git-annex-managed image folders into a gallery. Annex Gallery lays a folder out as a card wall — one card per image, with cover, name and key metadata side by side, filterable by sample, date or parameter.
+
+A card gets its cover from a thumbnail: the plugin generates thumbnails and sidecar Markdown metadata for images (`.tif` `.tiff` `.png` `.jpg` `.jpeg` `.bmp` `.webp`). For other formats, supply a same-name thumbnail and point the sidecar's `thumbnail` field at it.
+
+The vault remains an ordinary git + git-annex repository. Use the file explorer context menu to run Add / Get / Drop / Lock / Unlock on annex largefiles, and watch the status bar for uncommitted, untracked and annex-missing files. Metadata is extracted from file names through configurable profiles.
+
+## Installation
+
+- Obsidian **1.14.4+**, **desktop only** (uses Node / Electron APIs).
+- `git` and `git-annex` must be installed and on `PATH`.
+- Install from the community plugin directory (search **Annex Gallery**), add this repository with BRAT, or copy `main.js` / `manifest.json` / `styles.css` from a release into `<vault>/.obsidian/plugins/annex-gallery/`.
+
+To start, run **Initialize gallery** from the command palette. It turns the current vault root into a git + git-annex repository and repairs missing steps in an existing one.
+
+## Disclosures
+
+- **External programs.** The plugin runs your local `git` and `git-annex` binaries as subprocesses. It does not bundle them.
+- **Files outside the vault.** It reads your system git configuration and the SSH/GPG credentials git-annex uses to reach remotes. The annex object store lives under the vault's `.git/annex`.
+- **Network.** The plugin makes no network requests of its own. Traffic happens only when you run an annex operation such as **Get** or **Drop** and git-annex contacts the remotes you configured.
+- **No telemetry.** There is no analytics, tracking or remote logging.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## 中文说明
 
 **一眼看到，而不是一层层点进去找。** Annex Gallery 把 git + git-annex 管的目录平铺成一面卡片墙：
 一份数据一张卡，封面、名称与关键元数据并排铺开，按样品、日期、参数一筛就只剩你关心的那几张。

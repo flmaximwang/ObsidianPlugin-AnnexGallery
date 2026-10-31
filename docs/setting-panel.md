@@ -76,13 +76,14 @@
 │ 画廊模板（同上；内置只有 default，.base）                       │
 └─────────────────────────────────────────────────────────────────┘
 ────────────────── HR.annex-settings-divider（模板 ↔ 普通设置项）──────────────────
-缩略图边长  [<n>]                     ← app 自己的 .setting-item，唯一剩下的普通设置项
+缩略图边长  [<n>]                     ← app 自己的 .setting-item
+调试日志    [开/关]                    ← 默认关；打开后 git / git-annex 的进度才进控制台
 ```
 
 ### 必须成立的不变量
 
 - **顶层顺序**（离屏与真机必须逐字一致）：
-  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item`。
+  `H1.annex-settings-title → DIV.annex-remotes-section → HR.annex-remotes-divider → DIV.annex-profiles-section → DIV.annex-templates-section → HR.annex-settings-divider → DIV.setting-item → DIV.setting-item`。
 - **标题**是内容区第一个子元素，是真正的 `<h1>`（`containerEl.createEl("h1", …)`），下方无说明文字；
   `display: block`、`padding: 0`、只保留一行底部外边距。标题左边缘 = 卡片左边缘 = 内容区左边缘。
 - **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
@@ -121,8 +122,8 @@
   下方，不占用这三个词。
 - **分割线有两条**，1px、撑满内容宽：上面那条夹在 remote 区与工具条之间，两侧留白相等；下面那条在
   模板区与普通设置项之间。
-- **普通设置项只剩一条**「缩略图边长」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
-  这种东西 —— 那三行在设置页不出现。
+- **普通设置项只有两条**：「缩略图边长」与「调试日志」。`.gitattributes` / `.gitignore` 用内置默认，
+  没有「默认样品名」这种东西 —— 那三行在设置页不出现。
 
 ## 4. 结构与落点
 
@@ -265,11 +266,12 @@
 
 ## 6. 字段与默认值（`data.json`）
 
-落进 `data.json` 的只有九项：
+落进 `data.json` 的只有十项：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
+| 调试日志（`debugLogging`） | `false` | 把 git / git-annex 的进度输出到开发者控制台；默认关闭，避免默认配置下刷屏。 |
 | remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；加载时扫当前仓库的 `git remote`，把设置里没有的补进来（同名不覆盖手改过的地址）；初始化时逐个 `git remote add`（同名已存在就 `set-url`，地址相同则一个字节都不碰）。 |
 | `profiles` | 内置 TECNAI 电镜 | metadata 解析配置；工具条的「新模版 / 导入模版 / 添加预设」增，卡片上的「保存 / 复制 / 打开 / 删除」改。 |
 | `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（内置默认只有 `sample`）。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
@@ -311,7 +313,7 @@
 - 「复制为自定义」写出一个文件到 Annex Gallery Templates/，并登记成一条自定义行、落进 data.json
 - 登记一个不存在的路径 ⇒ 只多一条 Notice，不新增行、data.json 不变
 - 自定义行「删除」只取消登记（data.json 里也去掉），文件仍在盘上
-- 第二条分割线以下 data-name 列表 = ["缩略图边长"]
+- 第二条分割线以下 data-name 列表 = ["缩略图边长", "调试日志"]
 - remote 的增删改、落盘、读回
 ```
 

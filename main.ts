@@ -770,9 +770,17 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     return result.code === 0 ? result.stdout.trim() : dir;
   }
 
+  /**
+   * 进度日志默认不进控制台：社区插件审核要求默认配置下只显示错误。
+   * 需要看 git / git-annex 的实时输出时在设置里打开「调试日志」。
+   */
+  private logProgress(message: string): void {
+    if (this.settings.debugLogging) console.log(progressPrefix(message));
+  }
+
   private notifyReport(title: string, lines: string[]): void {
     new Notice(`${title}\n${lines.join("\n")}`, 8000);
-    for (const line of lines) console.log(progressPrefix(line));
+    for (const line of lines) this.logProgress(line);
   }
 
   // ── 入口 1：初始化 gallery ───────────────────────────────────────────────
@@ -782,7 +790,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     try {
       const result = await initGallery(root, {
         remotes: this.settings.remotes,
-        progress: (message) => console.log(progressPrefix(message)),
+        progress: (message) => this.logProgress(message),
       });
       const remotes = result.remotes;
       const remoteCount = (action: string): number => remotes.filter((entry) => entry.action === action).length;
@@ -829,7 +837,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     try {
       const report: ThumbnailReport = await generateThumbnails(dir, {
         edge: this.settings.thumbnailEdge,
-        progress: (message) => console.log(progressPrefix(message)),
+        progress: (message) => this.logProgress(message),
       });
       progress.hide();
       this.notifyReport("生成缩略图完成", [
@@ -857,7 +865,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const notice = new Notice(`${title}：${where} …`, 0);
     const progress = (message: string): void => {
       notice.setMessage(message);
-      console.log(progressPrefix(message));
+      this.logProgress(message);
     };
     try {
       const report: AnnexReport = await runAnnexOp(op, dir, { progress });
@@ -977,7 +985,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         template,
         apply: true,
         overwrite,
-        progress: (message) => console.log(progressPrefix(message)),
+        progress: (message) => this.logProgress(message),
       });
       progress.hide();
       const count = (action: string): number => report.entries.filter((entry) => entry.action === action).length;
@@ -1135,7 +1143,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const dir = this.folderPath(folder);
     const where = folder.path === "/" ? "仓库根" : folder.path;
     try {
-      const preview = await dropLargefiles(dir, { dryRun: true, progress: (m) => console.log(progressPrefix(m)) });
+      const preview = await dropLargefiles(dir, { dryRun: true, progress: (m) => this.logProgress(m) });
       if (preview.present === 0) {
         new Notice(
           `Drop largefiles：${where} 没有可丢的本地 annex 内容（已经丢过，或这里没有 annex 文件）`,
@@ -1156,7 +1164,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const progress = new Notice(`Drop largefiles：正在丢弃 ${where} 的 ${expected} 个文件的本地内容…`, 0);
     try {
       const report: DropReport = await dropLargefiles(dir, {
-        progress: (message) => console.log(progressPrefix(message)),
+        progress: (message) => this.logProgress(message),
       });
       progress.hide();
       const lines = [
