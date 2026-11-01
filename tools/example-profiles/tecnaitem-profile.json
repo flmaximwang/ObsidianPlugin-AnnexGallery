@@ -1,0 +1,36 @@
+{
+  "id": "tecnaitem",
+  "name": "TECNAI 电镜（<放大倍数>X-<标记>-<序号>）",
+  "source": "stem",
+  "regex": "^(?<magnification>\\d+)X-(?<marker>.+)-(?<index>\\d+)$",
+  "types": {
+    "magnification": "number",
+    "index": "number",
+    "width": "number",
+    "height": "number",
+    "size": "number",
+    "date": "date",
+    "btime": "date"
+  },
+  "ask": ["sample"],
+  "onMismatch": "empty",
+  "match": {
+    "relpathRegex": "\\d+X-[0-9A-Za-z]+-\\d+\\.(?:tif|tiff|png|jpg|jpeg|bmp|webp)$",
+    "filenameRegex": "^\\d+X-[0-9A-Za-z]+-\\d+"
+  },
+  "frontmatter": {
+    "tags": ["annex-gallery-metadata", "{{tags}}"],
+    "sample": "{{sample}}",
+    "session": "{{session}}",
+    "date": "{{date}}",
+    "magnification": "{{magnification}}",
+    "index": "{{index}}",
+    "width": "{{width}}",
+    "height": "{{height}}",
+    "size": "{{size}}",
+    "btime": "{{btime}}",
+    "thumbnail": "{{thumbnail}}",
+    "tif": "{{tif}}"
+  },
+  "template": "AnnexGalleryTemplates/tecnaitem.md"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "minimal",
+  "name": "最小示例（<序号>）",
+  "source": "stem",
+  "regex": "^(?<index>\\d+)$",
+  "types": { "index": "number", "date": "date" },
+  "ask": ["sample"],
+  "onMismatch": "empty",
+  "frontmatter": {
+    "tags": ["annex-gallery-metadata", "{{tags}}"],
+    "sample": "{{sample}}",
+    "date": "{{date}}",
+    "index": "{{index}}",
+    "thumbnail": "{{thumbnail}}"
+  },
+  "template": "AnnexGalleryTemplates/minimal.md"
+}

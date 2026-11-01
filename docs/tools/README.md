@@ -43,7 +43,7 @@
 | `tools/example-profiles/` | 语料 | — | `cli.md` |
 | `tools/example-profiles/verify-plugin-load.cjs` | 桩层（语料 + 插件加载） | — （手工跑） | `metadata.md` |
 
-> 桩层判的是**外部文件模型**：文件名匹配模板、metadata 模板、画廊模板都以 vault 里的文件为准，
+> 桩层判的是**外部文件模型**：元数据预设、画廊模板都以 vault 里的文件为准，
 > 登记 / 从预设创建 / 打开 / 取消登记、坏文件在写盘前停下、旧内联配置不迁移 —— 都在 `npm run smoke`
 > 与 `tools/example-profiles/verify-plugin-load.cjs` 里。
 

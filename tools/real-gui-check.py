@@ -199,7 +199,6 @@ def main():
         settingsKeys: p ? Object.keys(p.settings) : null,
         remotes: p ? p.settings.remotes : null,
         profileFiles: p ? p.settings.profileFiles : null,
-        metadataTemplates: p ? p.settings.metadataTemplates : null,
         baseTemplates: p ? p.settings.baseTemplates : null,
         legacyPresent: p ? Boolean(p.legacyInlineProfiles && p.legacyInlineProfiles.present) : null,
         legacyCount: p && p.legacyInlineProfiles ? p.legacyInlineProfiles.count : null,
@@ -236,10 +235,10 @@ def main():
     check(len(groups) == 3, f"顶层 = 3 个 .setting-group：{[g['cls'] for g in groups]}")
     if len(groups) == 3:
         headings = [g["heading"] for g in groups]
-        check(headings == [None, "文件名匹配模板与模板", "常规"],
-              f"三个 group 的 heading = 无 → 文件名匹配模板与模板 → 常规：{headings}")
+        check(headings == [None, "元数据预设与画廊模板", "常规"],
+              f"三个 group 的 heading = 无 → 元数据预设与画廊模板 → 常规：{headings}")
         item_names = [g["items"] for g in groups]
-        check(item_names == [["remote 设置"], ["文件名匹配模板", "metadata 与画廊模板"], ["缩略图边长", "调试日志"]],
+        check(item_names == [["remote 设置"], ["元数据预设", "画廊模板"], ["缩略图边长", "调试日志"]],
               f"每个 group 的设置项：{item_names}")
         render_rows = [g["renderRows"] for g in groups]
         check(render_rows == [1, 2, 0],
@@ -250,12 +249,12 @@ def main():
     check(all(c == "setting-group" for c in got),
           f"顶层全部是 .setting-group（没有散的 h1 / hr / setting-item）：{rep['topLevel']}")
 
-    # ── 文件名匹配模板：路径输入 + 登记 + 从预设创建（只有外部文件） ──────────
+    # ── 元数据预设：路径输入 + 登记 + 从预设创建（只有外部文件） ──────────────
     bar = rep["toolbar"] or {}
     controls = bar.get("controls", [])
     labels = [c["label"] for c in controls]
     check(len(controls) == 3, f"工具条只有 3 个控件：{labels}")
-    check(controls and controls[0]["tag"] == "INPUT" and "profile JSON 路径" in (controls[0].get("placeholder") or ""),
+    check(controls and controls[0]["tag"] == "INPUT" and "元数据预设路径" in (controls[0].get("placeholder") or ""),
           f"第 1 格是 vault 相对路径输入框：{controls[0] if controls else None}")
     check(len(controls) > 1 and controls[1]["tag"] == "BUTTON" and controls[1]["label"] == "登记",
           f"第 2 格是「登记」按钮：{controls[1] if len(controls) > 1 else None}")
@@ -290,11 +289,11 @@ def main():
     check(old["builtinRows"] == 0 and old["viewButtons"] == 0 and old["copyButtons"] == 0,
           f"没有可直接使用的内置模板行 / 查看 / 复制为自定义：{old}")
 
-    # ── metadata / 画廊模板：一行一个已登记外部文件 ──────────────────────────
+    # ── 画廊模板：一行一个已登记外部文件 ─────────────────────────────────────
     cards = rep["templateCards"]
-    check([c["kind"] for c in cards] == ["metadata", "base"],
-          f"模板区 = metadata + 画廊模板两张卡片：{[c['kind'] for c in cards]}")
-    for card, key in (("metadata", "metadataTemplates"), ("base", "baseTemplates")):
+    check([c["kind"] for c in cards] == ["base"],
+          f"模板区 = 只有画廊模板一张卡片：{[c['kind'] for c in cards]}")
+    for card, key in (("base", "baseTemplates"),):
         found = next((c for c in cards if c["kind"] == card), None)
         if found is None:
             check(False, f"缺少 {card} 模板卡片")

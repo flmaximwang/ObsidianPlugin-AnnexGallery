@@ -7,61 +7,85 @@
  *
  *   node tools/annex-gallery.mjs init    <dir> [--dry-run] [--json]
  *   node tools/annex-gallery.mjs thumbs  <dir> [--edge 256] [--dry-run] [--force] [--json]
- *   node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> [--sample <name>]
- *                                        [--profile <id>] [--profiles-file <json>] [--template <id|file>]
- *                                        [--verify] [--repo <root>] [--apply] [--force] [--json]
- *   node tools/annex-gallery.mjs gallery <dir> --vault <root> [--template <id|file>] [--profiles-file <json>]
- *                                        [--edge 256] [--apply] [--overwrite] [--fix-tags] [--json]
- *   node tools/annex-gallery.mjs profiles --list | --check | --parse <name> [--path <relpath>] [--profile <id>] [--profiles-file <json>]
+ *   node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --preset <json> [--preset <json> ...]
+ *                                        [--profile <id>] [--sample <name>] [--ask key=value]
+ *                                        [--repo <root>] [--apply] [--force] [--overwrite] [--plan] [--verify] [--json]
+ *   node tools/annex-gallery.mjs gallery <dir> --vault <root> --preset <json> [--preset <json> ...]
+ *                                        [--template <file>] [--edge 256] [--apply] [--overwrite] [--fix-tags] [--json]
+ *   node tools/annex-gallery.mjs profiles --list | --check | --parse <name> --preset <json> [--preset <json> ...]
+ *                                        [--vault <root>] [--path <rel>] [--profile <id>] [--json]
  *   node tools/annex-gallery.mjs stems   <dir> [--json]
  *   node tools/annex-gallery.mjs drop    <dir> [--dry-run] [--force] [--json]   # 丢本地 annex 内容
  *   node tools/annex-gallery.mjs annex   <add|unlock|lock|get|unannex|drop> <dir> [--json]
  *   node tools/annex-gallery.mjs defaults            # print the bundled .gitattributes
+ *
+ * 元数据预设（metadata preset）：**一份 .json 一条预设**（顶层就是一条 `ParseProfile`），
+ * 用 `--preset` 指定（可重复）。CLI **没有任何内置预设**：不给 `--preset` 直接报错。
+ * 预设文件本身的路径按 **当前工作目录** 解析；预设里的 `template`（正文 `.md`）
+ * 按 **--vault** 解析（core 用 `readVaultTextFile(..., "metadata")` 读）。
  */
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { initGallery } from "../src/core/init";
 import { ANNEX_OP_TITLE, AnnexOp, dropLargefiles, runAnnexOp } from "../src/core/annex";
 import { GITATTRIBUTES_TEMPLATE, GITIGNORE_TEMPLATE } from "../src/core/rules";
 import { buildSidecarText, generateSidecars, planSidecarTargets } from "../src/core/sidecar";
 import { addGalleryTag, buildGalleryBase, galleryFilePath, orderProperties, planGallery } from "../src/core/gallery";
-import {
-  presetTemplates,
-  readTemplateFile,
-  type ResolvedTemplate,
-  type TemplateKind,
-} from "../src/core/templates";
+import { presetTemplates, readTemplateFile, type ResolvedTemplate } from "../src/core/templates";
 import { collectImages, duplicateStems, stemOf } from "../src/core/stems";
 import { generateThumbnails } from "../src/core/thumbnails";
 import { progressPrefix } from "../src/core/types";
+import { readVaultTextFile } from "../src/core/external-files";
+import { parseProfileDocument, startsWithFrontmatter } from "../src/core/profile-files";
 import {
-  DEFAULT_PROFILES,
   parseWithProfile,
   pickProfile,
   validateProfile,
   type ParseContext,
   type ParseProfile,
+  type ProfileIssue,
 } from "../src/core/profiles";
+
+type FlagValue = string | boolean;
 
 interface Args {
   positional: string[];
-  flags: Map<string, string | boolean>;
+  /** 同一个 flag 可以给多次（`--preset a --preset b`）：按出现顺序存。 */
+  flags: Map<string, FlagValue[]>;
 }
+
+/** 这些 flag 不吃值（后面跟的东西是位置参数，不是它的值）。 */
+const BOOLEAN_FLAGS = new Set([
+  "apply",
+  "check",
+  "dry-run",
+  "fix-tags",
+  "force",
+  "help",
+  "json",
+  "list",
+  "overwrite",
+  "plan",
+  "verify",
+]);
 
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
-  const flags = new Map<string, string | boolean>();
+  const flags = new Map<string, FlagValue[]>();
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token.startsWith("--")) {
       const name = token.slice(2);
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
-        flags.set(name, next);
+      const values = flags.get(name) ?? [];
+      if (!BOOLEAN_FLAGS.has(name) && next !== undefined && !next.startsWith("--")) {
+        values.push(next);
         i += 1;
       } else {
-        flags.set(name, true);
+        values.push(true);
       }
+      flags.set(name, values);
     } else {
       positional.push(token);
     }
@@ -70,12 +94,27 @@ function parseArgs(argv: string[]): Args {
 }
 
 function flag(flags: Args["flags"], name: string): boolean {
-  return flags.get(name) === true || flags.get(name) === "true";
+  const values = flags.get(name);
+  if (values === undefined) return false;
+  return values.some((value) => value === true || value === "true");
 }
 
+/** 单值 flag：多次给时取最后一个。 */
 function opt(flags: Args["flags"], name: string): string | undefined {
-  const value = flags.get(name);
-  return typeof value === "string" ? value : undefined;
+  const values = flags.get(name);
+  if (values === undefined) return undefined;
+  for (let i = values.length - 1; i >= 0; i -= 1) {
+    const value = values[i];
+    if (typeof value === "string") return value;
+  }
+  return undefined;
+}
+
+/** 多次给的 flag：按出现顺序返回全部值（`--preset a --preset b`）。 */
+function opts(flags: Args["flags"], name: string): string[] {
+  const values = flags.get(name);
+  if (values === undefined) return [];
+  return values.filter((value): value is string => typeof value === "string");
 }
 
 function say(json: boolean, payload: unknown, human: string[]): void {
@@ -91,50 +130,176 @@ function relPath(vaultRoot: string, abs: string): string {
   return toPosix(path.relative(vaultRoot, abs));
 }
 
-/** profile 数据默认取 DEFAULT_PROFILES；`--profiles-file <json>` 可从文件读。 */
-function loadProfiles(flags: Args["flags"]): ParseProfile[] {
-  const file = opt(flags, "profiles-file");
-  if (file === undefined) return DEFAULT_PROFILES;
-  const raw = fs.readFileSync(path.resolve(file), "utf8");
-  const data: unknown = JSON.parse(raw);
-  const list = Array.isArray(data)
-    ? data
-    : data !== null && typeof data === "object" && Array.isArray((data as { profiles?: unknown }).profiles)
-      ? (data as { profiles: unknown[] }).profiles
-      : undefined;
-  if (list === undefined) throw new Error("--profiles-file 的 JSON 必须是 profile 数组，或 { \"profiles\": [ … ] }");
-  return list as ParseProfile[];
+function errText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function profileById(profiles: ParseProfile[], id: string): ParseProfile {
-  const found = profiles.find((profile) => profile.id === id);
-  if (found === undefined) throw new Error(`找不到 profile：${id}（用 profiles --list 看有哪些）`);
-  return found;
+/** 没有 `--preset` 时的统一提示（CLI 不带任何内置预设）。 */
+const NO_PRESET_HINT =
+  "没有可用的元数据预设：CLI 不带任何内置预设，必须用 --preset <文件> 指定" +
+  "（一条预设一个 .json，可以给多次）。示例预设见 tools/example-profiles/*.json。";
+
+// ── 预设（preset）读取 ───────────────────────────────────────────────────────
+
+/** 一份预设文件的读取结果（不抛错，坏文件也能显示原因）。 */
+interface CliPresetFile {
+  /** 命令行里给的原始路径（报错时用）。 */
+  given: string;
+  /** 本地绝对路径。 */
+  absPath: string;
+  /** 解析出来的预设（JSON 坏时没有）。 */
+  profile?: ParseProfile;
+  /** 正文模板原文（预设的 `template` 指向的 vault 内 `.md`）。 */
+  body?: string;
+  /** 正文模板的 vault 相对路径。 */
+  bodyRelPath?: string;
+  /** 旧格式顶层键名（空数组 ⇒ 不是旧格式）。 */
+  legacyKeys: string[];
+  issues: ProfileIssue[];
 }
 
 /**
- * `--template <id|file>`：值是一个存在的文件路径 ⇒ 直接读它；否则按 **CLI 内置预设 id** 取
- * `src/defaults/` 里那份原文（`default`；metadata 另有 `embed`）。
+ * 读一份预设文件（**不抛错**）。
  *
- * CLI 没有设置页，也**不读** `data.json` 里登记的外部模板，所以它不能走插件的
- * `resolveTemplate(..., [], ...)` —— 运行时的外部登记表在这里恒为空，只会得到「找不到模板」。
- * 这里的 id 分支是**显式的预设素材选择**：CLI 行为与改造前一致，但不会让插件运行时出现内置
- * fallback。没给 `--template` ⇒ `fallbackId`（metadata / base 都是 `default`）。
+ * 与 core 的 `inspectProfileFile` 同一套语义，差别只有一处：**预设文件本身**按
+ * 当前工作目录解析（CLI 的文件参数惯例），而预设里的 `template`（正文 `.md`）
+ * 仍按 vault 相对路径解析（`readVaultTextFile(..., "metadata")`）。
+ *
+ * `readBody=false` 时**不碰正文模板**（gallery 只需要 frontmatter 的键顺序，
+ * 不该因为 vault 里还没有那个 .md 就失败）。
  */
-function loadTemplate(flags: Args["flags"], kind: TemplateKind, fallbackId = "default"): ResolvedTemplate {
-  const value = opt(flags, "template") ?? fallbackId;
-  const abs = path.resolve(value);
+function inspectCliPreset(
+  vaultRoot: string | undefined,
+  given: string,
+  readBody = true,
+): CliPresetFile {
+  const out: CliPresetFile = { given, absPath: path.resolve(given), legacyKeys: [], issues: [] };
+  let text: string;
   try {
-    if (fs.statSync(abs).isFile()) return readTemplateFile(abs, abs);
-  } catch {
-    // 不是文件 ⇒ 下面按 CLI 预设 id 解析（找不到会得到清楚的报错）。
+    text = fs.readFileSync(out.absPath, "utf8");
+  } catch (error) {
+    out.issues.push({ level: "error", message: `元数据预设 ${given} 读不了：${errText(error)}` });
+    return out;
   }
-  const preset = presetTemplates(kind).find((entry) => entry.id === value);
-  if (preset !== undefined) return { id: preset.id, label: `CLI 内置预设 ${preset.id}`, text: preset.text };
-  const available = presetTemplates(kind).map((entry) => entry.id).join(" / ");
-  throw new Error(
-    `--template「${value}」既不是文件路径，也不是 CLI 内置预设（可用：${available}）。CLI 不读插件设置里的外部模板；自定义模板请直接给文件路径。`,
+
+  const doc = parseProfileDocument(text, given);
+  out.legacyKeys = doc.legacyKeys;
+  out.issues.push(...doc.issues);
+  if (doc.profile === undefined) return out;
+
+  const profile = doc.profile;
+  out.profile = profile;
+
+  // 正文模板：vault 相对路径（core 的 readVaultTextFile 同口径）。
+  const templatePath = typeof profile.template === "string" ? profile.template.trim() : "";
+  if (readBody && templatePath !== "") {
+    if (vaultRoot === undefined) {
+      out.issues.push({
+        level: "warn",
+        message: `元数据预设 ${given} 指向正文模板 ${templatePath}，但没有 --vault：跳过正文模板检查`,
+      });
+    } else {
+      try {
+        const file = readVaultTextFile(vaultRoot, templatePath, "metadata");
+        out.bodyRelPath = file.relPath;
+        if (startsWithFrontmatter(file.text)) {
+          out.issues.push({
+            level: "error",
+            message: `正文模板 ${file.relPath} 不能自带 frontmatter（frontmatter 由预设的 frontmatter 字典生成）`,
+          });
+        } else {
+          out.body = file.text;
+        }
+      } catch (error) {
+        out.issues.push({ level: "error", message: errText(error) });
+      }
+    }
+  }
+
+  try {
+    out.issues.push(...validateProfile(profile, out.body === undefined ? {} : { bodyText: out.body }));
+  } catch (error) {
+    out.issues.push({ level: "error", message: `校验失败：${errText(error)}` });
+  }
+  return out;
+}
+
+/**
+ * 读全部预设文件并检查跨文件 id 重复（错误留在各自的 issues 里，不抛）。
+ */
+function inspectCliPresets(
+  vaultRoot: string | undefined,
+  givens: string[],
+  readBody = true,
+): CliPresetFile[] {
+  const files = givens.map((given) => inspectCliPreset(vaultRoot, given, readBody));
+  const firstById = new Map<string, string>();
+  for (const file of files) {
+    if (file.profile === undefined) continue;
+    const id = file.profile.id;
+    const previous = firstById.get(id);
+    if (previous === undefined) {
+      firstById.set(id, file.given);
+      continue;
+    }
+    file.issues.push({ level: "error", message: `元数据预设 id「${id}」重复：${previous} 与 ${file.given}` });
+  }
+  return files;
+}
+
+/** 读全部预设文件；任何一份有 error ⇒ 抛错（错误里带文件路径）。 */
+function loadCliPresets(vaultRoot: string | undefined, givens: string[], readBody = true): CliPresetFile[] {
+  const files = inspectCliPresets(vaultRoot, givens, readBody);
+  const errors = files.flatMap((file) =>
+    file.issues
+      .filter((issue) => issue.level === "error")
+      // 读盘/JSON/legacy 一类的错误文案已经带上了文件路径，别重复加前缀。
+      .map((issue) => (issue.message.includes(file.given) ? issue.message : `${file.given}: ${issue.message}`)),
   );
+  if (errors.length > 0) throw new Error(errors.join("；"));
+  return files;
+}
+
+/** 按 id 在已读到的预设里找一条。 */
+function profileById(files: CliPresetFile[], id: string): ParseProfile {
+  for (const file of files) {
+    if (file.profile !== undefined && file.profile.id === id) return file.profile;
+  }
+  throw new Error(`找不到预设 id「${id}」（用 profiles --list 看有哪些）`);
+}
+
+/** `--ask key=value`（可给多次）⇒ ask 变量表。 */
+function parseAsk(flags: Args["flags"]): Record<string, string> {
+  const ask: Record<string, string> = {};
+  for (const entry of opts(flags, "ask")) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) throw new Error(`--ask 需要 key=value 的写法：${entry}`);
+    ask[entry.slice(0, eq).trim()] = entry.slice(eq + 1);
+  }
+  return ask;
+}
+
+/**
+ * 画廊模板（`.base`）：`--template <file>` 给文件路径；不给 ⇒ CLI 内置的 default 预设。
+ * （CLI 不读插件设置里登记的外部模板 —— 没有设置页可点。）
+ */
+function loadGalleryTemplate(flags: Args["flags"]): ResolvedTemplate {
+  const value = opt(flags, "template");
+  if (value !== undefined) {
+    const abs = path.resolve(value);
+    let isFile = false;
+    try {
+      isFile = fs.statSync(abs).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) throw new Error(`--template「${value}」不是文件路径（画廊模板请给 .base 文件）`);
+    return readTemplateFile(abs, abs);
+  }
+  const presets = presetTemplates("base");
+  const preset = presets.find((entry) => entry.id === "default") ?? presets[0];
+  if (preset === undefined) throw new Error("没有可用的画廊模板预设");
+  return { id: preset.id, label: `CLI 内置预设 ${preset.id}`, text: preset.text };
 }
 
 /**
@@ -158,10 +323,21 @@ function contextFromName(name: string, relpath?: string): ParseContext {
   };
 }
 
-function runProfilesList(profiles: ParseProfile[]): void {
-  for (const profile of profiles) {
+// ── profiles 子命令 ──────────────────────────────────────────────────────────
+
+function runProfilesList(files: CliPresetFile[]): void {
+  for (const file of files) {
+    const profile = file.profile;
+    if (profile === undefined) {
+      console.log(`?  ${file.given}（读不出来：${file.issues[0]?.message ?? "未知错误"}）`);
+      continue;
+    }
+    const keys = profile.frontmatter === undefined ? [] : Object.keys(profile.frontmatter);
     console.log(`${profile.id}  ${profile.name}`);
-    console.log(`  source=${profile.source ?? "stem"}  keys=${profile.keyOrder.join(",")}`);
+    console.log(`  file=${file.given}`);
+    console.log(`  source=${profile.source ?? "stem"}  regex=${profile.regex}`);
+    console.log(`  frontmatter=${keys.length === 0 ? "-" : keys.join(",")}`);
+    console.log(`  body=${profile.template === undefined || profile.template.trim() === "" ? "-" : file.bodyRelPath ?? profile.template}`);
     const match = profile.match;
     console.log(
       match === undefined
@@ -169,59 +345,160 @@ function runProfilesList(profiles: ParseProfile[]): void {
         : `  match: relpath=${match.relpathRegex ?? "-"} filename=${match.filenameRegex ?? "-"}`,
     );
   }
-  console.log(`profiles=${profiles.length}`);
+  console.log(`profiles=${files.length}`);
 }
 
-function runProfilesCheck(profiles: ParseProfile[]): void {
+function runProfilesCheck(files: CliPresetFile[]): void {
   let errors = 0;
   let warns = 0;
-  for (const profile of profiles) {
-    const issues = validateProfile(profile);
-    for (const issue of issues) {
-      console.log(`[${issue.level}] ${profile.id}: ${issue.message}`);
+  for (const file of files) {
+    for (const issue of file.issues) {
+      const label = file.profile?.id ?? file.given;
+      console.log(`[${issue.level}] ${label}: ${issue.message}`);
       if (issue.level === "error") errors += 1;
       else warns += 1;
     }
-    if (issues.length === 0) console.log(`OK ${profile.id}`);
+    if (file.issues.length === 0) console.log(`OK ${file.profile?.id ?? file.given}`);
   }
-  console.log(`checked=${profiles.length} errors=${errors} warns=${warns}`);
+  console.log(`checked=${files.length} errors=${errors} warns=${warns}`);
   if (errors > 0) process.exitCode = 1;
 }
 
-function runProfilesParse(profiles: ParseProfile[], flags: Args["flags"], name: string, json: boolean): void {
+/**
+ * 造一份「假的」sidecar 来预览 frontmatter。
+ *
+ * `buildSidecarText` 会 stat 图片（取 size / btime）、并跑 magick 取宽高 —— 所以
+ * 图片文件得真的存在。这里在临时目录里摆一份**同相对路径**的替身：
+ * 真实文件在 vault 里就复制过来（宽高/大小都是真的），否则放一个空占位文件。
+ * 临时根目录用 vault 根的同名目录，这样 session / date / tags 与真跑一致。
+ */
+function drySidecar(
+  vaultRoot: string,
+  profile: ParseProfile,
+  ctx: ParseContext,
+  body: string | undefined,
+  ask: Record<string, string>,
+): { frontmatter: string; detail?: string; note?: string } {
+  // 相对路径里的 ".." / 绝对路径都先压平，别让替身文件跑出临时目录。
+  const safeRel = ctx.relpath
+    .split("/")
+    .filter((part) => part !== "" && part !== "." && part !== "..")
+    .join("/");
+  const rel = safeRel === "" ? "preview" : safeRel;
+
+  const realPath = path.join(vaultRoot, rel);
+  const isRealFile = fs.existsSync(realPath) && fs.statSync(realPath).isFile();
+
+  const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "annex-parse-"));
+  const tmpRoot = path.join(tmpBase, path.basename(vaultRoot));
+  fs.mkdirSync(path.dirname(path.join(tmpRoot, rel)), { recursive: true });
+  const fakeImage = path.join(tmpRoot, rel);
+  try {
+    if (isRealFile) fs.copyFileSync(realPath, fakeImage);
+    else fs.writeFileSync(fakeImage, "", "utf8");
+    const built = buildSidecarText(fakeImage, profile, { vaultRoot: tmpRoot, ask, body });
+    const lines = built.text.split("\n");
+    const end = lines.indexOf("---", 1);
+    return {
+      frontmatter: lines.slice(1, end === -1 ? lines.length : end).join("\n"),
+      detail: built.detail,
+      ...(isRealFile ? {} : { note: "图片不在 vault 里，宽高/大小用的是占位值" }),
+    };
+  } finally {
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  }
+}
+
+function runProfilesParse(
+  files: CliPresetFile[],
+  flags: Args["flags"],
+  name: string,
+  vaultRoot: string | undefined,
+  json: boolean,
+): void {
+  const usable = files.filter((file): file is CliPresetFile & { profile: ParseProfile } => file.profile !== undefined);
+  if (usable.length === 0) throw new Error("没有可用的预设");
   const ctx = contextFromName(name, opt(flags, "path"));
   const fixedId = opt(flags, "profile");
-  const profile = fixedId !== undefined ? profileById(profiles, fixedId) : pickProfile(profiles, ctx) ?? profiles[0];
-  if (profile === undefined) throw new Error("没有可用 profile");
+  const picked = fixedId !== undefined ? profileById(usable, fixedId) : undefined;
+  const profile = picked ?? pickProfile(usable.map((file) => file.profile), ctx) ?? usable[0].profile;
   const parsed = parseWithProfile(profile, ctx);
+  const ask = parseAsk(flags);
+  // `--sample` 与 `sidecar` 同口径：等价于 `--ask sample=<值>`（显式 --ask 优先）。
+  const sample = opt(flags, "sample");
+  if (sample !== undefined && sample !== "" && ask.sample === undefined) ask.sample = sample;
+
+  // 渲染一份「假的」sidecar，把 frontmatter 真正算出来给人看。
+  const source = usable.find((file) => file.profile.id === profile.id);
+  let rendered: { frontmatter: string; detail?: string; note?: string } | undefined;
+  let renderError: string | undefined;
+  if (vaultRoot !== undefined) {
+    try {
+      rendered = drySidecar(vaultRoot, profile, ctx, source?.body, ask);
+    } catch (error) {
+      renderError = errText(error);
+    }
+  }
+
   if (json) {
-    console.log(JSON.stringify({ profileId: profile.id, source: profile.source ?? "stem", subject: ctx.stem, ...parsed }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          profileId: profile.id,
+          source: profile.source ?? "stem",
+          subject: ctx.stem,
+          matched: parsed.matched,
+          groups: parsed.groups,
+          values: parsed.values,
+          missingGroups: parsed.missingGroups,
+          frontmatter: rendered?.frontmatter ?? null,
+          detail: rendered?.detail ?? null,
+          note: rendered?.note ?? null,
+          renderError: renderError ?? null,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
+
   console.log(`profile=${profile.id} source=${profile.source ?? "stem"} matched=${parsed.matched}`);
-  for (const spec of profile.fields) {
-    const key = spec.key ?? spec.group;
-    const value = parsed.values[key] ?? "";
-    const missing = parsed.missingGroups.includes(spec.group);
-    console.log(`  ${key}=${value === "" ? '""' : value}${missing ? "（组没参与匹配，写 whenMissing）" : ""}`);
+  for (const group of parsed.groups) {
+    const value = parsed.values[group] ?? "";
+    const missing = parsed.missingGroups.includes(group);
+    console.log(`  ${group}=${value === "" ? '""' : value}${missing ? "（组没参与匹配 ⇒ 写 YAML null）" : ""}`);
   }
   console.log(`missingGroups=${parsed.missingGroups.length === 0 ? "-" : parsed.missingGroups.join(",")}`);
-  console.log(`extraGroups=${parsed.extraGroups.length === 0 ? "-" : parsed.extraGroups.join(",")}`);
+  if (rendered !== undefined) {
+    console.log("--- frontmatter ---");
+    console.log(rendered.frontmatter);
+    if (rendered.detail !== undefined) console.log(`（${rendered.detail}）`);
+    if (rendered.note !== undefined) console.log(`（${rendered.note}）`);
+  } else {
+    console.log(
+      renderError === undefined
+        ? "（没给 --vault：只列变量值，不渲染 frontmatter）"
+        : `（渲染 frontmatter 失败：${renderError}）`,
+    );
+  }
 }
+
+// ── sidecar --verify ────────────────────────────────────────────────────────
 
 interface VerifyOptions {
   vaultRoot: string;
-  profiles: ParseProfile[];
+  files: CliPresetFile[];
   profile?: ParseProfile;
   ask: Record<string, string>;
   tag?: string;
-  template?: ResolvedTemplate;
   json: boolean;
 }
 
 /** `sidecar --verify`：逐字节比对，绝不写盘。 */
 function runSidecarVerify(dir: string, opts: VerifyOptions): void {
   const images = collectImages(dir);
+  const usable = opts.files.filter((file): file is CliPresetFile & { profile: ParseProfile } => file.profile !== undefined);
   const usedIds = new Set<string>();
   const entries: Array<Record<string, unknown>> = [];
   let same = 0;
@@ -236,14 +513,15 @@ function runSidecarVerify(dir: string, opts: VerifyOptions): void {
       relpath: relPath(opts.vaultRoot, image),
       folderName: path.basename(path.dirname(image)),
     };
-    const profile = opts.profile ?? pickProfile(opts.profiles, ctx) ?? opts.profiles[0];
-    if (profile === undefined) throw new Error("没有可用 profile");
+    const profile = opts.profile ?? pickProfile(usable.map((file) => file.profile), ctx) ?? usable[0]?.profile;
+    if (profile === undefined) throw new Error("没有可用预设");
     usedIds.add(profile.id);
+    const source = usable.find((file) => file.profile.id === profile.id);
     const built = buildSidecarText(image, profile, {
       vaultRoot: opts.vaultRoot,
       ask: opts.ask,
       ...(opts.tag === undefined ? {} : { tag: opts.tag }),
-      ...(opts.template === undefined ? {} : { template: opts.template }),
+      ...(source?.body === undefined ? {} : { body: source.body }),
     });
     const sidecar = path.join(path.dirname(image), `${stem}.md`);
     const rel = relPath(opts.vaultRoot, sidecar);
@@ -298,20 +576,26 @@ const HELP = `annex-gallery <command> [options]
 commands
   init     <dir>                                       初始化 gallery（git init + git annex init + annex.addunlocked=true + 合并 .gitattributes/.gitignore）
   thumbs   <dir> [--edge 256] [--dry-run] [--force]     为目录内所有图片生成 .thumbnail.png
-  sidecar  <dir> --vault <root> [--sample <name>]       为目录内所有图片生成 <stem>.md（默认 dry-run，--apply 才写）
-           [--profile <id>] [--profiles-file <json>] [--template <id|file>] [--verify] [--repo <root>] [--apply] [--force]
-  gallery  <dir> --vault <root> [--template <id|file>]  盘点目录并生成 <文件夹>/<文件夹名>.base（默认 dry-run）
-           [--profiles-file <json>] [--edge 256] [--apply] [--overwrite] [--fix-tags]
+  sidecar  <dir> --vault <root> --preset <json>        为目录内所有图片生成 <stem>.md（默认 dry-run，--apply 才写）
+           [--preset <json> ...] [--profile <id>] [--sample <name>] [--ask key=value] [--repo <root>]
+           [--apply] [--force] [--overwrite] [--plan] [--verify] [--json]
+  gallery  <dir> --vault <root> --preset <json>        盘点目录并生成 <文件夹>/<文件夹名>.base（默认 dry-run）
+           [--preset <json> ...] [--template <file>] [--edge 256] [--apply] [--overwrite] [--fix-tags] [--json]
            --fix-tags（需 --apply）给旧 sidecar 只补 annex-gallery-metadata 标签
-  profiles --list                                      列出每条 profile 的 id/name/source/键顺序
-  profiles --check                                     对全部 profile 跑 validateProfile（有 error 退 1）
-  profiles --parse <名字> [--path <相对路径>] [--profile <id>]   打印解析出的键值、标出没命中的组
+  profiles --list                                      列出每条预设的 id/name/source/frontmatter 键/正文路径
+           --check                                     对全部预设跑 validateProfile（有 error 退 1）
+           --parse <名字> [--path <相对路径>] [--profile <id>]   打印解析出的组值、缺失的组与算出来的 frontmatter
+           两个子命令都需要 --preset <json>（可给多次）；--check 的正文模板检查需要 --vault
   stems    <dir>                                        统计重名 basename（跨会话重名）
   drop     <dir> [--dry-run] [--force]                  丢掉目录内 annex 内容的本地副本（默认只丢别处有足够副本的）
   annex    <op> <dir>                                   largefiles 操作（插件右键菜单同款）：add | unlock | lock | get | unannex | drop
   defaults                                              打印插件内置的 .gitattributes 模板
 
-common flags: --json   --dry-run   --force   --profile <id>   --profiles-file <json>`;
+元数据预设：一份 .json 一条预设（顶层就是一条 ParseProfile），用 --preset 指定（可重复）。
+CLI 不带任何内置预设：不给 --preset 会直接报错。预设文件路径按当前工作目录解析；
+预设里的 template（正文 .md）按 --vault 解析。
+
+common flags: --json   --dry-run   --force   --profile <id>   --preset <json>`;
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -374,24 +658,23 @@ async function main(): Promise<void> {
       const vaultRoot = opt(flags, "vault");
       if (vaultRoot === undefined) throw new Error("sidecar 需要 --vault <vaultRoot>（链接写全 vault 路径）");
       const resolvedVault = path.resolve(vaultRoot);
-      const profiles = loadProfiles(flags);
+      const presetPaths = opts(flags, "preset");
+      if (presetPaths.length === 0) throw new Error(NO_PRESET_HINT);
+      const files = loadCliPresets(resolvedVault, presetPaths);
+      const profiles = files.map((file) => file.profile as ParseProfile);
       const fixedId = opt(flags, "profile");
-      const profile = fixedId === undefined ? undefined : profileById(profiles, fixedId);
+      const profile = fixedId === undefined ? undefined : profileById(files, fixedId);
       const sample = opt(flags, "sample");
-      const ask: Record<string, string> = {};
-      if (sample !== undefined && sample !== "") ask.sample = sample;
-      // 不给 --template 也要**显式**选出 CLI 内置预设 default 并传下去：
-      // 插件运行时没有内置 fallback，CLI 的既有默认行为由这里（而不是 core）承担。
-      const template = loadTemplate(flags, "metadata");
+      const ask = parseAsk(flags);
+      if (sample !== undefined && sample !== "" && ask.sample === undefined) ask.sample = sample;
 
       if (flag(flags, "verify")) {
         runSidecarVerify(dir, {
           vaultRoot: resolvedVault,
-          profiles,
+          files,
           ...(profile === undefined ? {} : { profile }),
           ask,
           ...(opt(flags, "tag") === undefined ? {} : { tag: opt(flags, "tag") }),
-          template,
           json,
         });
         return;
@@ -399,7 +682,7 @@ async function main(): Promise<void> {
 
       if (flag(flags, "plan")) {
         // 重跑前的只读预览：「生成元数据」里那个「是否覆盖」弹窗数出来的东西。
-        const planned = planSidecarTargets(dir, resolvedVault);
+        const planned = planSidecarTargets(dir, path.resolve(opt(flags, "repo") ?? vaultRoot));
         say(json, planned, [
           `dir=${dir}`,
           `images=${planned.images} existing=${planned.existing} dirty=${planned.dirty}`,
@@ -418,7 +701,6 @@ async function main(): Promise<void> {
         ...(profile === undefined ? {} : { profile }),
         profiles,
         tag: opt(flags, "tag"),
-        template,
         apply: flag(flags, "apply"),
         force: flag(flags, "force"),
         overwrite: flag(flags, "overwrite"),
@@ -462,10 +744,17 @@ async function main(): Promise<void> {
       const fixTags = flag(flags, "fix-tags");
       if (fixTags && !apply) throw new Error("--fix-tags 只能和 --apply 一起用（dry-run 不写盘）");
 
-      const profiles = loadProfiles(flags);
-      const template = loadTemplate(flags, "base");
+      const presetPaths = opts(flags, "preset");
+      if (presetPaths.length === 0) throw new Error(NO_PRESET_HINT);
+      // gallery 只要 frontmatter 的键顺序，不读正文模板 —— vault 里还没有那个 .md 也不该失败。
+      const files = loadCliPresets(resolvedVault, presetPaths, false);
+      const template = loadGalleryTemplate(flags);
       const plan = planGallery(dir);
-      const properties = orderProperties(plan.keys, profiles.map((profile) => profile.keyOrder));
+      // 属性顺序 = 各预设 frontmatter 字典的键顺序（不再有 keyOrder）。
+      const properties = orderProperties(
+        plan.keys,
+        files.map((file) => Object.keys((file.profile as ParseProfile).frontmatter ?? {})),
+      );
       const built = buildGalleryBase(template, { folder, cardSize: edge, properties });
       const targetRel = galleryFilePath(folder, vaultName);
       const targetAbs = path.join(resolvedVault, targetRel);
@@ -511,18 +800,22 @@ async function main(): Promise<void> {
       return;
     }
     case "profiles": {
-      const profiles = loadProfiles(flags);
+      const presetPaths = opts(flags, "preset");
+      if (presetPaths.length === 0) throw new Error(NO_PRESET_HINT);
+      const vaultRoot = opt(flags, "vault");
+      const resolvedVault = vaultRoot === undefined ? undefined : path.resolve(vaultRoot);
+      const files = inspectCliPresets(resolvedVault, presetPaths);
       const parseName = opt(flags, "parse");
       let didSomething = false;
       if (parseName !== undefined) {
-        runProfilesParse(profiles, flags, parseName, json);
+        runProfilesParse(files, flags, parseName, resolvedVault, json);
         didSomething = true;
       }
       if (flag(flags, "check")) {
-        runProfilesCheck(profiles);
+        runProfilesCheck(files);
         didSomething = true;
       }
-      if (flag(flags, "list") || !didSomething) runProfilesList(profiles);
+      if (flag(flags, "list") || !didSomething) runProfilesList(files);
       return;
     }
     case "annex": {
@@ -539,7 +832,7 @@ async function main(): Promise<void> {
         `ok=${report.ok} skipped=${report.skipped} failed=${report.failed}${
           report.candidates === undefined ? "" : ` candidates=${report.candidates}`
         }${report.staged === undefined ? "" : ` staged=${report.staged}`}${
-          report.bytesFreed === undefined ? "" : ` bytesFreed=${report.bytesFreed}`
+          report.bytesFreed === undefined ? "" : ` freed=${report.bytesFreed} B`
         }`,
         ...report.entries.map((entry) => `  ${entry.action} ${entry.file}${entry.detail === undefined ? "" : ` (${entry.detail})`}`),
       ]);

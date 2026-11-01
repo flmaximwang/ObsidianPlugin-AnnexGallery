@@ -31,7 +31,7 @@
    宽度上限；不写死像素宽度，也不靠容器宽度算术。
 4. **特异度写在选择器里，不靠加载顺序。** 与 app.css 同权重时谁在样式表后面谁赢 —— 那是构建产物与
    app 版本的偶然，不作为设计依据。
-5. **设置里只存指针。** 模板与文件名匹配模板的**正文永远在 vault 的文件里**；`data.json` 只记
+5. **设置里只存指针。** 元数据预设与画廊模板的**正文永远在 vault 的文件里**；`data.json` 只记
    `{ path }` / `{ id, name, path }`，不抄内容、不缓存内容。
 6. **写盘保守。** 坏文件不落进任何「已登记」状态；批量写（扫描、初始化）只做幂等的最小改动。
 
@@ -49,23 +49,20 @@
 │ [名称: <remote>] [地址: /Volumes/<volume>/<path>]     [删除]      │
 │ [添加 remote]                                                     │
 └─────────────────────────────────────────────────────────────────┘
-.setting-group（heading「文件名匹配模板与模板」）
+.setting-group（heading「元数据预设与画廊模板」）
 ┌ .annex-profiles-section ─────────────────────────────────────────┐
 │ [.annex-profile-path-input（vault 相对 .json 路径）] [登记]        │  ← 工具条：输入 + 登记 + 从预设创建
 │ [.annex-profile-preset ▾]                                        │
 │ TECNAI 电镜（…）  id: <id>  Profiles/<file>.json      [打开][删除] │  ← 一行一份外部 JSON
 │ 多孔板成像（…）  id: <id>  Profiles/<file>.json      [打开][删除] │
 │ <该文件坏了时的错误说明（整行宽）>                                 │  ← 只有坏的那一行有
+│ <该文件只有警告时的说明（整行宽）>                                 │  ← 警告不阻塞这一行
 └─────────────────────────────────────────────────────────────────┘
 ┌ .annex-templates-section ────────────────────────────────────────┐
-│ ┌ .annex-templates-card[data-kind=metadata] ────────────────────┐ │
-│ │ metadata 模板                                                 │ │
-│ │ 一行说明：第一行必须是 {{frontmatter}}，正文可用 …             │ │
+│ ┌ .annex-templates-card[data-kind=base] ────────────────────────┐ │
+│ │ 画廊模板（扩展名 .base）                                       │ │
 │ │ <名字>  id: <id>  <vault 路径>                    [打开][删除] │ │
 │ │ [.annex-template-path-input] [登记] [.annex-template-preset ▾] │ │
-│ └───────────────────────────────────────────────────────────────┘ │
-│ ┌ .annex-templates-card[data-kind=base] ────────────────────────┐ │
-│ │ 画廊模板（同上，扩展名 .base）                                 │ │
 │ └───────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 .setting-group（heading「常规」）
@@ -76,7 +73,7 @@
 ### 必须成立的不变量
 
 - **顶层顺序**（离屏与真机必须逐字一致）：
-  `.setting-group（remote render）→ .setting-group（heading「文件名匹配模板与模板」：profiles render → templates render）→ .setting-group（heading「常规」：thumbnailEdge control → debugLogging control）`。
+  `.setting-group（remote render）→ .setting-group（heading「元数据预设与画廊模板」：profiles render → templates render）→ .setting-group（heading「常规」：thumbnailEdge control → debugLogging control）`。
   顶层只有 `.setting-group`，没有 h1、没有 hr。
 - **页面没有标题。** 侧栏已经显示 tab 名，`Annex Gallery Settings` 那个 h1 连同对抗
   `.vertical-tab-content h1{display:none}` 的样式一起删除。
@@ -92,42 +89,53 @@
   N 行 `.annex-remote-row`（名称 / 地址 / 删除）+ 一个「添加 remote」。行内三列跨行同列对齐；名称列定宽，
   地址列吃掉剩余宽度。输入即写 `data.json` 的 `remotes`。名称或地址缺一半 ⇒ 行尾红字提示
   （缺名称 / 缺地址 / 名称里有空白字符）。
-- **文件名匹配模板区**（`.annex-profiles-section`）只有两样东西：
+- **元数据预设区**（`.annex-profiles-section`）只有两样东西：
   1. **工具条**（`.annex-profiles-toolbar`）：`<input class="annex-profile-path-input">`（vault 相对 `.json`
      路径）+ `<button class="annex-profile-register">登记</button>` +
      `<select class="dropdown annex-profile-preset">`（占位项「从预设创建…」，之后是预设素材）。
      工具条允许换行（`flex-wrap: wrap`）：窄窗口里三个控件折行，而不是把内容顶出内容区。
   2. **已登记项列表**（`.annex-profile-list`）：每份外部 JSON 一行 `.annex-profile-row`，行内是
      `name`（来自 JSON）· `id: <id>`（来自 JSON）· vault 相对路径 · 「打开」·「删除」。
-     坏文件**仍然占一行**（路径与「打开」都留着，方便去修），下面多一行 `.annex-profile-error`。
-- **没有内联编辑器**：设置页里**不存在** profile 的 JSON textarea、解析预览、状态胶囊
+     坏文件**仍然占一行**（路径与「打开」都留着，方便去修），下面多一行 `.annex-profile-error`；
+     只有警告的文件下面多一行 `.annex-profile-warn`（不阻塞这一行）。
+- **没有内联编辑器**：设置页里**不存在** 预设的 JSON textarea、解析预览、状态胶囊
   （`Saved` / `Unsaved changes` / `Syntax Error`）、逐条「保存 / 复制 / 删除 / 打开」动作排。
   内容改在 vault 的文件里改（用「打开」交给系统默认应用），插件只读。
 - **旧内联 profiles 的失效提示**（`.annex-legacy-profiles-warning`）：`data.json` 里还留着旧的
-  `profiles` 数组时，在文件名匹配模板区顶部显示一条**非阻塞**提示，写明「不会读取、不会自动迁移，
+  `profiles` 数组时，在元数据预设区顶部显示一条**非阻塞**提示，写明「不会读取、不会自动迁移，
   也不会回退到预设」，并引导把每条配置分别保存成 vault 里的一个 `.json` 后逐条登记。
   旧值**原样留在 `data.json` 里**（不迁移、不删除、不导出）。
-- **模板区**是 `.annex-templates-section` 里的**两张卡片**：`data-kind=metadata`（`metadata 模板`）与
-  `data-kind=base`（`画廊模板`）。每张卡片：标题 + 一行说明 + 已登记列表 + 登记行
-  （路径输入 + 「登记」+ 「从预设创建…」下拉）。每行一行放下：名字 · `id:` · vault 路径 · 「打开」·
-  「删除」（删除**只取消登记、不删文件**）。
+- **旧 metadata 模板登记表的失效提示**（同一个 class）：`data.json` 里还留着旧的 `metadataTemplates`
+  时也显示一条**非阻塞**提示，写明这份登记表不再被读取、不会自动迁移（`data.json` 里的旧键原样保留、
+  vault 里的旧正文文件也还在），并引导改用「从预设创建」生成新格式的预设 ——
+  正文模板改由预设自己的 `template` 字段指向 vault 里的 `.md`。
+- **模板区**是 `.annex-templates-section` 里的**一张卡片**：`data-kind=base`（`画廊模板`）。
+  卡片：标题 + 一行说明 + 已登记列表 + 登记行（路径输入 + 「登记」+ 「从预设创建…」下拉）。
+  每行一行放下：名字 · `id:` · vault 路径 · 「打开」·「删除」（删除**只取消登记、不删文件**）。
+  **没有 metadata 模板卡片**：sidecar 的正文不再单独登记，由每条元数据预设的 `template` 字段指向
+  vault 里的 `.md`（见 [`metadata.md`](metadata.md)）。
 - **没有可直接使用的内置模板行。** 预设（`src/defaults/` 里的原文）只是「从预设创建」的**素材**：
   设置页不列内置行，也没有「查看」「复制为自定义」。**运行时同样没有内置兜底** ——
   插件只认登记过的外部文件。
-- **「从预设创建」每次写一个独立文件**：路径是 `AnnexGalleryTemplates/<preset-id>.<ext>`
-  （文件夹名**无空格**）；路径被占用时自动加序号（`default 2.md`），**不覆盖**已有文件；
-  写完**不自动打开**。metadata 预设 id 为 `default` / `embed`，画廊预设 id 为 `default`，
-  文件名匹配模板预设 id 为 `template` / `tecnaitem`。文件名匹配模板的预设若与已登记 id 撞车，
-  在**待创建的那份 JSON 里**生成唯一 id（`template-2`），名称标「（副本）」。
-- **登记的校验**（三种模板一样）：路径必须是 vault 内相对路径（不接受绝对路径 / 盘符路径 / `..`）、
-  扩展名必须对（`.json` / `.md` / `.base`）、文件必须存在、同一路径不能重复登记。
+- **「从预设创建」每次写独立文件**：画廊模板写 `AnnexGalleryTemplates/<preset-id>.base`；
+  元数据预设写**两份** —— 正文 `AnnexGalleryTemplates/<preset-id>.md`（素材有正文才写）与
+  预设本身 `AnnexGalleryTemplates/<preset-id>.json`，JSON 里的 `template` 写成正文**实际**落盘的路径。
+  路径被占用时自动加序号（`default 2.md`），**不覆盖**已有文件；写完**不自动打开**。
+  画廊预设 id 为 `default`；元数据预设 id 为 `tecnaitem` / `tecnaitem-embed` / `minimal`。
+  元数据预设若与已登记 id 撞车，在**待创建的那份 JSON 里**生成唯一 id（`tecnaitem-2`），名称标「（副本）」。
+- **登记的校验**（两类文件各自一套）：路径必须是 vault 内相对路径（不接受绝对路径 / 盘符路径 / `..`）、
+  扩展名必须对（元数据预设 `.json` / 画廊模板 `.base`）、文件必须存在、同一路径不能重复登记。
   不满足 ⇒ 只弹一条 Notice，不新增行、不写 `data.json`。
 - **「打开」走系统默认应用**：`electron.shell.openPath(<绝对路径>)`；只有在拿不到 electron 且路径确实落在
   vault 内时，才退回 `app.openWithDefaultApp(<vault 相对路径>)`（那个 API 只认相对路径）。
   打开前重新做路径与存在性检查，失败 ⇒ Notice 指名 vault 路径与原因，**绝不自动创建文件**。
 - **模板区没有「保存」按钮**：改动即写 `data.json`，口径与 remote 区一致。
+- **「生成元数据」弹窗只问两件事**：一个**元数据预设下拉**（默认按 `match` 预选，其次是按文件夹记住的
+  `folderProfiles`，再其次是第一条已登记）+ 该预设的 **ask 字段**（默认 `["sample"]`，
+  按文件夹记住上次填的值）。**没有模板下拉** —— 正文由预设自己的 `template` 决定，
+  换预设就换正文，不需要再选一次。选中的预设 id 写进 `folderProfiles`，ask 值写进 `folderSamples`。
 - **区块之间不再有分割线**：旧的两条 `<hr>`（remote ↔ 模板、模板 ↔ 普通设置项）删掉，改用
-  `.setting-group` 的 heading（「文件名匹配模板与模板」「常规」）；第一个 group 的 remote 卡片自带标题，
+  `.setting-group` 的 heading（「元数据预设与画廊模板」「常规」）；第一个 group 的 remote 卡片自带标题，
   所以不设 heading。间距由 app.css 的 `.setting-group + .setting-group { margin-top: … }` 提供。
 - **普通设置项只剩两条**「缩略图边长」与「调试日志」。`.gitattributes` / `.gitignore` 用内置默认，没有「默认样品名」
   这种东西 —— 那三行在设置页不出现。
@@ -136,19 +144,20 @@
 
 | 落点 | 内容 |
 |---|---|
-| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → 文件名匹配模板与模板 render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`hide()` 重置 remote 扫描守卫；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `metadataTemplates` / `baseTemplates` / 两个按文件夹记住的模板字段）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()` |
+| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → 元数据预设与画廊模板 render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`hide()` 重置 remote 扫描守卫；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `baseTemplates` / `folderProfiles` / `folderSamples` / `folderBaseTemplates`）；旧键检测（`detectLegacyInlineProfiles` / `detectLegacyMetadataTemplates`）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()` |
 | `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：`.annex-remotes-card`、`.annex-remote-list`、`.annex-remote-row`、`.annex-remote-note(-warn)`、`.annex-remote-add` |
-| `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-row`、`-name` / `-id` / `-path` / `-open` / `-del` / `-error`；登记 / 从预设创建 / 打开 / 取消登记 |
-| `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-open` / `-del`、`.annex-template-add-row` / `-path-input` / `-add` / `-preset`；`TEMPLATE_FOLDER`（`AnnexGalleryTemplates/`）、`uniqueTemplateId()` |
-| `src/core/external-files.ts` | 外部文件的路径规范化与校验：`normalizeVaultRelPath()` / `validateVaultRelPath()` / `resolveVaultFile()` / `readVaultTextFile()`（vault 相对路径、扩展名、存在性） |
-| `src/core/profile-files.ts` | 外部 profile JSON 的读取：`profileFileRefs()` / `loadProfileFile()` / `loadProfileFiles()`（单对象约束、跨文件 id 重复、坏 JSON、坏正则） |
-| `src/core/templates.ts` | 模板 id / 预设清单 / `TemplateRef`（`id` · `name` · vault 相对 `path`）/ `listTemplates()`（只有登记项）/ `resolveTemplate()`（无内置兜底）/ `readTemplateFile()` / 占位符填充 / metadata 模板的 `{{frontmatter}}` 硬约束 |
-| `src/defaults/metadata/*.md`、`src/defaults/base/*.base` | 预设素材原文 —— 源码里的唯一一份，构建时由 `defaults-text` 内联（与 `.gitattributes` 同一条路） |
-| `src/core/profiles.ts` | `FieldType`、`ParseProfile`、`TEMPLATE_PROFILE`（通用模板预设）、`TECNAI_TEM_PROFILE`、`DEFAULT_PROFILES`（**只作预设素材**，不再是运行时来源） |
+| `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-row`、`-name` / `-id` / `-path` / `-open` / `-del` / `-error` / `-warn`；登记 / 从预设创建 / 打开 / 取消登记 |
+| `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card[data-kind=base]`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-open` / `-del`、`.annex-template-add-row` / `-path-input` / `-add` / `-preset`；`TEMPLATE_FOLDER`（`AnnexGalleryTemplates/`）、`uniqueTemplateId()` |
+| `src/core/external-files.ts` | 外部文件的路径规范化与校验：`normalizeVaultRelPath()` / `validateVaultRelPath()` / `resolveVaultFile()` / `readVaultTextFile()`（vault 相对路径、扩展名、存在性）；三类文件：元数据预设 `.json` / 正文模板 `.md` / 画廊模板 `.base` |
+| `src/core/profile-files.ts` | 外部元数据预设 JSON 的读取：`profileFileRefs()` / `inspectProfileFile()`（不抛错，逐行显示用）/ `loadProfileFile()` / `loadProfileFiles()`（单对象约束、跨文件 id 重复、坏 JSON、坏正则、旧格式） |
+| `src/core/profiles.ts` | `ParseProfile` / `ValueType` / `PatternSource` / `BUILTIN_VARIABLES` / `DEFAULT_ASK` / `LEGACY_PROFILE_KEYS`；`validateProfile()`（错误 / 警告分级）、`parseWithProfile()`、`pickProfile()` |
+| `src/core/presets.ts` | 「从预设创建」的素材：`PRESET_PROFILES`（`tecnaitem` / `tecnaitem-embed` / `minimal`，各带一份正文）、`presetJsonText()` |
+| `src/core/templates.ts` | 画廊模板 id / 预设素材 / `TemplateRef`（`id` · `name` · vault 相对 `path`）/ `listTemplates()`（只有登记项）/ `resolveTemplate()`（无内置兜底）/ `readTemplateFile()` / 占位符填充（从 `placeholders.ts` 转出） |
+| `src/defaults/presets/*.json`、`src/defaults/presets/*.body.md`、`src/defaults/base/*.base` | 预设素材原文 —— 源码里的唯一一份，构建时由 `defaults-text` 内联（与 `.gitattributes` 同一条路） |
 | `src/core/remotes.ts` | `scanRemotes()` / `mergeScannedRemotes()` / `applyRemotes()` |
 | `src/core/stems.ts` | `stemOf()` —— 全插件唯一的 stem 实现 |
 | `styles.css` | 本页全部选择器；与 app.css 的对抗关系写在注释里 |
-| `esbuild.config.mjs` | `defaults-text` 插件把 `src/defaults/metadata/*.md`、`src/defaults/base/*.base` 内联成字符串（预设素材只有源码这一份） |
+| `esbuild.config.mjs` | `defaults-text` 插件把 `src/defaults/presets/*.body.md`、`src/defaults/base/*.base` 内联成字符串（预设素材只有源码这一份）；`src/defaults/presets/*.json` 走 esbuild 的 JSON loader |
 | `tools/layout-check.cjs` | 离屏几何（`npm run layout`） |
 | `tools/real-gui-check.py` | 真机结构（`npm run gui`） |
 | `tools/smoke-test.cjs` / `tools/remotes-check.cjs` | 无头结构与落盘、remote 写入语义 |
@@ -158,7 +167,7 @@
 | 选择器 | 特异度 | 压掉谁 |
 |---|---|---|
 | `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | app.css 给 h3 的行内 padding |
-| `.vertical-tab-content h3.annex-templates-title` | (0,2,1) | 同上（模板区两张卡片的标题） |
+| `.vertical-tab-content h3.annex-templates-title` | (0,2,1) | 同上（模板区卡片的标题） |
 | `.setting-item.annex-editor-row` | (0,2,0) | app 给 `.setting-item` 的内边距 / 背景 / 边框；render 项整行交给编辑器卡片 |
 | `.setting-item.annex-editor-row > .setting-item-info` | (0,2,0) | 隐藏只用于设置搜索的 name/desc（编辑器自带标题） |
 | `.setting-group.annex-editors-group .setting-items` | (0,3,0) | 去掉框架给 group 的卡片底/边框，避免卡片套卡片 |
@@ -201,6 +210,10 @@
    「画廊是空的」。现在模板坏了就**指名文件停下**，用户去登记或修文件。
 7. **旧内联 profiles 只提示、不迁移。** 自动迁移会把用户的旧配置悄悄改写成另一套结构（一份 JSON 拆成
    N 个文件还要分配 id），出错时无法回退；提示 + 手工登记把这一步交给用户，代价是多点几下。
+   旧格式的**预设文件**（`keyOrder` / `fields` / `constFields` / `metadataTemplate` 等）同样不迁移：
+   加载时直接报错，设置页在那一行显示迁移提示，用户用「从预设创建」重建后手工搬字段。
+   旧的 `metadataTemplates` 登记表也不再被读取（正文改由预设的 `template` 字段指向 vault `.md`），
+   `data.json` 里的旧键与 vault 里的旧正文文件都**原样保留**，只显示一条非阻塞提示。
 8. **「打开」走 `electron.shell.openPath(绝对路径)`，只在路径确实位于 vault 内时才退回
    `app.openWithDefaultApp`。** 后者吃的是**vault 相对路径**（bundle 内是 `getFilePath(p)` +
    `window.open(abs, "_external")`）；传 `TMPDIR` 那种绝对路径会被拼到 vault 根后面，指向不存在的文件
@@ -212,24 +225,26 @@
 10. **加载时扫描只补不覆盖。** `onload` 与每次打开设置页都跑 `scanRemotes()`：仓库里有、设置里没有的补进
     `data.json`，同名条目**不覆盖**维护者改过的地址，补进来时给一条 Notice。只看 `data.json` 会让仓库里
     本来就存在的 remote 显示成「没有 remote」，这是这套设计必须避免的假阴性。
-11. **`type: "string"` 作为 `text` 的等价拼写，不新增渲染分支。** 插件 schema 原来只有 `number` / `text`；
-    把 `"string"` 认成 `text` 的同义写法（渲染都走带引号那条，sidecar 里只有 `number` 是特判），
-    是为了让原文 JSON 一个字符都不用改就能落进 schema。
+11. **`types` 只有 `number` / `date` / `text` 三种。** 旧格式里的 `type: "string"` 不再是 `text` 的
+    同义写法 —— 新格式里类型只写在 `types` 对象里，值写错就是**硬错误**（不会被默默当成 text 放行）。
+    不写 `types` 的变量一律按 `text` 处理（双引号字符串），这是最安全的默认。
 12. **`.gitattributes` / `.gitignore` 不暴露路径，没有默认样品名。** 合并目标固定为 `<vault>/.gitattributes`
     与 `<vault>/.gitignore`；旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample`
     在 `loadSettings()` 里删掉。样品名每次生成 metadata 都在弹窗里填（仍按文件夹记住上次的值，只是预填）。
 13. **预设素材以源码文件为唯一一份。** 预设文本不抄进 `data.json`、也不另存一份设置页常量：两份文本一旦
     分叉，判据就不知道以哪一份为准。「从预设创建」是拿到可改副本的唯一路径，副本是 vault 里受 git 管理的
-    普通文件。
-14. **「删除」只取消登记，不删文件。** 模板 / profile 文件是 vault 里的数据，插件只持有指针；
+    普通文件。元数据预设有三份素材（`tecnaitem` / `tecnaitem-embed` / `minimal`），每份都带一份正文，
+    「从预设创建」一次写出 JSON + 正文两份文件。
+14. **「删除」只取消登记，不删文件。** 模板 / 预设文件是 vault 里的数据，插件只持有指针；
     删文件不可撤销，而取消登记随时可以再登记回来。
-15. **CLI 是唯一保留内置预设的地方（刻意的例外）。** 插件运行时只认登记过的外部文件；命令行是脚本场景，
-    没有设置页可点，所以 `--template default|embed` 与「不给 `--template`」显式取 CLI 自带的预设原文。
-    两条路径的区别在 [`tools/cli.md`](tools/cli.md) 里写明。
-16. **核心层不兜底，缺参数就报错。** `src/core/sidecar.ts` 的 `generateSidecars()` / `buildSidecarText()`
-    拿不到 `template` 或 `profiles` 时直接抛错，不再退回内置默认 —— 那样「调用方漏传参数」会变成
-    「生成结果看起来正常但用的是另一套模板」，比报错难查得多。插件传外部文件，CLI 传显式预设，
-    两条路都显式给参数。
+15. **CLI 与插件读的是同一种东西：一份预设一个 `.json` 文件。** CLI 没有设置页可点，所以用
+    `--preset <file>` 直接给文件路径（相对当前工作目录解析），要给几条就重复给几次；
+    旧的 `--profiles-file` 与 `{ "profiles": [...] }` 格式已经没有了。两条路径的区别在
+    [`tools/cli.md`](tools/cli.md) 里写明。
+16. **核心层不兜底，缺参数就报错。** `src/core/sidecar.ts` 的 `generateSidecars()` 拿不到 `profiles`
+    时直接抛错，不再退回内置默认 —— 那样「调用方漏传参数」会变成「生成结果看起来正常但用的是另一套预设」，
+    比报错难查得多。插件传外部文件，CLI 传显式预设，两条路都显式给参数。正文模板同理：预设没写
+    `template` 就是「只有 frontmatter」，不是「回退到内置正文」。
 
 ### 六条只有量过才成立的约束
 
@@ -254,23 +269,25 @@
 
 ## 6. 字段与默认值（`data.json`）
 
-落进 `data.json` 的只有十项：
+落进 `data.json` 的只有八项：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
 | 调试日志（`debugLogging`） | `false` | 把 git / git-annex 的进度输出到开发者控制台；默认关闭，避免默认配置下刷屏。 |
 | remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；加载时扫当前仓库的 `git remote`，把设置里没有的补进来（同名不覆盖手改过的地址）；初始化时逐个 `git remote add`（同名已存在就 `set-url`，地址相同则一个字节都不碰）。 |
-| 已登记的文件名匹配模板（`profileFiles`） | `[]` | 一条 = `{ path }`：**vault 相对路径**，正斜杠；正文在 vault 的 `.json` 文件里（顶层一条 `ParseProfile` 对象）。 |
-| `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
-| `folderProfiles` | `{}` | 按文件夹记住上次选的 profile id。 |
-| 已登记的 metadata 模板（`metadataTemplates`） | `[]` | 一条 = `{ id, name, path }`；`path` 是 vault 相对路径（`.md`）。 |
-| 已登记的画廊模板（`baseTemplates`） | `[]` | 同上，文件扩展名是 `.base`。 |
-| 按文件夹记住的 metadata 模板（`folderMetadataTemplates`） | `{}` | 文件夹绝对路径 → 模板 id；「生成元数据」弹窗的模板下拉框预选它。 |
+| 已登记的元数据预设（`profileFiles`） | `[]` | 一条 = `{ path }`：**vault 相对路径**，正斜杠；一条预设一个 `.json`（顶层一条 `ParseProfile` 对象，含 frontmatter 字典与可选的 `template`）。 |
+| `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（`sample` 用目录本身当键，其余 ask 键用 `<目录>\u0001<键>`）。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
+| `folderProfiles` | `{}` | 按文件夹记住上次选的**元数据预设 id**；「生成元数据」弹窗的预设下拉预选它。 |
+| 已登记的画廊模板（`baseTemplates`） | `[]` | 一条 = `{ id, name, path }`；`path` 是 vault 相对路径（`.base`）。 |
 | 按文件夹记住的画廊模板（`folderBaseTemplates`） | `{}` | 文件夹绝对路径 → 模板 id；「创建画廊」的模板选择预选它。 |
 
 **旧 `profiles` 数组**：旧版把 profile 内联在 `data.json` 里。新版**不读、不迁移、不删除**它 ——
 它在 `data.json` 里原样留着（用户想删可以自己删），设置页只显示一条失效提示，运行时不参与。
+
+**旧 `metadataTemplates` 数组**：旧版把 sidecar 正文模板单独登记在设置里。新版**不读、不迁移、不删除**它 ——
+正文改由每条元数据预设的 `template` 字段指向 vault 里的 `.md`。旧键在 `data.json` 里原样留着，
+旧正文文件也仍在 vault 里，设置页只显示一条失效提示。
 
 两条规则文件（`.gitattributes` / `.gitignore`）不在设置里，见 [`commands.md`](commands.md)。
 
@@ -279,7 +296,7 @@
 | 命令 | 钉住什么 | 钉不住什么 |
 |---|---|---|
 | `npm run build` | 产物 `main.js` / `styles.css` 可生成 | 任何版式 |
-| `npm run smoke` | 无头加载构建产物：设置定义（3 个 group、两个 control key）、remote 区、文件名匹配模板区、模板区、三类模板的登记 / 从预设创建 / 打开 / 取消登记、profile JSON 的各种坏法、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
+| `npm run smoke` | 无头加载构建产物：设置定义（3 个 group、两个 control key）、remote 区、元数据预设区、模板区、两类外部文件的登记 / 从预设创建 / 打开 / 取消登记、元数据预设 JSON 的各种坏法、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
 | `npm run layout` | 离屏几何：真实 app.css + 真实 DOM + headless Chromium，只回答「结构没塌」 | 下拉宽度、控件外观、运行时行为 |
 | `npm run verify:core` | 核心层契约：缺 `template` / `profiles` 时直接报错，不回退内置默认 | UI 与几何 |
 | `npm run remotes` | 真 git 仓库上的 add / set-url / 幂等 / dry-run / 扫描合并 / 非仓库不报错 | 设置页 UI |
@@ -293,19 +310,20 @@
 无头加载构建产物，断言的是结构与落盘，例如：
 
 ```
-- 设置定义：顶层 3 个 group（remote / 文件名匹配模板与模板 / 常规）；第三个 group 的两项是
+- 设置定义：顶层 3 个 group（remote / 元数据预设与画廊模板 / 常规）；第三个 group 的两项是
   control 定义，key = thumbnailEdge / debugLogging，name/desc 非空且参与设置搜索
 - 设置页没有 h1（annex-settings-title）也没有 hr 分割线；三个编辑器仍挂在 render 行里
-- 顶层 DOM 顺序 = remote → 文件名匹配模板 → 模板区
+- 顶层 DOM 顺序 = remote → 元数据预设 → 模板区
 - 没有内联编辑器：annex-profile-card / annex-profile-json / annex-preview-* / annex-profile-status /
   annex-profile-actions 的数量都是 0
 - 工具条 = 路径输入 + 登记 + 从预设创建（下拉），没有「新模版 / 导入模版 / 添加预设」
-- 模板区：两张卡片（data-kind = metadata / base），没有 annex-template-builtin / -view-btn / -copy
+- 模板区：一张卡片（data-kind = base），没有 annex-template-builtin / -view-btn / -copy
 - 登记：路径越界 / 绝对路径 / 盘符路径 / 扩展名不对 / 文件不存在 ⇒ 只多一条 Notice，不新增行、不写 data.json
 - 同一路径不能重复登记；「删除」只取消登记、文件仍在盘上
 - 从预设创建：写到 AnnexGalleryTemplates/（无空格），同名加序号不覆盖，不自动打开
 - 打开：拿不到系统默认应用 ⇒ Notice 指名 vault 路径；宿主抛错 ⇒ Notice 带原因；成功 ⇒ 交给宿主的绝对路径
-- profile JSON：顶层是数组 / { profiles: [...] } / 坏 JSON / 坏正则 / 文件丢失 / 跨文件 id 重复 ⇒ 行上可见错误
+- 元数据预设 JSON：顶层是数组 / { profiles: [...] } / 坏 JSON / 坏正则 / 文件丢失 / 跨文件 id 重复 /
+  旧格式预设 ⇒ 行上可见错误（错误标红、警告另起一行）
 - 运行时：坏文件、重复 id、空列表 ⇒ 弹窗都不开，更不写盘；外部改 id/name 后下一次生成读到新值
 - 旧内联 profiles：显示失效提示、不迁移、不参与运行时
 - 常规 group 里渲染出「缩略图边长」「调试日志」两个 setting-item
@@ -319,13 +337,13 @@
 `tab.update()`）+ headless Chromium。断言全是关系式：
 
 ```
-- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 文件名匹配模板与模板 / 常规）
+- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 元数据预设与画廊模板 / 常规）
 - 三个编辑器都挂在 render 行里（annex-editor-row：remote 1 + 模板 2）
 - 「缩略图边长」行贴住常规 group 的左边缘（行内文字另带 app 的 padding）
 - remote 卡片与第一个 group 左对齐
-- 文件名匹配工具条: 输入框 + 登记 + 从预设创建，三个控件从左往右、垂直居中，输入框吃掉剩余宽度
+- 元数据预设工具条: 输入框 + 登记 + 从预设创建，三个控件从左往右、垂直居中，输入框吃掉剩余宽度
 - 每条已登记 profile 一行：name → path → 打开 → 删除，行有 1px 边框，允许换行且不溢出
-- 模板区: 两张卡片撑满内容宽；每行一行放下；登记行 = 路径输入 + 登记 + 从预设创建
+- 模板区: 一张卡片撑满内容宽；每行一行放下；登记行 = 路径输入 + 登记 + 从预设创建
 - 面板没有横向溢出
 ```
 
@@ -344,11 +362,11 @@ remote 区同一套量法（装两条时）：
 在真实窗口上量，断言同样是关系式：
 
 ```
-- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 文件名匹配模板与模板 / 常规）
+- 没有 h1 / hr；顶层 = 3 个 .setting-group（heading：无 / 元数据预设与画廊模板 / 常规）
 - 设置搜索能按「缩略图」「调试」命中两个普通设置项
 - 工具条: 输入 + 登记 + 从预设创建，三个控件从左往右；预设下拉宽度受 CSS max-width 约束
 - 已登记行数 = data.json 里 profileFiles 的条数，且每行 path 一一对应
-- 模板区两张卡片：每张的行数 = data.json 里对应登记项的条数，id 一一对应
+- 模板区卡片：行数 = data.json 里 baseTemplates 的条数，id 一一对应
 - 没有旧内联编辑器 / 内置模板行 / 查看 / 复制为自定义
 - remote 行: 每行的 name / url / 删除 同列对齐；行数 = `git -C <vault> remote` 的条数
 ```

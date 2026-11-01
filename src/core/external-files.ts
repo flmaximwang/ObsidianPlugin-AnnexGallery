@@ -1,5 +1,5 @@
 /**
- * 三类外部模板（文件名匹配 `.json` / metadata `.md` / 画廊 `.base`）共用的
+ * 三类外部模板（元数据预设 `.json` / 正文 `.md` / 画廊 `.base`）共用的
  * vault 相对路径校验与同步读取。
  *
  * 硬规则（见 issue 774d7ee 的冻结 spec）：
@@ -18,8 +18,8 @@ import * as path from "path";
 export type ExternalFileKind = "profile" | "metadata" | "base";
 
 const KIND_LABEL: Record<ExternalFileKind, string> = {
-  profile: "文件名匹配模板",
-  metadata: "metadata 模板",
+  profile: "元数据预设",
+  metadata: "正文模板",
   base: "画廊模板",
 };
 

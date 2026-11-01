@@ -1,5 +1,6 @@
 /**
- * 模板：metadata 模板（sidecar `.md` 的整份文本）与画廊模板（`.base`）。
+ * 画廊模板（`.base`）。元数据 sidecar 的正文由预设的 `template` 指向 vault `.md`，
+ * 不在这里登记（见 src/core/profile-files.ts）。
  *
  * **运行时唯一事实来源是 vault 里的外部文件**：设置里登记 `{ id, name, path }`
  * （`path` 相对 vault）。`PRESET_*` / `BUILTIN_*` 只是「从预设创建」的素材，
@@ -8,19 +9,17 @@
  *
  * 占位符一律 `{{name}}`。取不到值的占位符替换成空串，并把名字交还给调用方记进报告 ——
  * 不让一个笔误（`{{fooo}}`）把整批生成弄失败。模板本身坏了（文件不存在、路径越界、
- * metadata 模板没有 `{{frontmatter}}`、`.base` 填完占位符后 YAML 解析不了）才整体停下。
+ * `.base` 填完占位符后 YAML 解析不了）才整体停下。
  */
 import * as fs from "fs";
-import metadataDefault from "../defaults/metadata/default.md";
-import metadataEmbed from "../defaults/metadata/embed.md";
 import baseDefault from "../defaults/base/default.base";
 import { readVaultTextFile } from "./external-files";
 
-export type TemplateKind = "metadata" | "base";
+export type TemplateKind = "base";
 
 /** 设置里登记的一份自定义模板。 */
 export interface TemplateRef {
-  /** 稳定 id（folder 记忆与 profile.metadataTemplate 用它当键）。 */
+  /** 稳定 id（folder 记忆用它当键）。 */
   id: string;
   /** 人读名字。 */
   name: string;
@@ -58,29 +57,17 @@ export interface TemplateListEntry {
 /** 预设 material 的 id（不是运行时默认值；运行时没有 fallback）。 */
 export const DEFAULT_TEMPLATE_ID = "default";
 
-/** 预设素材（metadata）——只用于「从预设创建」。 */
-export const PRESET_METADATA_TEMPLATES: TemplatePreset[] = [
-  { id: "default", name: "默认（缩略图链接 + 原图链接）", text: metadataDefault },
-  { id: "embed", name: "嵌入缩略图（![[…]] + 原图链接）", text: metadataEmbed },
-];
-
 /** 预设素材（画廊 `.base`）——只用于「从预设创建」。 */
 export const PRESET_BASE_TEMPLATES: TemplatePreset[] = [
   { id: "default", name: "默认（卡片：文件名 + 缩略图）", text: baseDefault },
 ];
 
-/**
- * @deprecated 旧名字，转发到 `PRESET_METADATA_TEMPLATES`。
- * 仅供「从预设创建」读取原文；**不要再把它当可用模板列表**。
- */
-export const BUILTIN_METADATA_TEMPLATES: TemplatePreset[] = PRESET_METADATA_TEMPLATES;
-
 /** @deprecated 旧名字，转发到 `PRESET_BASE_TEMPLATES`。 */
 export const BUILTIN_BASE_TEMPLATES: TemplatePreset[] = PRESET_BASE_TEMPLATES;
 
 /** 某个 kind 的预设素材。 */
-export function presetTemplates(kind: TemplateKind): TemplatePreset[] {
-  return kind === "metadata" ? PRESET_METADATA_TEMPLATES : PRESET_BASE_TEMPLATES;
+export function presetTemplates(_kind: TemplateKind): TemplatePreset[] {
+  return PRESET_BASE_TEMPLATES;
 }
 
 /**
@@ -112,7 +99,7 @@ export function resolveTemplate(
   registered: readonly TemplateRef[],
   vaultRoot: string,
 ): ResolvedTemplate {
-  const kindName = kind === "metadata" ? "metadata 模板" : "画廊模板";
+  const kindName = "画廊模板";
   const matches = registered.filter((entry) => entry.id === id);
   if (matches.length === 0) {
     throw new Error(`找不到 ${kindName}「${id}」（请在设置页「模板」里登记或从预设创建外部文件）`);
@@ -138,40 +125,7 @@ export function readTemplateFile(abs: string, label: string, id = label): Resolv
   }
 }
 
-const PLACEHOLDER = /\{\{\s*([A-Za-z_][\w.-]*)\s*\}\}/g;
+export { PLACEHOLDER, exactPlaceholder, fillPlaceholders, placeholdersOf } from "./placeholders";
 
-/** 模板里出现过的占位符名（去重，按出现顺序）。 */
-export function placeholdersOf(text: string): string[] {
-  const seen = new Set<string>();
-  for (const match of text.matchAll(PLACEHOLDER)) seen.add(match[1]);
-  return [...seen];
-}
 
-/**
- * 替换占位符。`lookup` 返回 `undefined` ⇒ 换成空串，名字进 `missing`（调用方记进报告）。
- */
-export function fillPlaceholders(text: string, lookup: (name: string) => string | undefined): { text: string; missing: string[] } {
-  const missing: string[] = [];
-  const filled = text.replace(PLACEHOLDER, (_whole, name: string) => {
-    const value = lookup(name);
-    if (value === undefined) {
-      if (!missing.includes(name)) missing.push(name);
-      return "";
-    }
-    return value;
-  });
-  return { text: filled, missing };
-}
 
-/**
- * metadata 模板的硬约束：第一行必须是 `{{frontmatter}}`（frontmatter 由 profile 生成，
- * 只能在文件开头），且只出现一次。不满足 ⇒ 抛错（带 label）。
- */
-export function checkMetadataTemplate(template: ResolvedTemplate): void {
-  const first = template.text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0].trim();
-  if (!/^\{\{\s*frontmatter\s*\}\}$/.test(first)) {
-    throw new Error(`metadata 模板 ${template.label} 的第一行必须是 {{frontmatter}}（frontmatter 只能写在文件开头）`);
-  }
-  const count = [...template.text.matchAll(/\{\{\s*frontmatter\s*\}\}/g)].length;
-  if (count !== 1) throw new Error(`metadata 模板 ${template.label} 里 {{frontmatter}} 出现了 ${count} 次（只能 1 次）`);
-}

@@ -1,4 +1,3 @@
-{{frontmatter}}
 
 缩略图：{{thumbnail}}
 

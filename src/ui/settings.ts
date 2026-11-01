@@ -3,11 +3,9 @@ import type { SettingDefinitionControl, SettingDefinitionItem, SettingDefinition
 import type { ProfileFileRef } from "../core/profile-files";
 import type { RemoteEntry } from "../core/remotes";
 import type { TemplateRef } from "../core/templates";
-import { ProfileEditor, cloneProfile, cloneProfiles, type ProfileEditorHost } from "./profile-editor";
+import { ProfileEditor, type ProfileEditorHost } from "./profile-editor";
 import { RemotesEditor } from "./remotes-editor";
 import { TemplatesEditor, type TemplatesEditorHost } from "./templates-editor";
-
-export { cloneProfile, cloneProfiles };
 
 /**
  * 落进 data.json 的设置。
@@ -23,21 +21,17 @@ export interface PluginSettings {
   /** 按文件夹记住的现场填写值（`sample` 用目录本身当键，兼容旧 data.json）。 */
   folderSamples: Record<string, string>;
   /**
-   * 文件名匹配模板：设置里只登记 vault 内的独立 `.json` 文件（每条一个文件，顶层一条
-   * `ParseProfile`）。id/name/正则等全部以 JSON 内容为准，所以这里只保存路径。
+   * 元数据预设：设置里只登记 vault 内的独立 `.json` 文件（每条一个文件，顶层一条
+   * `ParseProfile`）。id/name/frontmatter 等全部以 JSON 内容为准，所以这里只保存路径。
    *
    * 旧 data.json 的内联 `profiles: ParseProfile[]` **不再是配置来源**，也不会自动迁移；
    * 检测到旧数据时由设置页显示非阻塞提示（见 `detectLegacyInlineProfiles`）。
    */
   profileFiles: ProfileFileRef[];
-  /** 文件夹绝对路径 → 选中的 profile id（右键弹窗记住上次选择）。 */
+  /** 文件夹绝对路径 → 选中的元数据预设 id（右键弹窗记住上次选择）。 */
   folderProfiles: Record<string, string>;
-  /** 自定义 metadata 模板（vault 里的 .md；内置的不在这里，见 src/core/templates.ts）。 */
-  metadataTemplates: TemplateRef[];
   /** 自定义画廊模板（vault 里的 .base）。 */
   baseTemplates: TemplateRef[];
-  /** 文件夹绝对路径 → 「生成元数据」上次选的 metadata 模板 id。 */
-  folderMetadataTemplates: Record<string, string>;
   /** 文件夹绝对路径 → 「创建画廊」上次选的画廊模板 id。 */
   folderBaseTemplates: Record<string, string>;
   /** 把 git / git-annex 的进度写进开发者控制台；默认关闭（社区插件审核要求默认只显示错误）。 */
@@ -50,9 +44,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   folderSamples: {},
   profileFiles: [],
   folderProfiles: {},
-  metadataTemplates: [],
   baseTemplates: [],
-  folderMetadataTemplates: {},
   folderBaseTemplates: {},
   debugLogging: false,
 };
@@ -61,6 +53,14 @@ export const DEFAULT_SETTINGS: PluginSettings = {
  * 旧 data.json 里内联 profile 数组的键名。仅用于检测与提示，**不是**运行时配置来源。
  */
 export const LEGACY_INLINE_PROFILES_KEY = "profiles";
+
+/**
+ * 旧 data.json 里「metadata 模板登记表」的键名。
+ *
+ * 2.0 及更早版本把 sidecar 正文模板单独登记在 `metadataTemplates` 里；现在正文由每条
+ * 元数据预设自己的 `template` 字段指向 vault `.md`，这份登记表**不再被读取**，也不会自动迁移。
+ */
+export const LEGACY_METADATA_TEMPLATES_KEY = "metadataTemplates";
 
 /** 旧内联 profile 的检测结果（供设置页显示非阻塞提示）。 */
 export interface LegacyInlineProfilesInfo {
@@ -80,6 +80,28 @@ export interface LegacyInlineProfilesInfo {
 export function detectLegacyInlineProfiles(raw: unknown): LegacyInlineProfilesInfo {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { present: false, count: 0 };
   const value = (raw as Record<string, unknown>)[LEGACY_INLINE_PROFILES_KEY];
+  const count = Array.isArray(value) ? value.length : 0;
+  return { present: count > 0, count };
+}
+
+/** 旧「metadata 模板登记表」的检测结果（供设置页显示非阻塞提示）。 */
+export interface LegacyMetadataTemplatesInfo {
+  /** 是否存在非空的 `metadataTemplates` 数组。 */
+  present: boolean;
+  /** 旧登记的条数（不是数组时为 0）。 */
+  count: number;
+}
+
+/**
+ * 检测旧 data.json 里的 `metadataTemplates: TemplateRef[]`。
+ *
+ * 这份登记表已经不用了（正文改由元数据预设的 `template` 字段指向 vault `.md`），
+ * 但**不迁移、也不删除** data.json 里的旧键 —— 只在设置页显示一条可见、非阻塞的提示，
+ * 引导用户从「从预设创建」重新生成。正文内容不会因此丢失：旧正文文件仍在 vault 里。
+ */
+export function detectLegacyMetadataTemplates(raw: unknown): LegacyMetadataTemplatesInfo {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { present: false, count: 0 };
+  const value = (raw as Record<string, unknown>)[LEGACY_METADATA_TEMPLATES_KEY];
   const count = Array.isArray(value) ? value.length : 0;
   return { present: count > 0, count };
 }
@@ -113,6 +135,11 @@ export interface SettingsHost extends ProfileEditorHost, TemplatesEditorHost {
    * 设置页只用它显示「已失效、需要手工登记外部 JSON」的非阻塞提示；不迁移、不读取。
    */
   legacyInlineProfiles: LegacyInlineProfilesInfo;
+  /**
+   * 旧 data.json 的 `metadataTemplates`（metadata 模板登记表）的检测结果。
+   * 同样只用于显示非阻塞提示；旧键原样留在 data.json 里，不迁移、不删除。
+   */
+  legacyMetadataTemplates: LegacyMetadataTemplatesInfo;
   /** 扫当前仓库的 remote，把设置里没有的补进来；返回补了几条。 */
   scanVaultRemotes(): Promise<number>;
 }
@@ -132,8 +159,8 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
   /**
    * Obsidian 1.13+ 的声明式设置页：整页由定义生成，`display()` 不再被调用。
    *
-   * 顺序与旧版一致：remote 编辑器 → 文件名匹配模板（旧内联提示 + ProfileEditor）→
-   * 模板区（TemplatesEditor）→ 两个普通设置项。两条 `<hr>` 分割线换成 group 的 heading；
+   * 顺序与旧版一致：remote 编辑器 → 元数据预设（旧数据提示 + ProfileEditor）→
+   * 画廊模板区（TemplatesEditor）→ 两个普通设置项。两条 `<hr>` 分割线换成 group 的 heading；
    * 三个编辑器用 render 项挂载（name/desc 只用于设置搜索，编辑器自带卡片标题）。
    */
   getSettingDefinitions(): SettingDefinitionItem[] {
@@ -146,7 +173,7 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
       },
       {
         type: "group",
-        heading: "文件名匹配模板与模板",
+        heading: "元数据预设与画廊模板",
         cls: "annex-editors-group",
         items: [this.profilesDefinition(), this.templatesDefinition()],
       },
@@ -206,12 +233,13 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   private profilesDefinition(): SettingDefinitionRender {
     return {
-      name: "文件名匹配模板",
-      desc: "每条文件名匹配模板是 vault 里的一个 .json 文件；在这里登记路径，或从预设创建。",
+      name: "元数据预设",
+      desc: "每条元数据预设是 vault 里的一个 .json 文件（frontmatter 与可选正文模板都写在里面）；在这里登记路径，或从预设创建。",
       render: (setting) => {
         // ProfileEditor 会清空自己的容器，所以旧配置提示和编辑器各用一个子容器。
         const container = this.mountEditor(setting, "annex-profiles-section");
         this.renderLegacyInlineProfilesWarning(container);
+        this.renderLegacyMetadataTemplatesWarning(container);
         const editor = container.createDiv({ cls: "annex-profiles-editor" });
         new ProfileEditor(editor, this.host).render();
       },
@@ -220,8 +248,8 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   private templatesDefinition(): SettingDefinitionRender {
     return {
-      name: "metadata 与画廊模板",
-      desc: "metadata 模板是 vault 里的 .md，画廊模板是 vault 里的 .base；在这里登记或从预设创建。",
+      name: "画廊模板",
+      desc: "画廊模板是 vault 里的 .base；在这里登记或从预设创建。",
       render: (setting) => {
         const container = this.mountEditor(setting, "annex-templates-section");
         new TemplatesEditor(container, this.host).render();
@@ -299,13 +327,38 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     warning.setAttr("data-count", String(legacy.count));
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-title",
-      text: "旧版内联文件名匹配模板已不再生效",
+      text: "旧版内联元数据预设已不再生效",
     });
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-body",
       text:
         `data.json 里还有 ${legacy.count} 条内联 profiles。本版本不会读取、不会自动迁移，也不会回退到预设。` +
         "请把每条配置分别保存成 vault 里的一个 .json 文件，然后在下面逐条「登记」。",
+    });
+  }
+
+  /**
+   * 旧「metadata 模板登记表」（`metadataTemplates`）的失效提示：可见、非阻塞。
+   *
+   * 正文模板不再单独登记 —— 它由每条元数据预设的 `template` 字段指向 vault 里的 `.md`。
+   * 旧键原样留在 data.json 里（不迁移、不删除），旧正文文件也仍在 vault 里；这里只提示用户
+   * 从「从预设创建」重新生成一份新格式的预设。
+   */
+  private renderLegacyMetadataTemplatesWarning(parent: HTMLElement): void {
+    const legacy = this.host.legacyMetadataTemplates;
+    if (legacy === undefined || !legacy.present) return;
+    const warning = parent.createDiv({ cls: "annex-legacy-profiles-warning" });
+    warning.setAttr("data-count", String(legacy.count));
+    warning.createDiv({
+      cls: "annex-legacy-profiles-warning-title",
+      text: "旧版 metadata 模板登记表已不再生效",
+    });
+    warning.createDiv({
+      cls: "annex-legacy-profiles-warning-body",
+      text:
+        `data.json 里还有 ${legacy.count} 条 metadataTemplates。本版本不会读取它们，也不会自动迁移` +
+        "（data.json 里的旧键原样保留，vault 里的旧正文文件也还在）。" +
+        "请改用「从预设创建」生成新的元数据预设：正文模板由预设自己的 template 字段指定。",
     });
   }
 }
