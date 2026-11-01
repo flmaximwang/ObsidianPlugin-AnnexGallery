@@ -2,8 +2,8 @@
 /**
  * 插件加载路径校验（外部文件模型，spec-774d7ee）：
  * 用 `npm run smoke` 的同一个桩环境加载构建产物 main.js，验证真实运行时行为：
- *   - 文件名匹配模板只从设置登记的**外部 .json** 读取，每份顶层一条 ParseProfile；
- *   - 示例 profile（TECNAI + 多孔板）逐字读回，keyOrder / fields 不变；
+ *   - 文件名匹配模板只从设置登记的**外部 .json** 读取，每份顶层一条预设；
+ *   - 示例预设（TECNAI + 多孔板）逐字读回，frontmatter 字典 / types 不变；
  *   - 外部文件改了，下一次操作重新读取（无缓存）；
  *   - 跨文件 id 重复 / 坏 JSON / 文件丢失 ⇒ 整次操作抛错（不跳过、不 fallback）；
  *   - 旧 data.json 的内联 profiles 不迁移、不读取、不参与运行时；
@@ -27,8 +27,10 @@ Module._load = function patchedLoad(request, ...rest) {
 const repo = path.resolve(__dirname, "..", "..");
 const PluginClass = require(path.join(repo, "main.js")).default;
 const VAULT = "/tmp/annex-example-profiles-vault";
-const profiles = require(path.join(__dirname, "two-profiles.json"));
-const plateOnly = require(path.join(__dirname, "plate-profile.json"));
+const profiles = {
+  tecnaitem: JSON.parse(fs.readFileSync(path.join(__dirname, "tecnaitem-profile.json"), "utf8")),
+  platewell: JSON.parse(fs.readFileSync(path.join(__dirname, "plate-profile.json"), "utf8")),
+};
 
 fs.rmSync(VAULT, { recursive: true, force: true });
 fs.mkdirSync(VAULT, { recursive: true });
@@ -62,12 +64,14 @@ const failsWith = (fn, re) => {
 };
 
 (async () => {
-  // 示例文件是 CLI 的多 profile 数组；插件要求一条一个文件。这里拆成两份独立 JSON。
-  const tec = profiles.find((entry) => entry.id === "tecnaitem");
-  const plate = profiles.find((entry) => entry.id === "platewell");
-  check(tec !== undefined && plate !== undefined, "two-profiles.json 里含 TECNAI + 多孔板两条示例");
+  // 示例预设本来就是「一条一个 .json」；正文模板放在 vault 里，路径相对 vault。
+  const tec = profiles.tecnaitem;
+  const plate = profiles.platewell;
+  check(tec.id === "tecnaitem" && plate.id === "platewell", "两份示例预设都是独立的单对象 .json");
   writeJson("Profiles/tecnaitem.json", tec);
   writeJson("Profiles/Other/platewell.json", plate);
+  write("AnnexGalleryTemplates/tecnaitem.md", fs.readFileSync(path.join(__dirname, "tecnaitem.md"), "utf8"));
+  write("AnnexGalleryTemplates/plate.md", fs.readFileSync(path.join(__dirname, "plate.md"), "utf8"));
 
   stub.registry.savedData = {
     thumbnailEdge: 256,
@@ -84,10 +88,11 @@ const failsWith = (fn, re) => {
   const loaded = plugin.loadProfilesForOperation();
   console.log(`  运行时读到的 profile id：${loaded.map((entry) => `${entry.profile.id}@${entry.path}`).join(", ")}`);
   check(loaded.length === 2 && loaded[0].profile.id === "tecnaitem" && loaded[1].profile.id === "platewell", "两个外部文件按登记顺序读成两条 profile");
-  check(JSON.stringify(loaded[0].profile) === JSON.stringify(tec), "TECNAI profile 逐字节读回（regex / fields / keyOrder 未变）");
-  check(loaded[0].profile.keyOrder.length === 12, "TECNAI 是 12 键 keyOrder");
-  check(JSON.stringify(loaded[1].profile) === JSON.stringify(plateOnly[0]), "多孔板 profile 逐字节读回");
-  check(loaded[1].profile.fields.some((field) => field.group === "well" && field.type === "text"), "多孔板 profile 的 well 字段类型仍是 text");
+  check(JSON.stringify(loaded[0].profile) === JSON.stringify(tec), "TECNAI 预设逐字节读回（regex / frontmatter / types 未变）");
+  check(Object.keys(loaded[0].profile.frontmatter).length === 12, "TECNAI 的 frontmatter 字典是 12 个键");
+  check(loaded[0].profile.template === "AnnexGalleryTemplates/tecnaitem.md" && loaded[0].body?.text.includes("缩略图：{{thumbnail}}"), "TECNAI 的正文模板按 vault 相对路径读入（body.text）");
+  check(JSON.stringify(loaded[1].profile) === JSON.stringify(plate), "多孔板预设逐字节读回");
+  check(loaded[1].profile.frontmatter.well === "{{well}}" && loaded[1].profile.types?.well === undefined, "多孔板的 well 仍是未声明类型的占位符（默认 text）");
   check(loaded[0].absPath === path.join(VAULT, "Profiles/tecnaitem.json"), "加载结果带打开用的绝对路径");
 
   // 外部改动 ⇒ 下次操作重新读（没有缓存）。
@@ -119,14 +124,14 @@ const failsWith = (fn, re) => {
   plugin.settings.profileFiles.pop();
 
   // 数组 / { profiles: [...] } 包装（CLI 多 profile 格式）不属于插件设置。
-  writeJson("Profiles/array.json", [plateOnly[0]]);
+  writeJson("Profiles/array.json", [plate]);
   plugin.settings.profileFiles.push({ path: "Profiles/array.json" });
-  const arrayFile = failsWith(() => plugin.loadProfilesForOperation(), /顶层必须是单条 ParseProfile 对象/);
+  const arrayFile = failsWith(() => plugin.loadProfilesForOperation(), /顶层必须是单条预设对象/);
   check(arrayFile.ok, "数组格式的 profile 文件被拒绝（插件要求一条一个对象文件）", arrayFile.error);
   plugin.settings.profileFiles.pop();
 
   // 文件丢失。
-  writeJson("Profiles/gone.json", { ...plateOnly[0], id: "gone" });
+  writeJson("Profiles/gone.json", { ...plate, id: "gone" });
   plugin.settings.profileFiles.push({ path: "Profiles/gone.json" });
   fs.rmSync(path.join(VAULT, "Profiles/gone.json"));
   const missing = failsWith(() => plugin.loadProfilesForOperation(), /文件不存在/);
@@ -146,18 +151,18 @@ const failsWith = (fn, re) => {
   check(legacy.legacyInlineProfiles.present === true && legacy.legacyInlineProfiles.count === 1, "旧内联 profiles 被检测到（仅用于显示失效提示）");
   check(legacy.settings.profileFiles.length === 0, "旧内联 profiles 没有被迁移成 profileFiles");
   check(legacy.settings.profiles.length === 1 && legacy.settings.profiles[0].id === "tecnaitem", "旧 profiles 原样留在内存设置里（不删除、不迁移）");
-  const legacyRun = failsWith(() => legacy.loadProfilesForOperation(), /还没有登记任何文件名匹配模板/);
+  const legacyRun = failsWith(() => legacy.loadProfilesForOperation(), /还没有登记任何元数据预设/);
   console.log(`  旧内联 profiles 运行时 → ${legacyRun.error}`);
   check(legacyRun.ok, "旧内联 profiles 不参与运行时：空登记列表直接报错，不回退旧值");
   check(stub.registry.savedData.profileFiles === undefined, "没有把任何迁移结果写回 data.json");
 
-  // 全新 data.json：同样不回退内置 DEFAULT_PROFILES。
+  // 全新 data.json：同样不回退任何内置预设。
   stub.registry.savedData = null;
   const fresh = new PluginClass(stub.makeApp(VAULT), { id: "annex-gallery", version: "0.1.0" });
   await fresh.onload();
   check(fresh.settings.profileFiles.length === 0, "全新 data.json ⇒ profileFiles = []");
-  const freshRun = failsWith(() => fresh.loadProfilesForOperation(), /还没有登记任何文件名匹配模板/);
-  check(freshRun.ok, "全新 data.json 不回退内置 TECNAI / 预设，明确引导去登记外部 JSON", freshRun.error);
+  const freshRun = failsWith(() => fresh.loadProfilesForOperation(), /还没有登记任何元数据预设/);
+  check(freshRun.ok, "全新 data.json 不回退任何内置预设，明确引导去登记外部 JSON", freshRun.error);
 
   fs.rmSync(VAULT, { recursive: true, force: true });
   console.log(`\nPASS=${pass} FAIL=${fail}`);

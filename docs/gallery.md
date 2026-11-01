@@ -24,12 +24,12 @@ sidecar 归「生成元数据」，`.base` 归「创建画廊」。任何一个�
 
 1. **认标签，不认文件名。** 画廊成员资格的唯一判据是 sidecar 带 `annex-gallery-metadata` 标签。
    不按 `<stem>.md` 的命名认（任何 `.md` 都可能是笔记），也不按所在目录认（画廊要递归，目录里混着笔记）。
-   标签跨 profile 稳定：换一条 profile、改一次 `keyOrder`，已有的 sidecar 照样在画廊里。
+   标签跨预设稳定：换一条元数据预设、改一次 frontmatter 字典的键序，已有的 sidecar 照样在画廊里。
 2. **作用域钉死在插件这一层，模板只能收窄。** 顶层 `filters` 永远先写
    `file.inFolder(<folder>)` 与 `file.hasTag("annex-gallery-metadata")`，模板自己的 `filters` 被
    **并进去**当作第三个条件。抄来一份模板也不会把范围放宽到整个 vault；模板作者想「不要文件夹限制」
    也没有入口。
-3. **模板是数据，坏了大声失败。** 画廊模板是 vault 里的外部 `.base` 文件（metadata 模板同理），
+3. **模板是数据，坏了大声失败。** 画廊模板是 vault 里的外部 `.base` 文件，
    预设原文只作「从预设创建」的素材；模板文本不塞进 `data.json`。模板本身坏了（文件没了、
    `.base` 填完不是合法 YAML）就**整体停下并指名文件**，不静默回退到内置默认 ——
    回退会把「模板坏了」伪装成「画廊是空的」。
@@ -101,13 +101,20 @@ filters:
 ## 6. 标签：画廊的成员资格
 
 标签名是 `annex-gallery-metadata`（`src/core/sidecar.ts` 的 `GALLERY_TAG`）。**每一份 sidecar 的
-`tags` 第一项都是它**，不论 profile 的 `keyOrder` 怎么写：
+`tags` 里都必须有它**，而这份标签由**元数据预设自己写** —— 预设的 `frontmatter.tags` 必须是一个列表，
+且含这个字面量（`validateProfile` 会检查，不满足就是硬错误，一份 sidecar 都不写）。
 
-- `keyOrder` 里有 `tags`：列表第一项是 `annex-gallery-metadata`，profile 派生/给定的值跟在后面。
-- `keyOrder` 里没有 `tags`：仍然在最前面写一行 `tags:`，只带这一个标签。
+**插件不再隐式注入这个标签。** 理由：成员资格一旦交给别的机制决定，改一次预设就可能让一批 sidecar
+悄悄从所有画廊里消失；让预设显式写出来，改动看得见、也校验得住。
 
-这是 [`metadata.md`](metadata.md) 里「不在 `keyOrder` 里的键一律不写」的**唯一例外**：标签决定
-成员资格，若交给 `keyOrder` 决定，改一次 profile 就能让一批 sidecar 悄悄从所有画廊里消失。
+```jsonc
+"frontmatter": {
+  "tags": ["annex-gallery-metadata", "{{tags}}"]   // 第一项是字面量，第二项是内置变量
+}
+```
+
+想加自己的标签，直接写进同一个列表即可；`{{tags}}` 是内置变量（图片所在目录相对 vault 的第一段路径），
+不加也行 —— 标签列表里只有 `annex-gallery-metadata` 也完全合法。
 
 ### 旧 sidecar：补标签
 
@@ -129,7 +136,7 @@ filters:
 - `tags:` 是行内值（`tags: a` / `tags: [a, b]`）⇒ 只把这一行改写成块列表，值不变；
 - 已经带标签 ⇒ 原样返回（幂等）；没有 frontmatter ⇒ 不是 sidecar，不碰。
 
-别的键的引号、顺序、注释、空行**一个字节都不动**；不按 profile 重算、不改正文。理由：旧 sidecar
+别的键的引号、顺序、注释、空行**一个字节都不动**；不按元数据预设重算、不改正文。理由：旧 sidecar
 可能有用户手写的内容，重写 YAML 会把「只加一个标签」变成一次不可见的格式迁移。
 
 ## 7. 先看再写：预检与报告
@@ -172,9 +179,9 @@ filters:
 |---|---|---|
 | `{{folder}}` | 画廊所在文件夹的 vault 相对路径（vault 根为空串） | 要不要加引号由模板决定；根目录填空串 |
 | `{{cardSize}}` | 设置里的缩略图边长（数字） | 用于 `cardSize:` |
-| `{{properties}}` | sidecar 里实际出现过的 frontmatter 键，**按各 profile 的 `keyOrder` 排序**（profile 顺序优先），`keyOrder` 里都没有的键按首次出现顺序排在最后 | 渲染成 JSON 数组 —— 合法 YAML 流式列表，键名带逗号/括号/中文都安全 |
+| `{{properties}}` | sidecar 里实际出现过的 frontmatter 键，**按已加载预设的 frontmatter 字典键序排序**（预设顺序优先，先出现的预设说了算），字典里都没有的键按首次出现顺序排在最后 | 渲染成 JSON 数组 —— 合法 YAML 流式列表，键名带逗号/括号/中文都安全 |
 
-`{{properties}}` 的用途是让模板不用硬编码字段清单（例如把它放进 `order:`），换了 profile 之后
+`{{properties}}` 的用途是让模板不用硬编码字段清单（例如把它放进 `order:`），换了预设之后
 画廊跟着变；键只统计**被画廊认作 sidecar 的 `.md`**（带标签的，或旧式带 `tif` 的），普通笔记不算。
 
 **选哪一份模板**：可用模板 = 设置里登记过的外部 `.base` 文件（**没有内置兜底**）。一条都没有 ⇒
@@ -182,31 +189,29 @@ filters:
 （`folderBaseTemplates`），下次同一文件夹预选上次那份；记住的 id 已失效（例如旧的内置 `default`）
 ⇒ 用第一条已登记的。
 
-### 8.2 metadata 模板（sidecar 的整份 `.md`）
+### 8.2 sidecar 的正文模板（由元数据预设指定）
 
-metadata 模板是 sidecar 的**整份文件文本**，不是「正文片段」：
+sidecar 的正文**不再单独登记**：它由每条元数据预设的 `template` 字段指向 vault 里的 `.md`。
+换预设就换正文，「生成元数据」弹窗里**没有模板下拉框**。
 
-- **第一行必须是 `{{frontmatter}}`**（且只能出现一次）：frontmatter 由 profile 生成、只能写在文件开头，
-  profile 仍然独占它 —— 模板决定不了里面有哪些键。
-- 正文可用 `{{thumbnail}}` / `{{tif}}` / `{{stem}}`，以及 `{{<任意键>}}`。取值与 frontmatter 同一套
-  解析（解析 / 常量 / 询问 / 派生 / 自动），**包括不在 `keyOrder` 里的自动值**（`thumbnail` / `tif`
-  通常就不在 `keyOrder` 里，正文照样拿得到）。
-- 模板是**设置页登记过的 vault 内 `.md` 文件**；两份预设素材（`default` / `embed`，源码在
-  `src/defaults/metadata/`）只能通过「从预设创建…」变成 vault 里的独立文件后才算数。
-- 选择：profile 的 `metadataTemplate`（必须是**已登记**的 id）是默认值；「生成元数据」弹窗里有一个
-  模板下拉框，优先级是**按文件夹记住的 > profile.metadataTemplate > 第一条已登记**，
-  选择按文件夹记住（`folderMetadataTemplates`）。声明的 id 没登记 ⇒ 直接报错，不回退内置。
+- 正文 `.md` 必须存在、必须是 vault 相对路径、扩展名必须是 `.md`，且**不能自带 frontmatter**
+  （frontmatter 由预设的 `frontmatter` 字典生成，正文模板无权决定里面有哪些键）。
+- 正文可用 `{{thumbnail}}` / `{{tif}}` / `{{stem}}` / `{{<任意变量>}}`，取值与 frontmatter 同一套
+  （捕获组 / ask / 内置变量）；取不到值的占位符替换成空串并记进报告。
+- 预设没写 `template`（或写成 `""`）⇒ sidecar 只有 frontmatter。
+
+完整口径见 [`metadata.md`](metadata.md)。
 
 ### 8.3 模板的失败口径
 
 | 情形 | 结果 |
 |---|---|
 | 模板文件不存在 / 读不了 | 停下，Notice 指名模板的 vault 路径 |
-| metadata 模板第一行不是 `{{frontmatter}}`，或 `{{frontmatter}}` 出现多次 | 停下，整批 sidecar 一份都不写 |
+| 正文模板（预设的 `template`）自带 frontmatter | 停下，整批 sidecar 一份都不写 |
 | `.base` 填完占位符后不是合法 YAML | 停下，Notice 指名模板文件与解析错误 |
 | `.base` 顶层不是映射，或没有 `views` 列表 | 停下 |
 | 某个占位符取不到值（含笔误） | **不失败**：替换成空串，报告里记一条「模板里的 `{{name}}` 取不到值，已留空」 |
-| 一个模板都没登记 | 停下，Notice 引导去登记或「从预设创建」 |
+| 一个画廊模板都没登记 | 停下，Notice 引导去登记或「从预设创建」 |
 
 前四行是「模板本身坏了」，第五行是「数据不全」。两者分开处理：坏模板修模板，缺值修数据，
 不要用一个静默回退把两者混成「画廊看起来是空的」。
@@ -215,36 +220,39 @@ metadata 模板是 sidecar 的**整份文件文本**，不是「正文片段」�
 
 | 位置 | 承担什么 |
 |---|---|
-| `src/core/gallery.ts` | `planGallery()` 只读盘点；`addGalleryTag()` 文本级补标签；`buildGalleryBase()` 填占位符 → YAML 校验 → 并作用域；`galleryFilePath()` 输出路径；`orderProperties()` 键排序 |
-| `src/core/templates.ts` | 模板 id / 预设素材 / 已登记清单（`TemplateRef`）/ `listTemplates()`（只有登记项）/ `resolveTemplate()`（**无内置兜底**）/ `fillPlaceholders()` / `checkMetadataTemplate()` |
-| `src/core/external-files.ts` | 外部模板 / profile 文件的路径规范化与校验（vault 相对路径、扩展名、存在性） |
-| `src/core/profile-files.ts` | 外部 profile JSON 的读取（单对象约束、跨文件 id 重复、坏 JSON、坏正则） |
-| `src/core/sidecar.ts` | `GALLERY_TAG`；`tags` 第一项强制写标签；metadata 模板渲染（`{{frontmatter}}` 由这里给） |
-| `src/defaults/metadata/*.md`、`src/defaults/base/*.base` | **预设素材**（metadata `default` / `embed`、画廊 `default`）——「从预设创建」的原料，不是运行时可用模板 |
-| `src/ui/templates-editor.ts` | 设置页「模板」区：登记外部文件 / 从预设创建（写 `AnnexGalleryTemplates/<id>.<ext>`）/ 打开 / 取消登记 |
-| `src/ui/settings.ts` | `metadataTemplates` / `baseTemplates` / `folderMetadataTemplates` / `folderBaseTemplates` 与「模板」区的顶层落点 |
+| `src/core/gallery.ts` | `planGallery()` 只读盘点；`addGalleryTag()` 文本级补标签；`buildGalleryBase()` 填占位符 → YAML 校验 → 并作用域；`galleryFilePath()` 输出路径；`orderProperties()` 键排序（按已加载预设的 frontmatter 字典键序） |
+| `src/core/templates.ts` | 画廊模板 id / 预设素材 / 已登记清单（`TemplateRef`）/ `listTemplates()`（只有登记项）/ `resolveTemplate()`（**无内置兜底**）/ `fillPlaceholders()`（从 `placeholders.ts` 转出） |
+| `src/core/placeholders.ts` | `{{name}}` 占位符的解析与替换（frontmatter 字典 / 正文模板 / `.base` 共用） |
+| `src/core/external-files.ts` | 外部文件（元数据预设 `.json` / 正文模板 `.md` / 画廊模板 `.base`）的路径规范化与校验（vault 相对路径、扩展名、存在性） |
+| `src/core/profile-files.ts` | 外部元数据预设 JSON 的读取（单对象约束、跨文件 id 重复、坏 JSON、坏正则、旧格式） |
+| `src/core/sidecar.ts` | `GALLERY_TAG`；frontmatter 字典 → YAML 的渲染；正文模板的占位符填充 |
+| `src/core/presets.ts` | 元数据预设素材（`tecnaitem` / `tecnaitem-embed` / `minimal`，各带一份正文） |
+| `src/defaults/presets/*.json`、`src/defaults/presets/*.body.md`、`src/defaults/base/*.base` | **预设素材** ——「从预设创建」的原料，不是运行时可用文件 |
+| `src/ui/templates-editor.ts` | 设置页「画廊模板」区：登记外部 `.base` / 从预设创建（写 `AnnexGalleryTemplates/<id>.base`）/ 打开 / 取消登记 |
+| `src/ui/profile-editor.ts` | 设置页「元数据预设」区：登记外部 `.json` / 从预设创建（写 JSON + 正文两份）/ 打开 / 取消登记 |
+| `src/ui/settings.ts` | `profileFiles` / `baseTemplates` / `folderBaseTemplates` 与两个区的顶层落点 |
 | `main.ts` | 子菜单第 3 项、标题本地化、预检 → 弹窗 → 写 `.base` → 打开 |
-| `scripts/cli.ts` | `gallery` 子命令（同一套 core；dry-run 默认；`--template` 认 CLI 自带预设或文件） |
+| `scripts/cli.ts` | `gallery` 子命令（同一套 core；dry-run 默认；`--template` 给 `.base` 文件路径） |
 | `tools/verify-gallery.cjs` | 判据侧，不是运行时 |
-| `esbuild.config.mjs` | `defaults-text` 插件把 `defaults/metadata/*.md`、`defaults/base/*.base` 内联成字符串（与 `.gitattributes` 同一条路） |
+| `esbuild.config.mjs` | `defaults-text` 插件把 `defaults/presets/*.body.md`、`defaults/base/*.base` 内联成字符串（与 `.gitattributes` 同一条路） |
 
 ## 10. 命令行
 
 ```bash
 # 画廊：dry-run 默认；--apply 才落盘
-node tools/annex-gallery.mjs gallery <dir> --vault <vaultRoot> \
-  [--template <id|file>] [--profiles-file <json>] [--edge <n>] \
-  [--apply] [--overwrite] [--fix-tags] [--json]
+node tools/annex-gallery.mjs gallery <dir> --vault <vaultRoot> --preset <file> [--preset <file> ...] \
+  [--template <base file>] [--edge <n>] [--apply] [--overwrite] [--fix-tags] [--json]
 
-# metadata 模板也可以在生成 sidecar 时直接指定
-node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> \
-  [--profile <id>] [--profiles-file <json>] [--template <id|file>] [--apply] [--overwrite]
+# sidecar：正文由预设自己的 template 决定，CLI 不再接受 --template
+node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --preset <file> [--preset <file> ...] \
+  [--profile <id>] [--sample <name>] [--ask key=value] [--apply] [--force] [--verify] [--json]
 ```
 
 | 选项 | 语义 |
 |---|---|
-| `--template <id\|file>` | CLI 自带的预设 id（metadata：`default` / `embed`；画廊：`default`），或直接给一个模板文件的路径；两种都找不到即报错，不回退 |
-| `--profiles-file <json>` | 传 profile 数组或 `{ "profiles": [ … ] }`；`{{properties}}` 的键序按它排；不给就用 CLI 自带的 `DEFAULT_PROFILES` |
+| `--preset <file>` | 一条元数据预设的 `.json` 文件路径（相对当前工作目录解析），顶层是一条预设对象；要给几条就重复给几次。`{{properties}}` 的键序按它们的前后顺序排。 |
+| `--template <base file>` | 画廊 `.base` 模板的**文件路径**；给了但找不到即报错，不回退。不给时用 CLI 自带的画廊预设 `default`（插件运行时没有这个兜底）。 |
+| `--profile <id>` | 从 `--preset` 给的预设里挑一条（`sidecar` 用它决定用哪条；`profiles --parse` 用它指定解析哪条）。 |
 | `--edge <n>` | `{{cardSize}}` 的值；不给用插件默认的缩略图边长（与设置页默认一致） |
 | `--apply` | 真正写 `.base`（以及 `--fix-tags` 的标签）；不给就是 dry-run，不写任何文件 |
 | `--overwrite` | 与 `--apply` 同用：`.base` 已存在时覆盖；不给则按「已存在」报错退出（连补标签也不做） |
@@ -252,16 +260,17 @@ node tools/annex-gallery.mjs sidecar <dir> --vault <vaultRoot> --sample <name> \
 | `--json` | 机器可读报告：`plan`（五项计数 + `untagged` 列表）、`properties`、`target`、`text`、`missing`、`wrote`、`fixedTags` |
 
 退出码表态：有失败（坏模板、已存在未 `--overwrite`、写盘失败）即非零退出 —— 便于在脚本里串联。
-CLI 不读 `data.json`，所以 `--template` 的 **id 只认 CLI 自带的预设**；插件设置里登记的外部模板
-在 CLI 不可用 —— 直接给文件路径。**这是插件与 CLI 的刻意差别**：插件运行时只认登记过的外部文件
-（没有内置兜底），CLI 是脚本场景，没有设置页可点，所以保留自带预设。
+CLI 不读 `data.json`，所以插件设置里登记的外部文件在 CLI 不可用 —— 直接给文件路径。
+**这是插件与 CLI 的刻意差别**：插件运行时只认登记过的外部文件（没有内置兜底），CLI 是脚本场景、
+没有设置页可点，所以用 `--preset <file>` / `--template <file>` 直接给路径。
+完整口径见 [`tools/cli.md`](tools/cli.md)。
 
 ## 11. 判据（可复跑）
 
 | 命令 | 钉住什么 |
 |---|---|
-| `npm run verify:gallery` | metadata 模板：`tags` 第一项恒为 `annex-gallery-metadata`（含 `keyOrder` 没有 `tags` 的 profile）、预设 `default` 正文与改造前逐字节相同、`embed`、占位符缺值留空、坏模板整体停下且不写任何 sidecar。画廊：预检五项计数；补标签的**文本级最小改动**与幂等（除插入的那一项外逐字节不变）；作用域合并（模板 `filters` 被并进 `and`、删不掉前两项）；输出路径（子文件夹 / vault 根）；重复 `--apply` 的保护与 `--overwrite`；CLI 的 dry-run / `--fix-tags` / 坏 `.base` 模板 |
-| `npm run smoke` | 桩环境：子菜单 9 项的**顺序与图标**、`创建画廊` / `Create Gallery` 的标题选择（含 `language=en` 时只有第 3 项变）、设置页「模板」区（登记 / 从预设创建 / 打开 / 取消登记）、创建画廊的弹窗（选模板 / 已存在 `.base` / 旧 sidecar / 坏模板）、**坏 profile 在写 `.base` 前停下** |
+| `npm run verify:gallery` | sidecar：预设的 `frontmatter.tags` 恒含 `annex-gallery-metadata`、正文模板占位符缺值留空、坏模板整体停下且不写任何 sidecar。画廊：预检五项计数；补标签的**文本级最小改动**与幂等（除插入的那一项外逐字节不变）；作用域合并（模板 `filters` 被并进 `and`、删不掉前两项）；输出路径（子文件夹 / vault 根）；重复 `--apply` 的保护与 `--overwrite`；CLI 的 dry-run / `--fix-tags` / 坏 `.base` 模板 |
+| `npm run smoke` | 桩环境：子菜单 9 项的**顺序与图标**、`创建画廊` / `Create Gallery` 的标题选择（含 `language=en` 时只有第 3 项变）、设置页「画廊模板」区（登记 / 从预设创建 / 打开 / 取消登记）、创建画廊的弹窗（选模板 / 已存在 `.base` / 旧 sidecar / 坏模板）、**坏元数据预设在写 `.base` 前停下** |
 | `npm run build` + `npm run typecheck` | 两份产物可生成、类型不塌 |
 | 截图 + 人眼 | `.base` 打开后的卡片观感、`cardSize` 与缩略图是否同尺寸 —— 这部分没有自动判据 |
 
@@ -275,15 +284,16 @@ CLI 不读 `data.json`，所以 `--template` 的 **id 只认 CLI 自带的预设
    会让同一个目录看起来在 vault 外（[`context-menu.md`](context-menu.md) §5.4 同因）。
 3. **递归交给 `inFolder`，不要自己加文件夹等值条件。** 模板里写 `file.folder == "<folder>"` 会把
    子文件夹排除，与「递归」口径相反。
-4. **标签是成员资格，不是展示用的徽章。** 不要在 profile 的 `keyOrder` 里拿掉 `tags` 来「少写一个键」：
-   标签写在最前面是硬契约，`keyOrder` 只决定其余键。
+4. **标签是成员资格，不是展示用的徽章。** 预设的 `frontmatter.tags` 必须是一个列表且含字面量
+   `annex-gallery-metadata`，少写就是硬错误（整批 sidecar 都不写）。插件不再隐式注入这个标签 ——
+   成员资格写在预设里，改动看得见、也校验得住。
 5. **补标签不能走 YAML 重写。** 重写会改引号、顺序、注释；旧 sidecar 可能有手写内容。这条与「只加
    一个标签、别的字节不动」的承诺冲突，必须以文本级实现，并由一条逐字节对比的断言钉住。
 6. **`{{properties}}` 用 JSON 编码。** 键名可能带逗号、括号、中文；手写 YAML 列表会在这些键名上崩。
    JSON 数组同时是合法的 YAML 流式列表，所以两种视角都对。
 7. **`cardSize` 与缩略图边长必须一致。** 不一致会把封面放大、发虚（[`design.md`](design.md) 的
    三条贯穿约定第 2 条）；默认模板从 `{{cardSize}}` 取设置值，自定义模板不要写死数字。
-8. **登记的模板 id 由文件名生成。** 预设 id（`default` / `embed`）不是注册项，所以不会与登记项撞名；
+8. **登记的模板 id 由文件名生成。** 预设 id（画廊 `default`）不是注册项，所以不会与登记项撞名；
    登记项之间撞名（小写、非字母数字转 `-`）时自动加 `-2` / `-3`，不让两份同名模板互相顶掉。
 9. **坏模板不回退。** 静默回退到内置默认会把「模板第一行写错了」显示成「画廊是空的」；Notice 必须
    指名是哪份模板、哪一个文件。

@@ -12,9 +12,9 @@
  *   ③ 真实引擎：headless Chromium（本机 Chrome）算的几何。
  *
  * 验证的是声明式设置页里能变成数字的那些：没有 h1 / hr，顶层是三个 .setting-group
- * （remote → 文件名匹配模板与模板 → 常规）；remote 设置在最上方；
- * 文件名匹配模板工具条 = 路径输入 + 登记 + 从预设创建；每条已登记 JSON 一行（name/id/path/打开/删除）；
- * metadata / 画廊模板各一张卡片、一行一个外部文件；没有内置可用行、没有内联编辑器/预览/旧动作排；
+ * （remote → 元数据预设与画廊模板 → 常规）；remote 设置在最上方；
+ * 元数据预设工具条 = 路径输入 + 登记 + 从预设创建；每条已登记 JSON 一行（name/id/path/打开/删除）；
+ * 画廊模板一张卡片、一行一个外部 .base；没有内置可用行、没有内联编辑器/预览/旧动作排；
  * 所有内容没有横向溢出。观感（配色、间距好不好看）仍要人眼在真机上看一眼。
  *
  * 依赖：本机有 Chrome / Chromium / Edge 之一（自动找）。
@@ -89,15 +89,16 @@ function seedVault() {
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, text, "utf8");
   };
-  const tec = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/two-profiles.json"), "utf8"))[0];
-  const plate = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/plate-profile.json"), "utf8"))[0];
+  const tec = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/tecnaitem-profile.json"), "utf8"));
+  const plate = JSON.parse(fs.readFileSync(path.join(REPO, "tools/example-profiles/plate-profile.json"), "utf8"));
   write("Profiles/tecnaitem.json", `${JSON.stringify(tec, null, 2)}\n`);
   write("Profiles/Other/platewell.json", `${JSON.stringify(plate, null, 2)}\n`);
-  write("Templates/meta.md", "{{frontmatter}}\n\n缩略图：{{thumbnail}}\n原图：{{tif}}\n");
+  // 正文模板由预设自己的 template 指向 vault 里的 .md（不再有独立的 metadata 模板登记表）。
+  write("AnnexGalleryTemplates/tecnaitem.md", fs.readFileSync(path.join(REPO, "tools/example-profiles/tecnaitem.md"), "utf8"));
+  write("AnnexGalleryTemplates/plate.md", fs.readFileSync(path.join(REPO, "tools/example-profiles/plate.md"), "utf8"));
   write("Templates/base.base", "views:\n  - type: cards\n    name: Layout {{folder}}\n    cardSize: {{cardSize}}\n");
   return {
     profileFiles: [{ path: "Profiles/tecnaitem.json" }, { path: "Profiles/Other/platewell.json" }],
-    metadataTemplates: [{ id: "meta", name: "meta", path: "Templates/meta.md" }],
     baseTemplates: [{ id: "base", name: "base", path: "Templates/base.base" }],
   };
 }
@@ -136,7 +137,7 @@ function renderFragment() {
   return (async () => {
     await plugin.onload();
     const tab = stub.registry.tabs[0];
-    // 两条已登记外部 profile + 各一份外部 metadata / 画廊模板。
+    // 两条已登记外部预设 + 一份外部画廊模板。
     Object.assign(plugin.settings, seeded);
     // 两行 remote：量「一个 item 装多条」时的行内布局
     plugin.settings.remotes = [
@@ -320,7 +321,7 @@ ${fragment}
   check(rep.topLevel.length === 3 && rep.groups.length === 3, `顶层 = 3 个 .setting-group：${rep.topLevel.length}`, rep.topLevel.map((t) => t.cls).join(" | "));
   check(rep.groups.every((g) => g.display !== "none" && g.box.height > 0), "三个 group 都可见");
   check(rep.groups[0].heading === null || rep.groups[0].heading === "", "第一个 group 没有 heading（remote 卡片自带标题）", String(rep.groups[0].heading));
-  check(rep.groups[1].heading === "文件名匹配模板与模板", "第二个 group 的 heading = 文件名匹配模板与模板", String(rep.groups[1].heading));
+  check(rep.groups[1].heading === "元数据预设与画廊模板", "第二个 group 的 heading = 元数据预设与画廊模板", String(rep.groups[1].heading));
   check(rep.groups[2].heading === "常规", "第三个 group 的 heading = 常规", String(rep.groups[2].heading));
   check(rep.groups[2].items.join(",") === "缩略图边长,调试日志", "常规 group 里是两个普通设置项（缩略图边长 / 调试日志）", rep.groups[2].items.join(" | "));
   check(rep.groups[0].renderRows === 1 && rep.groups[1].renderRows === 2, "三个编辑器都挂在 render 行里（remote 1 + 模板 2）", JSON.stringify(rep.groups.map((g) => g.renderRows)));
@@ -344,9 +345,9 @@ ${fragment}
   check(Math.abs(remotes.addButton.box.left - remotes.title.box.left) < 0.5, "「添加 remote」与标题左对齐");
   check(remotes.addButton.box.top > row1.box.top, "「添加 remote」在两行 remote 下面");
 
-  // ── 文件名匹配模板：外部 JSON 工具条 + 每文件一行 ─────────────────────────
+  // ── 元数据预设：外部 JSON 工具条 + 每文件一行 ──────────────────────────────
   check(rep.toolbar.length === 3, "工具条只有 3 个控件（路径输入 / 登记 / 从预设创建）", `${rep.toolbar.length} 个`);
-  check(rep.toolbar[0].tag === "INPUT" && /profile JSON 路径/.test(rep.toolbar[0].placeholder ?? ""), "第 1 格是 vault 相对路径输入框");
+  check(rep.toolbar[0].tag === "INPUT" && /预设路径/.test(rep.toolbar[0].placeholder ?? ""), "第 1 格是 vault 相对路径输入框");
   check(rep.toolbar[1].tag === "BUTTON" && rep.toolbar[1].text === "登记", "第 2 格是「登记」按钮");
   check(rep.toolbar[2].tag === "SELECT" && rep.toolbar[2].text === "从预设创建…", "第 3 格是「从预设创建…」下拉");
   check(rep.toolbar[0].box.left < rep.toolbar[1].box.left && rep.toolbar[1].box.left < rep.toolbar[2].box.left, "三个控件真的从左往右排");
@@ -374,25 +375,25 @@ ${fragment}
   check(pr1.box.top > pr0.box.top, "两行上下排列");
   check(Math.abs(pr0.box.left - contentLeft) < 0.5 && Math.abs(pr0.box.width - rep.toolbarBox.box.width) < 1, "profile 行与工具条同宽、同左边缘");
 
-  // ── metadata / 画廊模板卡片：一行一个外部文件 ──────────────────────────────
-  check(rep.templates.length === 2, "模板区有 2 张卡片");
-  check(rep.templates.map((c) => c.kind).join(",") === "metadata,base", "卡片依次 = metadata / base");
-  check(rep.templates[0].title === "metadata 模板" && rep.templates[1].title === "画廊模板", "两张卡片标题正确");
-  check(rep.templates.every((c) => c.hint !== null && c.hint.length > 10), "两张卡片都有使用说明");
+  // ── 画廊模板卡片：一行一个外部 .base ───────────────────────────────────────
+  check(rep.templates.length === 1, "模板区只有 1 张卡片（画廊模板）");
+  check(rep.templates[0].kind === "base", "卡片 data-kind = base（metadata 正文由每条预设自己的 template 指定）");
+  check(rep.templates[0].title === "画廊模板", "卡片标题正确");
+  check(rep.templates[0].hint !== null && rep.templates[0].hint.length > 10, "卡片有使用说明");
   check(rep.builtinRows === 0 && rep.viewButtons === 0 && rep.copyButtons === 0, "没有内置模板行 / 查看 / 复制为自定义", JSON.stringify({ builtin: rep.builtinRows, view: rep.viewButtons, copy: rep.copyButtons }));
-  check(rep.templates.every((c) => !c.empty && c.rows.length === 1), "两张卡片各显示 1 行已登记外部文件");
-  check(rep.templates[0].box.top < rep.templates[1].box.top, "metadata 卡片在画廊模板卡片上面");
+  check(!rep.templates[0].empty && rep.templates[0].rows.length === 1, "卡片显示 1 行已登记外部文件");
   check(Math.abs(rep.templates[0].box.left - contentLeft) < 0.5 && Math.abs(rep.templates[0].box.width - rep.toolbarBox.box.width) < 1, "模板卡片与工具条同宽、同左边缘");
-  for (const card of rep.templates) {
+  {
+    const card = rep.templates[0];
     const row = card.rows[0];
-    check(row.state === "ok" && !row.error, `${card.kind} 行成功读到（data-state=ok）`);
-    check(row.id === `id: ${card.kind === "metadata" ? "meta" : "base"}`, `${card.kind} 行显示 id`, row.id);
-    check(row.oldPath === undefined && row.path === (card.kind === "metadata" ? "Templates/meta.md" : "Templates/base.base"), `${card.kind} 行显示 vault 相对路径`, row.path);
-    check(row.open.left < row.del.left && row.del.right <= row.box.right + 0.5, `${card.kind} 行尾 = 打开 → 删除，且不溢出`);
-    check(card.add !== null && card.add.input.left < card.add.button.left && card.add.button.left < card.add.select.left, `${card.kind} 登记行从左往右 = 路径输入 → 登记 → 从预设创建`);
-    check(Math.abs(card.add.input.left - card.box.left - 16) < 1, `${card.kind} 登记行贴住卡片内容左边缘`);
-    check(card.add.wrap === "wrap", `${card.kind} 登记行允许换行（窄窗口不溢出）`);
-    check(card.add.box.bottom <= card.box.bottom + 0.5, `${card.kind} 登记行在卡片内`);
+    check(row.state === "ok" && !row.error, "画廊模板行成功读到（data-state=ok）");
+    check(row.id === "id: base", "画廊模板行显示 id", row.id);
+    check(row.path === "Templates/base.base", "画廊模板行显示 vault 相对路径", row.path);
+    check(row.open.left < row.del.left && row.del.right <= row.box.right + 0.5, "画廊模板行尾 = 打开 → 删除，且不溢出");
+    check(card.add !== null && card.add.input.left < card.add.button.left && card.add.button.left < card.add.select.left, "登记行从左往右 = 路径输入 → 登记 → 从预设创建");
+    check(Math.abs(card.add.input.left - card.box.left - 16) < 1, "登记行贴住卡片内容左边缘");
+    check(card.add.wrap === "wrap", "登记行允许换行（窄窗口不溢出）");
+    check(card.add.box.bottom <= card.box.bottom + 0.5, "登记行在卡片内");
   }
 
   check(rep.paneScrollWidth <= rep.paneClientWidth, "没有横向溢出（内容放得下）", `${rep.paneScrollWidth} > ${rep.paneClientWidth}`);

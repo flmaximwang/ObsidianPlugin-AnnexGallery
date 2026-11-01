@@ -1,4 +1,3 @@
-{{frontmatter}}
 
 !{{thumbnail}}
 

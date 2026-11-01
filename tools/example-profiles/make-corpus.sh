@@ -21,6 +21,11 @@ magick -size 512x512   xc:black      -depth 8 "$DIR/plate02_wellB1_10000x_011.pn
 magick -size 800x600   xc:red        -depth 8 "$DIR/plate02_4000x_012.png"          # 没有 well 段
 magick -size 300x900   xc:green      -depth 8 "$DIR/plate03_wellC2_2000x_013.png"
 
+# 预设的正文模板按 --vault 解析，所以把示例 .md 放进 vault 的 AnnexGalleryTemplates/。
+mkdir -p "$VAULT/AnnexGalleryTemplates"
+cp "$(dirname "$0")/plate.md" "$VAULT/AnnexGalleryTemplates/plate.md"
+cp "$(dirname "$0")/tecnaitem.md" "$VAULT/AnnexGalleryTemplates/tecnaitem.md"
+
 # 把一个 git 仓库放进 /tmp vault，让 sidecar 的 dirty-file 守卫走真实分支
 git -C "$VAULT" init -q -b main
 

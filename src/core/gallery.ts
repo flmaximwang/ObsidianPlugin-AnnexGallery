@@ -128,13 +128,13 @@ export function planGallery(dir: string): GalleryPlan {
 }
 
 /**
- * 键排序：按 profile 的 keyOrder 依次归位（先出现的 profile 优先），keyOrder 里都没有的键
- * 按首次出现顺序排在最后。
+ * 键排序：按各元数据预设的 frontmatter 字典键序依次归位（先出现的预设优先），
+ * 哪份预设里都没有的键按首次出现顺序排在最后。
  */
-export function orderProperties(keys: string[], keyOrders: string[][]): string[] {
+export function orderProperties(keys: string[], keyLists: string[][]): string[] {
   const found = new Set(keys);
   const out: string[] = [];
-  for (const order of keyOrders) {
+  for (const order of keyLists) {
     for (const key of order) {
       if (found.has(key) && !out.includes(key)) out.push(key);
     }

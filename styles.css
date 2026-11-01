@@ -3,7 +3,7 @@
  * 一起被复制进 <vault>/.obsidian/plugins/annex-gallery/。
  *
  * 布局口径：Obsidian 1.13+ 的声明式设置页（getSettingDefinitions）生成
- * remote 设置 → 文件名匹配模板与模板 → 常规（缩略图边长 / 调试日志）。
+ * remote 设置 → 元数据预设与画廊模板 → 常规（缩略图边长 / 调试日志）。
  * 页面没有标题 h1，也没有 hr 分割线：区块之间由 group 的 heading 分开。
  */
 
@@ -111,7 +111,7 @@
   cursor: pointer;
 }
 
-/* ── 模板区（metadata 模板 / 画廊模板）：与 remote 设置同一套卡片口径 ───────── */
+/* ── 模板区（画廊 .base 模板）：与 remote 设置同一套卡片口径 ─────────────── */
 
 .annex-templates-section {
   display: flex;
@@ -212,7 +212,7 @@
   cursor: pointer;
 }
 
-/* ── 文件名匹配模板区（外部 JSON 文件） ─────────────────────────────────── */
+/* ── 元数据预设区（外部 JSON 文件） ──────────────────────────────────────── */
 
 .annex-profiles-section {
   margin: 0 0 1em 0;
@@ -324,6 +324,14 @@
 .annex-profile-error {
   flex-basis: 100%;
   color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+/* warn 级问题（占位符没来源、name 为空…）：单独一行提示，不把整行标红、不阻塞这一行。 */
+.annex-profile-warn {
+  flex-basis: 100%;
+  color: var(--text-warning);
   font-size: var(--font-ui-smaller);
   overflow-wrap: anywhere;
 }

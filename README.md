@@ -4,7 +4,7 @@ Turn git-annex-managed image folders into a gallery. Annex Gallery lays a folder
 
 A card gets its cover from a thumbnail: the plugin generates thumbnails and sidecar Markdown metadata for images (`.tif` `.tiff` `.png` `.jpg` `.jpeg` `.bmp` `.webp`). For other formats, supply a same-name thumbnail and point the sidecar's `thumbnail` field at it.
 
-The vault remains an ordinary git + git-annex repository. Use the file explorer context menu to run Add / Get / Drop / Lock / Unlock on annex largefiles, and watch the status bar for uncommitted, untracked and annex-missing files. Metadata is extracted from file names through configurable profiles.
+The vault remains an ordinary git + git-annex repository. Use the file explorer context menu to run Add / Get / Drop / Lock / Unlock on annex largefiles, and watch the status bar for uncommitted, untracked and annex-missing files. Metadata is extracted from file names through configurable metadata presets.
 
 ## Installation
 
@@ -27,9 +27,9 @@ Obsidian's vault API does not expose a git + git-annex repository, and thumbnail
 
 - **Repository state.** It reads and merges the vault repository's own `.gitattributes` / `.gitignore`, and runs annex actions through the local `git` and `git-annex` binaries. Every command is anchored with `git -C <vault folder>`.
 - **Thumbnails and sidecars.** It walks the gallery folder you invoked and writes `<stem>.thumbnail.png` and `<stem>.md` beside the source image.
-- **Registered templates.** It reads the profile, metadata and gallery template files you registered; their paths are validated as vault-relative, and absolute paths or `..` are rejected.
+- **Registered files.** It reads the metadata preset, body-template and gallery-template files you registered; their paths are validated as vault-relative, and absolute paths or `..` are rejected.
 
-External programs invoked: `git`, `git-annex` (through `git annex`), and ImageMagick 7 (`magick`, for thumbnails and image dimensions). Commands are passed as argument arrays and never through a shell. No files outside the vault are read or written, apart from the system git configuration and the SSH/GPG credentials that `git` / `git-annex` use for the remotes you configure, plus existence checks for the `magick` binary in Homebrew's standard locations. The bundled CLI (`scripts/cli.ts`, built to `tools/annex-gallery.mjs`) reads and writes only the directories and template files you pass on its command line.
+External programs invoked: `git`, `git-annex` (through `git annex`), and ImageMagick 7 (`magick`, for thumbnails and image dimensions). Commands are passed as argument arrays and never through a shell. No files outside the vault are read or written, apart from the system git configuration and the SSH/GPG credentials that `git` / `git-annex` use for the remotes you configure, plus existence checks for the `magick` binary in Homebrew's standard locations. The bundled CLI (`scripts/cli.ts`, built to `tools/annex-gallery.mjs`) reads and writes only the directories and preset / template files you pass on its command line.
 
 ## License
 
@@ -47,7 +47,7 @@ MIT — see [LICENSE](LICENSE).
 把 sidecar 的 `thumbnail` 指向它，它就和图片一样出现在墙上。
 
 墙底下仍然是那个 git + git-annex 仓库：右键对 annex 的大文件做 Add / Get / Drop / Lock / Unlock，
-状态栏常驻显示未提交、未跟踪、未入库的数目，元数据由 profile 从文件名里抽（任意命名约定都只改配置）。
+状态栏常驻显示未提交、未跟踪、未入库的数目，元数据由元数据预设从文件名里抽（任意命名约定都只改配置）。
 数据层一个字都不新造 —— 你在终端里 `git annex` 能做的事，装上插件之后照样能做。
 
 ## 安装
@@ -68,19 +68,22 @@ git + git-annex 仓库（已经是仓库的不会重建，只补缺的步骤）�
 | 文件管理器右键 · **Annex Gallery** | 9 个动作：生成元数据 / 生成缩略图 / 创建画廊 / Add / Unlock & unannex / Lock / Unlock / Get / Drop | [`docs/context-menu.md`](docs/context-menu.md) |
 | 文件管理器右键 · **Annex Gallery → 创建画廊** | 生成 `<文件夹>/<文件夹名>.base`（vault 根 → `<vault name>.base`），成员 = 带 `annex-gallery-metadata` 标签的 sidecar，作用域递归、模板可换 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏（右下角） | **未提交 · 未跟踪 · 未入库 largefiles** 三个数，30 秒刷新、点一下立即刷新 | [`docs/status-bar.md`](docs/status-bar.md) |
-| 设置页 | 登记外部文件：文件名匹配模板（每条一个 `.json`）、metadata 模板（`.md`）、画廊模板（`.base`）；再是缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
+| 设置页 | 登记外部文件：元数据预设（每条一个 `.json`）、画廊模板（`.base`）；再是缩略图边长、remote 列表 | [`docs/setting-panel.md`](docs/setting-panel.md) |
 
 ### 配置从哪来
 
 插件的运行时**只认 vault 里的文件**，没有内置兜底：
 
-- **文件名匹配模板**：一条一个 `.json`（顶层是一条 `ParseProfile` 对象），在设置页登记 vault 相对路径；
-- **metadata 模板 / 画廊模板**：vault 里的 `.md` / `.base`，同样在设置页登记；
-- 设置页的「从预设创建…」会把内置预设写成一份独立文件（`AnnexGalleryTemplates/<id>.<ext>`，文件夹名无空格），
+- **元数据预设**：一条一个 `.json`（顶层是一条 `ParseProfile` 对象：正则 + frontmatter 字典 + 可选的正文模板），
+  在设置页登记 vault 相对路径；
+- **画廊模板**：vault 里的 `.base`，同样在设置页登记；
+- 设置页的「从预设创建…」会把内置素材写成独立文件（`AnnexGalleryTemplates/<id>.<ext>`，文件夹名无空格）——
+  元数据预设一次写出**预设 JSON + 正文 `.md`** 两份，正文路径写进预设的 `template` 字段；
   同名再加序号，不覆盖、不自动打开；「打开」交给系统默认应用编辑；「删除」只取消登记、文件留着。
 
 改完文件直接生效 —— 每次生成都重新读外部文件；文件坏了会在写盘前停下并指名是哪一个。
-旧版本内联在 `data.json` 里的 profile 只显示一条失效提示，不读取、不迁移。
+旧版本内联在 `data.json` 里的 profile、旧格式的预设文件、旧的 metadata 模板登记表都只显示一条失效提示，
+不读取、不迁移；重建办法见 [`docs/metadata.md`](docs/metadata.md)。
 
 ## 开发入门
 
@@ -103,9 +106,9 @@ npm run layout     # 设置页布局（真实 app.css + headless Chromium）
 ```
 main.ts            插件入口：命令、状态栏、9 个右键菜单项、设置页接线
 src/core/          核心逻辑（不依赖 Obsidian，插件与 CLI 共用）
-                   init · rules · thumbnails · sidecar · gallery · templates · external-files · profile-files · stems · annex · git · status · remotes
-src/ui/            设置页、文件名匹配模板编辑器、模板编辑器、remotes 编辑器
-src/defaults/      内置规则文件与预设素材（.gitattributes / .gitignore / metadata / base）
+                   init · rules · thumbnails · sidecar · gallery · templates · external-files · profile-files · profiles · placeholders · presets · stems · annex · git · status · remotes
+src/ui/            设置页、元数据预设编辑器、画廊模板编辑器、remotes 编辑器
+src/defaults/      内置规则文件与预设素材（.gitattributes / .gitignore / presets / base）
 tools/             判据（桩层 / 真仓库层 / 真机层）、示例语料
 scripts/           CLI 源码（构建产物仍是 tools/annex-gallery.mjs）
 tests/             数据安全测试（npm test）
@@ -128,7 +131,7 @@ docs/              设计与口径文档（见下）
 | 画廊（`.base`）的成员、作用域与模板 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏的三个数 | [`docs/status-bar.md`](docs/status-bar.md) |
 | 设置页的布局与字段 | [`docs/setting-panel.md`](docs/setting-panel.md) |
-| 文件名解析 / sidecar 字段 | [`docs/metadata.md`](docs/metadata.md) |
+| 文件名解析 / sidecar 字段 / 元数据预设 | [`docs/metadata.md`](docs/metadata.md) |
 | 加一条判据或改工具 | [`docs/tools/`](docs/tools/README.md) |
 | 为什么要这么设计 | [`docs/design.md`](docs/design.md) |
 
@@ -139,10 +142,10 @@ docs/              设计与口径文档（见下）
 | [`docs/design.md`](docs/design.md) | 设计原则、三条全局约定、文档里的占位符 |
 | [`docs/commands.md`](docs/commands.md) | 「初始化 gallery」的职责边界、7 步、幂等契约、规则文件合并 |
 | [`docs/context-menu.md`](docs/context-menu.md) | 右键菜单的形状原则、9 项语义、平台 API 边界与坑 |
-| [`docs/gallery.md`](docs/gallery.md) | 画廊的成员资格（标签）、作用域、输出路径、`.base` / metadata 模板与命令行 |
+| [`docs/gallery.md`](docs/gallery.md) | 画廊的成员资格（标签）、作用域、输出路径、`.base` 模板与命令行 |
 | [`docs/status-bar.md`](docs/status-bar.md) | 三个计数的口径、刷新与交互不变量、视觉不变量 |
 | [`docs/setting-panel.md`](docs/setting-panel.md) | 设置页的定位、不变量、结构落点、字段与默认值 |
-| [`docs/metadata.md`](docs/metadata.md) | profile 的 schema、五类值、`keyOrder`、三条硬规则 |
+| [`docs/metadata.md`](docs/metadata.md) | 元数据预设的 schema、变量来源、frontmatter 渲染规则、校验与迁移 |
 | [`docs/tools/`](docs/tools/README.md) | 判据的设计原则与三层工具（桩 / 真仓库 / 真机） |
 | [`docs/publish-checklist.md`](docs/publish-checklist.md) | 提交到 Obsidian 社区目录的硬要求与判据 |
 

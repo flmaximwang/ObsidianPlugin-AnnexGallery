@@ -28,16 +28,9 @@ import {
 } from "./src/core/annex";
 import { initGallery } from "./src/core/init";
 import { SidecarPlan, SidecarReport, generateSidecars, planSidecarTargets } from "./src/core/sidecar";
-import { checkMetadataTemplate } from "./src/core/templates";
 import { ThumbnailReport, generateThumbnails } from "./src/core/thumbnails";
 import { addGalleryTag, buildGalleryBase, galleryFilePath, orderProperties, planGallery, type GalleryPlan } from "./src/core/gallery";
-import {
-  listTemplates,
-  resolveTemplate,
-  type ResolvedTemplate,
-  type TemplateListEntry,
-  type TemplateRef,
-} from "./src/core/templates";
+import { listTemplates, resolveTemplate, type TemplateListEntry, type TemplateRef } from "./src/core/templates";
 import { findLoadedProfile, loadProfileFiles, profileFileRefs, type LoadedProfile } from "./src/core/profile-files";
 import { progressPrefix } from "./src/core/types";
 import {
@@ -62,13 +55,15 @@ import {
   PluginSettings,
   SettingsHost,
   detectLegacyInlineProfiles,
+  detectLegacyMetadataTemplates,
   readAsk,
   writeAsk,
   type LegacyInlineProfilesInfo,
+  type LegacyMetadataTemplatesInfo,
 } from "./src/ui/settings";
 
-/** 弹窗提交时用的外部 profile（带其 vault 路径）、其 ask 键 → 值、以及选中的 metadata 模板 id。 */
-type PromptSubmit = (profile: LoadedProfile, values: Record<string, string>, templateId: string) => void;
+/** 弹窗提交时用的外部元数据预设（带其 vault 路径）与它的 ask 键 → 值。 */
+type PromptSubmit = (profile: LoadedProfile, values: Record<string, string>) => void;
 
 /**
  * 「创建画廊」的标题跟 Obsidian 界面语言走（用户 2026-10-31 口径：只有这一项本地化）。
@@ -200,15 +195,12 @@ function promptContext(relpath: string, subject: string): ParseContext {
   return { stem: filename, filename, relpath: relpath === "" ? filename : relpath, folderName };
 }
 
-/** 弹窗要问的：选 profile（默认 pickProfile 命中或记住的那条）+ 该 profile 的 ask 字段。 */
+/** 弹窗要问的：选元数据预设（默认 pickProfile 命中或记住的那条）+ 该预设的 ask 字段。 */
 class SamplePromptModal extends Modal {
   private readonly profiles: LoadedProfile[];
-  private readonly metadataTemplates: TemplateListEntry[];
   private selectedProfile: LoadedProfile;
   private values: Record<string, string> = {};
   private askContainer!: HTMLElement;
-  private templateId: string;
-  private templateDropdown: { setValue(value: string): unknown } | null = null;
 
   constructor(
     app: App,
@@ -221,37 +213,10 @@ class SamplePromptModal extends Modal {
   ) {
     super(app);
     if (profiles.length === 0) {
-      throw new Error("还没有可用的文件名匹配模板（profile）：请到设置页登记外部 .json，或从预设创建。");
+      throw new Error("还没有可用的元数据预设：请到设置页「元数据预设」登记外部 .json，或从预设创建。");
     }
     this.profiles = profiles;
-    // 运行时只列已登记的外部模板；旧内置 default/embed 不是可用条目。
-    this.metadataTemplates = listTemplates("metadata", host.settings.metadataTemplates);
     this.selectedProfile = this.pickDefault();
-    this.templateId = this.initialTemplateId(this.selectedProfile);
-  }
-
-  private templateExists(id: string | undefined): boolean {
-    return id !== undefined && this.metadataTemplates.some((entry) => entry.id === id);
-  }
-
-  /** profile 声明的模板：已登记 ⇒ 用它；没声明 ⇒ 第一条已登记；声明了却没登记 ⇒ 报错（不回退内置）。 */
-  private profileTemplate(profile: LoadedProfile): string {
-    if (this.metadataTemplates.length === 0) {
-      throw new Error("还没有登记 metadata 模板：请到设置页「模板」登记 .md，或从预设创建外部文件。");
-    }
-    const declared = profile.profile.metadataTemplate;
-    if (declared === undefined) return this.metadataTemplates[0].id;
-    if (this.templateExists(declared)) return declared;
-    throw new Error(
-      `profile「${profile.profile.id}」（${profile.path}）声明的 metadata 模板「${declared}」没有登记：旧内置 default/embed 不再可用，请到设置页「模板」登记或从预设创建外部 .md 文件。`,
-    );
-  }
-
-  /** 弹窗打开时的默认：按文件夹记住的有效 id > profile 声明 > 第一条已登记。 */
-  private initialTemplateId(profile: LoadedProfile): string {
-    const remembered = this.host.settings.folderMetadataTemplates[this.dir];
-    if (remembered !== undefined && this.templateExists(remembered)) return remembered;
-    return this.profileTemplate(profile);
   }
 
   /** 记住的 → pickProfile 命中 → 第一条已加载（外部 id；都无效时用第一条）。 */
@@ -271,34 +236,27 @@ class SamplePromptModal extends Modal {
         if (found !== undefined) return found;
       }
     } catch {
-      // pickProfile 是并行块 B-002 的桩（还在抛错）：回退到第一条。
+      // pickProfile 的正则可能编译失败（设置页已提示）：回退到第一条。
     }
     return this.profiles[0];
   }
 
-  /** 换 profile ⇒ 模板跟着换成它声明的（或第一条已登记）；旧内置引用给可见错误。 */
+  /** 换预设 ⇒ 要问的字段跟着换。 */
   private selectProfile(profile: LoadedProfile): void {
     this.selectedProfile = profile;
-    try {
-      this.templateId = this.profileTemplate(profile);
-    } catch (error) {
-      // 保留当前这份有效选择；用户仍可从下拉里手动挑一份已登记模板。
-      new Notice(error instanceof Error ? error.message : String(error), 10000);
-    }
-    this.templateDropdown?.setValue(this.templateId);
     this.renderAskFields();
   }
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    titleEl.setText("生成 metadata — 选配置 + 填字段");
+    titleEl.setText("生成元数据 — 选预设 + 填字段");
     contentEl.createEl("p", {
-      text: `为 ${this.subject} 里每张图生成一份 sidecar .md；先选解析配置（profile），再填需要现场获得的字段（按文件夹记住，下次自动填上）。`,
+      text: `为 ${this.subject} 里每张图生成一份 sidecar .md；先选元数据预设，再填需要现场获得的字段（按文件夹记住，下次自动填上）。`,
     });
 
     new Setting(contentEl)
-      .setName("解析配置（profile）")
-      .setDesc("默认按 match 自动预选，选不出来时列出全部；显示 name 并带上 id。")
+      .setName("元数据预设")
+      .setDesc("默认按 match 自动预选，选不出来时列出全部；显示 name 并带上 id。正文模板由预设自己的 template 字段指定。")
       .addDropdown((dropdown) => {
         for (const entry of this.profiles) {
           dropdown.addOption(entry.profile.id, `${entry.profile.name}（${entry.profile.id}）`);
@@ -308,20 +266,6 @@ class SamplePromptModal extends Modal {
           const found = this.profiles.find((entry) => entry.profile.id === value);
           if (found !== undefined) this.selectProfile(found);
         });
-      });
-
-    new Setting(contentEl)
-      .setName("metadata 模板")
-      .setDesc("sidecar .md 的整份文本；默认取 profile 的 metadataTemplate，按文件夹记住。")
-      .addDropdown((dropdown) => {
-        for (const entry of this.metadataTemplates) {
-          dropdown.addOption(entry.id, `${entry.name}（${entry.id}）`);
-        }
-        dropdown.setValue(this.templateId);
-        dropdown.onChange((value) => {
-          this.templateId = value;
-        });
-        this.templateDropdown = dropdown;
       });
 
     this.askContainer = contentEl.createDiv({ cls: "annex-ask-fields" });
@@ -368,7 +312,6 @@ class SamplePromptModal extends Modal {
       }
     }
     this.host.settings.folderProfiles[this.dir] = selected.id;
-    this.host.settings.folderMetadataTemplates[this.dir] = this.templateId;
     for (const key of ask) {
       writeAsk(this.host.settings, this.dir, key, (this.values[key] ?? "").trim());
     }
@@ -376,7 +319,7 @@ class SamplePromptModal extends Modal {
     const values: Record<string, string> = {};
     for (const key of ask) values[key] = (this.values[key] ?? "").trim();
     this.close();
-    this.onSubmit(this.selectedProfile, values, this.templateId);
+    this.onSubmit(this.selectedProfile, values);
   }
 
   onClose(): void {
@@ -410,7 +353,7 @@ class OverwritePromptModal extends Modal {
       }。`,
     });
     contentEl.createEl("p", {
-      text: "覆盖重算：按当前 profile 重写这 " + String(this.plan.existing) + " 份 —— 改动模版后重新计算元数据就用它（被改过的那几份也会被覆盖）。",
+      text: "覆盖重算：按当前预设重写这 " + String(this.plan.existing) + " 份 —— 改动预设后重新计算元数据就用它（被改过的那几份也会被覆盖）。",
     });
     contentEl.createEl("p", { text: "只补缺失：已存在的一律不动，只为还没有 sidecar 的图新建。" });
 
@@ -498,6 +441,12 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    * 在 `loadSettings()` 里由原始 `loadData()` 结果填充。
    */
   legacyInlineProfiles: LegacyInlineProfilesInfo = { present: false, count: 0 };
+
+  /**
+   * 旧 data.json 的 `metadataTemplates`（metadata 模板登记表）的检测结果。
+   * 同样只用于设置页显示非阻塞提示；旧键原样留在 data.json 里（不迁移、不删除）。
+   */
+  legacyMetadataTemplates: LegacyMetadataTemplatesInfo = { present: false, count: 0 };
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -683,16 +632,17 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   // ── settings plumbing ────────────────────────────────────────────────────
 
   async loadSettings(): Promise<void> {
-    // 原始 data.json（未经合并）：旧内联 `profiles` 的检测只看它本身。
+    // 原始 data.json（未经合并）：旧内联 `profiles` 与旧 `metadataTemplates` 的检测只看它本身。
     const rawData: unknown = await this.loadData();
     this.legacyInlineProfiles = detectLegacyInlineProfiles(rawData);
+    this.legacyMetadataTemplates = detectLegacyMetadataTemplates(rawData);
     const stored: Record<string, unknown> =
       rawData !== null && typeof rawData === "object" && !Array.isArray(rawData)
         ? (rawData as Record<string, unknown>)
         : {};
     // 顺序不变：用户已有的 data.json 优先，缺失的键才用 DEFAULT_SETTINGS，绝不冲掉现有配置。
-    // 注意：旧的内联 `profiles` 会原样留在 data.json 里（不迁移、不删除），但运行时**只读**
-    // `profileFiles` 指向的外部 JSON —— 旧值永远不会被当成配置来源。
+    // 注意：旧的内联 `profiles`、旧的 `metadataTemplates` 会原样留在 data.json 里（不迁移、不删除），
+    // 但运行时**只读** `profileFiles` 指向的外部 JSON —— 旧值永远不会被当成配置来源。
     this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
     // 已废弃的键：.gitattributes / .gitignore 路径与「默认样品名」都不再是设置项
     // （spec: 用默认即可、没有所谓默认样品名）。留在 data.json 里只会误导人，删掉。
@@ -700,7 +650,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     delete legacy.gitattributesPath;
     delete legacy.gitignorePath;
     delete legacy.defaultSample;
-    // 文件名匹配模板：只保留 vault 相对路径；真正的路径/存在性/内容校验发生在每次操作前的
+    // 元数据预设：只保留 vault 相对路径；真正的路径/存在性/内容校验发生在每次操作前的
     // `loadProfileFiles`（那时出错才可见）。
     this.settings.profileFiles = profileFileRefs(this.settings.profileFiles);
     if (this.settings.folderProfiles === null || typeof this.settings.folderProfiles !== "object") {
@@ -709,7 +659,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     if (this.settings.folderSamples === null || typeof this.settings.folderSamples !== "object") {
       this.settings.folderSamples = {};
     }
-    // 模板登记与按文件夹的选择：旧 data.json 没这些键 ⇒ 空。
+    // 画廊模板登记与按文件夹的选择：旧 data.json 没这些键 ⇒ 空。
     // 值是 unknown：只接受 string/number/boolean，其它（对象、数组…）一律当空串 ——
     // String(obj) 会变成 "[object Object]"，混进设置里只会更难排查。
     const asText = (value: unknown): string =>
@@ -729,11 +679,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
             }))
             .filter((entry) => entry.id !== "" && entry.path !== "")
         : [];
-    this.settings.metadataTemplates = refs(this.settings.metadataTemplates);
     this.settings.baseTemplates = refs(this.settings.baseTemplates);
-    for (const key of ["folderMetadataTemplates", "folderBaseTemplates"] as const) {
-      const value = this.settings[key] as unknown;
-      if (value === null || typeof value !== "object" || Array.isArray(value)) this.settings[key] = {};
+    const folderBaseTemplates = this.settings.folderBaseTemplates as unknown;
+    if (folderBaseTemplates === null || typeof folderBaseTemplates !== "object" || Array.isArray(folderBaseTemplates)) {
+      this.settings.folderBaseTemplates = {};
     }
     // remotes：必须是 { name, url } 数组；旧 data.json 没这个键 ⇒ 空数组。
     if (!Array.isArray(this.settings.remotes)) {
@@ -748,11 +697,9 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     // 上一轮的残留记忆（甚至把「模板没登记」的错误掩盖掉）。这里统一换成各自的副本。
     this.settings.folderProfiles = { ...this.settings.folderProfiles };
     this.settings.folderSamples = { ...this.settings.folderSamples };
-    this.settings.folderMetadataTemplates = { ...this.settings.folderMetadataTemplates };
     this.settings.folderBaseTemplates = { ...this.settings.folderBaseTemplates };
     this.settings.remotes = [...this.settings.remotes];
     this.settings.profileFiles = [...this.settings.profileFiles];
-    this.settings.metadataTemplates = [...this.settings.metadataTemplates];
     this.settings.baseTemplates = [...this.settings.baseTemplates];
   }
 
@@ -1002,9 +949,9 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   // ── 入口 3：生成元数据（sidecar .md；可重跑，会问是否覆盖）────────────────
 
   /**
-   * 每次生成操作开始时重新读全部外部 profile JSON。
+   * 每次生成操作开始时重新读全部外部元数据预设 JSON。
    *
-   * 运行时**唯一**的 profile 来源是设置里登记的外部 `.json`（每份一个顶层 `ParseProfile` 对象）：
+   * 运行时**唯一**的预设来源是设置里登记的外部 `.json`（每份一个顶层 `ParseProfile` 对象）：
    * 旧内联 `profiles`、内置预设都不参与。任一份文件坏了 / id 重复 ⇒ 抛错（带路径）；
    * 一份都没登记 ⇒ 同样报错并引导去设置页 —— 不静默回退到任何内置内容。
    */
@@ -1012,7 +959,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const loaded = loadProfileFiles(this.vaultRoot(), profileFileRefs(this.settings.profileFiles));
     if (loaded.length === 0) {
       throw new Error(
-        "还没有登记任何文件名匹配模板（profile）：请到设置页「文件名匹配模板」登记外部 .json，或从预设创建。",
+        "还没有登记任何元数据预设：请到设置页「元数据预设」登记外部 .json，或从预设创建。",
       );
     }
     return loaded;
@@ -1031,8 +978,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       return;
     }
     try {
-      new SamplePromptModal(this.app, folder.path, this, dir, relpath, loaded, (profile, values, templateId) => {
-        void this.generateSidecarsWithPrompt(folder, dir, loaded, profile, values, templateId);
+      new SamplePromptModal(this.app, folder.path, this, dir, relpath, loaded, (profile, values) => {
+        void this.generateSidecarsWithPrompt(folder, dir, loaded, profile, values);
       }).open();
     } catch (error) {
       new Notice(`生成元数据失败：${error instanceof Error ? error.message : String(error)}`, 10000);
@@ -1041,8 +988,11 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   }
 
   /**
-   * 「生成元数据」可以重跑（用户 2026-10-17 口径）：改动模版（profile）后要重算，所以先**只读**数一下
+   * 「生成元数据」可以重跑（用户 2026-10-17 口径）：改动预设后要重算，所以先**只读**数一下
    * 已存在的 sidecar（`planSidecarTargets`，不写盘），有的话问一句「覆盖重算 / 只补缺失 / 取消」。
+   *
+   * 正文模板不再单独解析：由 core 的 `generateSidecars` 按 `profile.template` 读 vault 里的 `.md`，
+   * 坏模板在任何写盘之前就抛出（这里 catch 住并提示）。
    */
   private async generateSidecarsWithPrompt(
     folder: TFolder,
@@ -1050,18 +1000,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     loaded: LoadedProfile[],
     selected: LoadedProfile,
     values: Record<string, string>,
-    templateId: string,
   ): Promise<void> {
-    // 坏模板（文件没了 / 第一行不是 {{frontmatter}}）在任何写盘之前就停下，不静默回退。
-    let template: ResolvedTemplate;
-    try {
-      template = resolveTemplate("metadata", templateId, this.settings.metadataTemplates, this.vaultRoot());
-      checkMetadataTemplate(template);
-    } catch (error) {
-      new Notice(`生成元数据失败：${error instanceof Error ? error.message : String(error)}`, 10000);
-      console.error(error);
-      return;
-    }
     let plan: SidecarPlan;
     try {
       plan = planSidecarTargets(dir, this.gitTopOf(dir));
@@ -1070,11 +1009,11 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       plan = { images: 0, existing: 0, dirty: 0 };
     }
     if (plan.existing === 0) {
-      await this.executeSidecars(folder, dir, loaded, selected, values, template, false);
+      await this.executeSidecars(folder, dir, loaded, selected, values, false);
       return;
     }
     new OverwritePromptModal(this.app, folder.path, plan, (overwrite) => {
-      void this.executeSidecars(folder, dir, loaded, selected, values, template, overwrite);
+      void this.executeSidecars(folder, dir, loaded, selected, values, overwrite);
     }).open();
   }
 
@@ -1084,26 +1023,22 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     loaded: LoadedProfile[],
     selected: LoadedProfile,
     values: Record<string, string>,
-    template: ResolvedTemplate,
     overwrite: boolean,
   ): Promise<void> {
-    // profile 选择与 ask 值已由弹窗写进 folderProfiles / folderSamples 并落盘。
+    // 预设选择与 ask 值已由弹窗写进 folderProfiles / folderSamples 并落盘。
     const profile = selected.profile;
     const ask = askKeysFor(profile);
-    const sample = (values["sample"] ?? values[ask[0]] ?? "").trim();
     const summary = ask.map((key) => `${key}=${values[key] ?? ""}`).join(" · ");
     const progress = new Notice(`生成元数据：${folder.path}（${profile.name}｜${summary}${overwrite ? "｜覆盖重算" : ""}）`, 0);
     try {
       const report: SidecarReport = await generateSidecars(dir, {
         vaultRoot: this.vaultRoot(),
         repoRoot: this.gitTopOf(dir),
-        sample,
-        // 弹窗里选的 profile / 填的 ask / 选的模板都要传下去（之前漏传，弹窗的 profile 选择不生效）。
+        // 弹窗里选的预设 / 填的 ask 都要传下去（之前漏传，弹窗的预设选择不生效）。
         profile,
-        // 候选 profile = 本次操作开始时读到的全部外部 profile（不再有内置兜底）。
+        // 候选预设 = 本次操作开始时读到的全部外部预设（不再有内置兜底）。
         profiles: loaded.map((entry) => entry.profile),
         ask: values,
-        template,
         apply: true,
         overwrite,
         progress: (message) => this.logProgress(message),
@@ -1114,10 +1049,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         `目录：${report.dir}`,
         `新建 ${count("created")} 份 · 覆盖 ${count("overwritten")} 份 · 跳过（已存在）${count("skipped-existing")} · 跳过（被改过）${count("skipped-dirty")} · 失败 ${count("failed")}`,
       ];
-      lines.push(`模板：${template.label}`);
-      if (overwrite) lines.push("模式：覆盖重算（已存在的 sidecar 全部按当前 profile 重写）");
+      lines.push(`预设：${selected.path}`);
+      if (overwrite) lines.push("模式：覆盖重算（已存在的 sidecar 全部按当前预设重写）");
       const templateNotes = report.entries.filter((entry) => (entry.detail ?? "").includes("模板里的"));
-      if (templateNotes.length > 0) lines.push(`${templateNotes.length} 份里有模板占位符取不到值（已留空，详见控制台）`);
+      if (templateNotes.length > 0) lines.push(`${templateNotes.length} 份里有正文占位符取不到值（已留空，详见控制台）`);
       const collisions = Object.entries(report.duplicateStems);
       if (collisions.length > 0) lines.push(`重名 stem ${collisions.length} 个 —— 链接已按全 vault 路径写入`);
       const failed = report.entries.filter((entry) => entry.action === "failed");
@@ -1136,7 +1071,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    * 选模板（多于一份才问，按文件夹记住）→ 填模板（坏模板在这里就停）→ 只读盘点 →
    * 有旧 sidecar 没标签就问「补标签 / 跳过 / 取消」→ 目标已存在就问「覆盖 / 打开已有 / 取消」→ 写 → 打开。
    *
-   * 外部 profile 在这一步的最前面就读好（画廊的属性顺序按各 profile 的 keyOrder 排）；
+   * 外部元数据预设在这一步的最前面就读好（画廊的属性顺序按各预设的 frontmatter 键排）；
    * 读坏了 / 一份都没登记 ⇒ 在写 .base 之前就停。
    */
   private async runGallery(folder: TFolder): Promise<void> {
@@ -1154,7 +1089,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const options = listTemplates("base", this.settings.baseTemplates);
     if (options.length === 0) {
       new Notice(
-        `${title}失败：还没有登记任何画廊模板（.base）。请到设置页「模板」登记外部文件，或从预设创建。`,
+        `${title}失败：还没有登记任何画廊模板（.base）。请到设置页「画廊模板」登记外部文件，或从预设创建。`,
         10000,
       );
       return;
@@ -1191,7 +1126,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       plan = planGallery(dir);
       const properties = orderProperties(
         plan.keys,
-        loaded.map((entry) => entry.profile.keyOrder),
+        loaded.map((entry) => Object.keys(entry.profile.frontmatter ?? {})),
       );
       built = buildGalleryBase(template, { folder: relFolder, cardSize: this.settings.thumbnailEdge, properties });
     } catch (error) {

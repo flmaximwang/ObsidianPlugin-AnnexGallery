@@ -16,7 +16,7 @@ const production = process.argv[2] === "production";
 const defaultsTextLoader = {
   name: "defaults-text",
   setup(build) {
-    build.onLoad({ filter: /\/defaults\/(gitattributes|gitignore|metadata\/[^/]+\.md|base\/[^/]+\.base)$/ }, async (args) => ({
+    build.onLoad({ filter: /\/defaults\/(gitattributes|gitignore|presets\/[^/]+\.md|base\/[^/]+\.base)$/ }, async (args) => ({
       contents: await fs.promises.readFile(args.path, "utf8"),
       loader: "text",
     }));

@@ -25,7 +25,8 @@ const os = require("os");
 const path = require("path");
 
 const repo = path.resolve(__dirname, "..");
-const cli = path.join(repo, "tools", "annex-gallery.mjs");
+// 构建产物平时在 tools/annex-gallery.mjs；用 ANNEX_CLI 指向临时构建来冒烟测试（与 smoke-test 的 ANNEX_SMOKE_MAIN 同口径）。
+const cli = process.env.ANNEX_CLI ?? path.join(repo, "tools", "annex-gallery.mjs");
 const MARKER = "<!-- OLD-MARKER 这是手写的内容 -->\n";
 
 let pass = 0;
@@ -88,7 +89,32 @@ async function main() {
     git(["add", "-A"], vault);
     git(["-c", "user.email=v@local", "-c", "user.name=v", "commit", "-qm", "init"], vault);
 
-    const args = (extra) => ["sidecar", vault, "--vault", vault, "--sample", "verify", ...extra, "--json"];
+    // CLI 没有任何内置预设：先把本次要用的预设写到 vault 外（--preset 按 CWD 解析）。
+    const preset = path.join(os.tmpdir(), `sidecar-overwrite-preset-${process.pid}.json`);
+    fs.writeFileSync(
+      preset,
+      `${JSON.stringify(
+        {
+          id: "verify",
+          name: "验证用（a/b）",
+          source: "stem",
+          regex: "^(?<stem>[a-z])$",
+          ask: ["sample"],
+          onMismatch: "empty",
+          frontmatter: {
+            tags: ["annex-gallery-metadata"],
+            sample: "{{sample}}",
+            stem: "{{stem}}",
+            thumbnail: "{{thumbnail}}",
+            tif: "{{tif}}",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const args = (extra) => ["sidecar", vault, "--vault", vault, "--preset", preset, "--sample", "verify", ...extra, "--json"];
     console.log(`临时 vault ${vault}`);
 
     // ── 1. --plan：只读 ──────────────────────────────────────────────────
@@ -146,6 +172,8 @@ async function main() {
     // 外部文件模型（spec-774d7ee）：设置里只登记路径，profile / metadata 模板都来自 vault 里的文件。
     fs.mkdirSync(path.join(vault, "Profiles"), { recursive: true });
     fs.mkdirSync(path.join(vault, "Templates"), { recursive: true });
+    // 正文模板由**预设自己的 template** 指定（不再有独立的 metadata 模板登记表）。
+    fs.writeFileSync(path.join(vault, "Templates", "meta.md"), "样本：{{sample}}\n缩略图：{{thumbnail}}\n");
     fs.writeFileSync(
       path.join(vault, "Profiles", "verify.json"),
       JSON.stringify(
@@ -154,18 +182,22 @@ async function main() {
           name: "验证用（a/b）",
           source: "stem",
           regex: "^(?<stem>[a-z])$",
-          fields: [{ group: "stem", type: "text" }],
           ask: ["sample"],
-          keyOrder: ["tags", "sample", "stem"],
           onMismatch: "empty",
+          frontmatter: {
+            tags: ["annex-gallery-metadata"],
+            sample: "{{sample}}",
+            stem: "{{stem}}",
+            thumbnail: "{{thumbnail}}",
+            tif: "{{tif}}",
+          },
+          template: "Templates/meta.md",
         },
         null,
         2,
       ),
     );
-    fs.writeFileSync(path.join(vault, "Templates", "meta.md"), "{{frontmatter}}\n\n样本：{{sample}}\n缩略图：{{thumbnail}}\n");
     plugin.settings.profileFiles = [{ path: "Profiles/verify.json" }];
-    plugin.settings.metadataTemplates = [{ id: "meta", name: "meta", path: "Templates/meta.md" }];
     await plugin.saveSettings();
     const folderMenu = new stub.Menu();
     stub.registry.menus[0](folderMenu, new stub.TFolder("/"), "file-explorer");

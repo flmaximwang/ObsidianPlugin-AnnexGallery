@@ -1,39 +1,41 @@
-[
-  {
-    "id": "platewell",
-    "name": "多孔板成像（plate01_wellA3_4000x_007）",
-    "match": {
-      "relpathRegex": "plate\\d+(?:_well[A-Z]\\d+)?_\\d+x_\\d+\\.(?:png|tif|tiff|jpg|jpeg|bmp|webp)$",
-      "filenameRegex": "^plate\\d+(?:_well[A-Z]\\d+)?_\\d+x_\\d+"
-    },
-    "source": "stem",
-    "regex": "^plate(?<plate>\\d+)(?:_well(?<well>[A-Z]\\d+))?_(?<magnification>\\d+)x_(?<index>\\d+)$",
-    "fields": [
-      { "group": "plate", "type": "number" },
-      { "group": "well", "type": "text", "whenMissing": "" },
-      { "group": "magnification", "type": "number" },
-      { "group": "index", "type": "number" }
-    ],
-    "constFields": { "instrument": "plate-reader" },
-    "ask": ["sample"],
-    "keyOrder": [
-      "tags",
-      "sample",
-      "session",
-      "date",
-      "plate",
-      "well",
-      "magnification",
-      "index",
-      "instrument",
-      "notes",
-      "width",
-      "height",
-      "size",
-      "btime",
-      "thumbnail",
-      "tif"
-    ],
-    "onMismatch": "empty"
-  }
-]
+{
+  "id": "platewell",
+  "name": "多孔板成像（plate01_wellA3_4000x_007）",
+  "match": {
+    "relpathRegex": "plate\\d+(?:_well[A-Z]\\d+)?_\\d+x_\\d+\\.(?:png|tif|tiff|jpg|jpeg|bmp|webp)$",
+    "filenameRegex": "^plate\\d+(?:_well[A-Z]\\d+)?_\\d+x_\\d+"
+  },
+  "source": "stem",
+  "regex": "^plate(?<plate>\\d+)(?:_well(?<well>[A-Z]\\d+))?_(?<magnification>\\d+)x_(?<index>\\d+)$",
+  "types": {
+    "plate": "number",
+    "magnification": "number",
+    "index": "number",
+    "width": "number",
+    "height": "number",
+    "size": "number",
+    "date": "date",
+    "btime": "date"
+  },
+  "ask": ["sample"],
+  "onMismatch": "empty",
+  "frontmatter": {
+    "tags": ["annex-gallery-metadata", "{{tags}}"],
+    "sample": "{{sample}}",
+    "session": "{{session}}",
+    "date": "{{date}}",
+    "plate": "{{plate}}",
+    "well": "{{well}}",
+    "magnification": "{{magnification}}",
+    "index": "{{index}}",
+    "instrument": "plate-reader",
+    "notes": "{{notes}}",
+    "width": "{{width}}",
+    "height": "{{height}}",
+    "size": "{{size}}",
+    "btime": "{{btime}}",
+    "thumbnail": "{{thumbnail}}",
+    "tif": "{{tif}}"
+  },
+  "template": "AnnexGalleryTemplates/plate.md"
+}
