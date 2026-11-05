@@ -163,8 +163,11 @@ async function main() {
     check(fs.existsSync(path.join(fresh, ".git")), "盘上出现了 .git");
     check(fs.existsSync(path.join(fresh, ".git/annex")), "盘上出现了 .git/annex（真的是 annex 仓库）");
     check(
-      fs.readFileSync(path.join(fresh, ".gitattributes"), "utf8").includes("*               annex.largefiles=anything"),
-      ".gitattributes 合并进了内置规则",
+      (() => {
+        const lines = fs.readFileSync(path.join(fresh, ".gitattributes"), "utf8").split("\n").map((l) => l.trim().replace(/\s+/g, " "));
+        return ["* annex.largefiles=anything", "*.thumbnail.png annex.largefiles=nothing", "*.md annex.largefiles=nothing", "*.base annex.largefiles=nothing"].every((r) => lines.includes(r));
+      })(),
+      ".gitattributes 合并进了内置规则（* 进 annex；.thumbnail.png / .md / .base 进 git）",
     );
     check(fs.readFileSync(path.join(fresh, ".gitignore"), "utf8").includes(".obsidian"), ".gitignore 合并进了 .obsidian");
     check(

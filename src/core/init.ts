@@ -92,17 +92,18 @@ export interface InitResult {
  */
 function applyRulesFile(
   file: string,
-  required: string[],
+  template: string,
   dryRun: boolean,
   progress: Progress,
   label: string,
 ): MergeResult {
+  const required = templateLines(template);
   if (dryRun) {
-    const { result } = mergeRuleText(readIfExists(file), required, file);
+    const { result } = mergeRuleText(readIfExists(file), required, file, template);
     progress(`${label}：补 ${result.added.length} 行（dry-run：未写盘）`);
     return result;
   }
-  const result = ensureRulesFile(file, required);
+  const result = ensureRulesFile(file, required, template);
   progress(`${label}：补 ${result.added.length} 行`);
   return result;
 }
@@ -450,7 +451,7 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   const gitattributesPath = opts.gitattributesPath ?? path.join(absRoot, ".gitattributes");
   const gitattributes = applyRulesFile(
     gitattributesPath,
-    templateLines(GITATTRIBUTES_TEMPLATE),
+    GITATTRIBUTES_TEMPLATE,
     dryRun,
     progress,
     ".gitattributes",
@@ -460,7 +461,7 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   const gitignorePath = opts.gitignorePath ?? path.join(absRoot, ".gitignore");
   const gitignore = applyRulesFile(
     gitignorePath,
-    templateLines(GITIGNORE_TEMPLATE),
+    GITIGNORE_TEMPLATE,
     dryRun,
     progress,
     ".gitignore",

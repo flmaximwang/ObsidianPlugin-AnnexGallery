@@ -37,7 +37,7 @@
 | 2 | `git init -b main` | 已是 git 仓库 → 跳过（**不重建、不覆盖**）；是**别人的仓库的子目录** → 直接报错，不往里写 |
 | 3 | `git annex init "<目录名>"` ← **annex 命令 1** | 已是 annex 仓库 → 跳过 |
 | 4 | **把 annex 的「设置」核对并修复到标准状态**（← **annex 命令 2**，见下节） | 三条都合口径 → 零写入，报告写「未改动」 |
-| 5 | 合并 `.gitattributes`（内置 8 行规则，只追加缺的） | 规则齐了 → 补 0 行 |
+| 5 | 合并 `.gitattributes`（目标不存在 / 为空 → 原样写入内置模板；否则只追加缺的行） | 规则齐了 → 补 0 行 |
 | 6 | 合并 `.gitignore`（只 `.obsidian`） | 同上 |
 | 7 | 按设置页「remote 设置」逐条 `git remote add` / `set-url`（只写配置，不 fetch / 不 push） | 同名同地址 → 一个字节都不碰 |
 
@@ -70,7 +70,7 @@ git init：已新建
 git annex init：已执行
 annex.addunlocked：分支已设为 true（此后 add 的文件以 unlocked 入库）
 [本机设置：修 <n> 项（annex.addunlocked=false→删）]     ← 只有真的修过偏离才有这一行
-.gitattributes：补 8 条规则
+.gitattributes：补 <n> 条规则
 .gitignore：补 1 条规则
 annex.addunlocked=true 已写进 git-annex 分支（此后 add 的文件以 unlocked 入库）
 ```
@@ -130,18 +130,17 @@ annex.addunlocked=true 已写进 git-annex 分支（此后 add 的文件以 unlo
 合并目标固定是 `<vault>/.gitattributes` / `<vault>/.gitignore`（桌面版取 vault 根），**不提供路径设置**；
 旧 `data.json` 里的 `gitattributesPath` / `gitignorePath` / `defaultSample` 三个键在加载时会被删掉。
 
-内置默认 `.gitattributes`（文件结尾**无换行符**）：
+内置默认 `.gitattributes` 全文见 [`src/defaults/gitattributes`](../src/defaults/gitattributes)（约 200 行，
+按「兜底 → 媒体 / 附件 → 代码与配置 → 最高优先级」分节；**靠后的规则赢**）。画廊依赖的四条口径不变：
 
 ```gitattributes
-# 默认都进 annex
-*               annex.largefiles=anything
-# 缩略图不进 annex
-*.thumbnail.png annex.largefiles=nothing
-# .md 作为每个文件的 metadata, 进 git
-*.md            annex.largefiles=nothing
-# .base 作为文件展示的视图，进 git
-*.base          annex.largefiles=nothing
+*                  annex.largefiles=anything   # 第 0 节：兜底，默认进 annex
+*.thumbnail.png    annex.largefiles=nothing    # 第 4 节：盖住 *.png 的 annex 规则
+*.md               annex.largefiles=nothing
+*.base             annex.largefiles=nothing
 ```
+
+目标文件不存在或为空时，模板**原样**写入（保留空行与重复的分节注释）；已有内容时才走逐行合并。
 
 写成「默认全进 annex、再逐个排除派生文件」是有意的：数据仓库里绝大多数内容是图像/原始数据，
 适合走 annex；而 `.md` / 缩略图 / `.base` 必须留在 git 里，否则会被 annex 变成软链、画廊静默失效

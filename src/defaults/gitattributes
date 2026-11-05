@@ -1,8 +1,213 @@
-# 默认都进 annex
-*               annex.largefiles=anything
-# 缩略图不进 annex
-*.thumbnail.png annex.largefiles=nothing
-# .md 作为每个文件的 metadata, 进 git
-*.md            annex.largefiles=nothing
-# .base 作为文件展示的视图，进 git
-*.base          annex.largefiles=nothing
+# ============================================================
+# git-annex 分流规则（annex.largefiles）
+#   进 annex   = 内容存进 .git/annex/objects，git 历史里只留链接 → 历史不膨胀
+#   不进 annex = 内容直接进 git 历史（适合小文本、需要随时可写的文件）
+#   同一条路径被多条 pattern 匹配时：**本文件里靠后的那条赢**
+#   ⇒ 第 0 节是兜底默认，后面每一条都比它更具体、都能盖住它。
+#   dotfile（.xxx）与 dotdir 里的文件不走这套：它们默认直接进 git。
+# ============================================================
+
+# ------------------------------------------------------------
+# 0) 兜底默认：没被下面任何一条点名过的文件 → 进 annex
+#    （「保存下来，但不占 git 历史」）
+# ------------------------------------------------------------
+*                  annex.largefiles=anything
+
+# ------------------------------------------------------------
+# 1) 常见媒体格式 → 进 annex
+#   图片例外：文件名形如 xxx.important.<suffix> 的不进 annex（留作普通 git 文件）
+#   注意：gitattributes 的 pattern 在 macOS 上不区分大小写（E.PNG 也匹配 *.png），
+#         但 git-annex 的 glob 区分大小写 ⇒ 只有小写 .important. 会被排除；
+#         .IMPORTANT. / .Important. 仍会进 annex。
+# ------------------------------------------------------------
+# 图片
+*.png              annex.largefiles=exclude=*.important.*
+*.jpg              annex.largefiles=exclude=*.important.*
+*.jpeg             annex.largefiles=exclude=*.important.*
+*.gif              annex.largefiles=exclude=*.important.*
+*.bmp              annex.largefiles=exclude=*.important.*
+*.tif              annex.largefiles=exclude=*.important.*
+*.tiff             annex.largefiles=exclude=*.important.*
+*.webp             annex.largefiles=exclude=*.important.*
+*.avif             annex.largefiles=exclude=*.important.*
+*.heic             annex.largefiles=exclude=*.important.*
+*.svg              annex.largefiles=exclude=*.important.*
+*.ico              annex.largefiles=exclude=*.important.*
+# 音视频
+*.mp4              annex.largefiles=anything
+*.mov              annex.largefiles=anything
+*.webm             annex.largefiles=anything
+*.avi              annex.largefiles=anything
+
+# ------------------------------------------------------------
+# 2) 常见附件 / 数据文件 → 进 annex
+# ------------------------------------------------------------
+# 压缩包
+*.tar.gz           annex.largefiles=anything
+*.zip              annex.largefiles=anything
+*.rar              annex.largefiles=anything
+*.gz               annex.largefiles=anything
+# 文档 / 办公
+*.pdf              annex.largefiles=anything
+*.doc              annex.largefiles=anything
+*.docx             annex.largefiles=anything
+*.ppt              annex.largefiles=anything
+*.pptx             annex.largefiles=anything
+*.pptm             annex.largefiles=anything
+*.xls              annex.largefiles=anything
+*.xlsx             annex.largefiles=anything
+*.numbers          annex.largefiles=anything
+*.pages            annex.largefiles=anything
+*.key              annex.largefiles=anything
+*.note             annex.largefiles=anything
+*.psd              annex.largefiles=anything
+*.goodnotes        annex.largefiles=anything
+# 数据 / 表格 / 杂项
+*.csv              annex.largefiles=anything
+*.tsv              annex.largefiles=anything
+*.json             annex.largefiles=anything
+*.jsonl            annex.largefiles=anything
+*.txt              annex.largefiles=anything
+*.css              annex.largefiles=anything
+*.html             annex.largefiles=anything
+*.htm              annex.largefiles=anything
+*.stm              annex.largefiles=anything
+*.mdb              annex.largefiles=anything
+*.eni              annex.largefiles=anything
+*.enl              annex.largefiles=anything
+*.ffdata           annex.largefiles=anything
+*.ffindex          annex.largefiles=anything
+*.pse              annex.largefiles=anything
+# 备份 / 导出（存下来，但不进历史）
+*.bak              annex.largefiles=anything
+*.bak-*            annex.largefiles=anything
+*.bak_*            annex.largefiles=anything
+# 结构 / 序列
+*.pdb              annex.largefiles=anything
+*.pdb1             annex.largefiles=anything
+*.cif              annex.largefiles=anything
+*.dna              annex.largefiles=anything
+*.prot             annex.largefiles=anything
+*.dnaln            annex.largefiles=anything
+*.praln            annex.largefiles=anything
+*.gb               annex.largefiles=anything
+*.gbff             annex.largefiles=anything
+*.loom             annex.largefiles=anything
+*.fasta            annex.largefiles=anything
+*.fa               annex.largefiles=anything
+*.fna              annex.largefiles=anything
+*.faa              annex.largefiles=anything
+*.a3m              annex.largefiles=anything
+*.sto              annex.largefiles=anything
+*.aln              annex.largefiles=anything
+*.msa              annex.largefiles=anything
+*.rna              annex.largefiles=anything
+*.nwk              annex.largefiles=anything
+*.m8               annex.largefiles=anything
+*.ab1              annex.largefiles=anything
+# 计算化学 / 分子模拟 / 程序输出
+*.fchk             annex.largefiles=anything
+*.g03              annex.largefiles=anything
+*.xyz              annex.largefiles=anything
+*.sdf              annex.largefiles=anything
+*.mol              annex.largefiles=anything
+*.cml              annex.largefiles=anything
+*.cdxml            annex.largefiles=anything
+*.out              annex.largefiles=anything
+*.log              annex.largefiles=anything
+*.gro              annex.largefiles=anything
+*.top              annex.largefiles=anything
+*.itp              annex.largefiles=anything
+*.mdp              annex.largefiles=anything
+*.dcd              annex.largefiles=anything
+*.trr              annex.largefiles=anything
+*.xtc              annex.largefiles=anything
+# 二进制数据 / 模型权重
+*.pt               annex.largefiles=anything
+*.pth              annex.largefiles=anything
+*.ckpt             annex.largefiles=anything
+*.npz              annex.largefiles=anything
+*.npy              annex.largefiles=anything
+*.pkl              annex.largefiles=anything
+*.h5               annex.largefiles=anything
+*.hdf5             annex.largefiles=anything
+*.mat              annex.largefiles=anything
+
+# ------------------------------------------------------------
+# 3) 代码 / 脚本 / notebook / LaTeX / 配置 → 直接进 git
+#    （小文本，要能随手改、要能看 diff，不能变成 annex 指针）
+# ------------------------------------------------------------
+# 脚本语言
+*.py               annex.largefiles=nothing
+*.pyi              annex.largefiles=nothing
+*.js               annex.largefiles=nothing
+*.mjs              annex.largefiles=nothing
+*.cjs              annex.largefiles=nothing
+*.ts               annex.largefiles=nothing
+*.jsx              annex.largefiles=nothing
+*.tsx              annex.largefiles=nothing
+*.sh               annex.largefiles=nothing
+*.bash             annex.largefiles=nothing
+*.zsh              annex.largefiles=nothing
+*.csh              annex.largefiles=nothing
+*.fish             annex.largefiles=nothing
+*.pl               annex.largefiles=nothing
+*.pm               annex.largefiles=nothing
+*.rb               annex.largefiles=nothing
+*.lua              annex.largefiles=nothing
+*.r                annex.largefiles=nothing
+*.jl               annex.largefiles=nothing
+*.sql              annex.largefiles=nothing
+*.ps1              annex.largefiles=nothing
+*.bat              annex.largefiles=nothing
+*.cmd              annex.largefiles=nothing
+# 编译型语言
+*.c                annex.largefiles=nothing
+*.h                annex.largefiles=nothing
+*.cc               annex.largefiles=nothing
+*.cpp              annex.largefiles=nothing
+*.hpp              annex.largefiles=nothing
+*.cxx              annex.largefiles=nothing
+*.java             annex.largefiles=nothing
+*.go               annex.largefiles=nothing
+*.rs               annex.largefiles=nothing
+*.cs               annex.largefiles=nothing
+*.swift            annex.largefiles=nothing
+*.m                annex.largefiles=nothing
+*.mm               annex.largefiles=nothing
+*.f                annex.largefiles=nothing
+*.f90              annex.largefiles=nothing
+# notebook（文本、可 diff）
+*.ipynb            annex.largefiles=nothing
+*.nb               annex.largefiles=nothing
+# LaTeX / 引用
+*.tex              annex.largefiles=nothing
+*.sty              annex.largefiles=nothing
+*.cls              annex.largefiles=nothing
+*.bib              annex.largefiles=nothing
+*.bst              annex.largefiles=nothing
+*.csl              annex.largefiles=nothing
+# 配置文件
+*.yml              annex.largefiles=nothing
+*.yaml             annex.largefiles=nothing
+*.toml             annex.largefiles=nothing
+*.ini              annex.largefiles=nothing
+*.cfg              annex.largefiles=nothing
+*.conf             annex.largefiles=nothing
+
+# ============================================================
+# 4) 以下放在最后 → 优先级最高（覆盖上面所有匹配）
+# ============================================================
+
+# Obsidian 配置根目录：小文本 + Obsidian 自己要往里写
+#   → 直接进 git；绝不能变成 annex 符号链接，否则设置保存不了
+.obsidian/**       annex.largefiles=nothing
+
+# 缩略图：插件生成的 <stem>.thumbnail.png 要随画廊一起进 git，
+#   必须盖住上面 *.png 的 annex 规则（drop 原图后画廊照常可用）
+*.thumbnail.png    annex.largefiles=nothing
+
+# Obsidian 文档主体：小文本，进 git
+*.md               annex.largefiles=nothing
+*.base             annex.largefiles=nothing
+*.canvas           annex.largefiles=nothing
