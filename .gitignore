@@ -6,3 +6,11 @@ data.json
 *.log
 .worktrees/
 __pycache__/
+
+# Agents
+.claude
+.hermes
+.dsh
+.cursor
+.codex
+.agents
