@@ -209,10 +209,10 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
       desc: "Read from .git/config and written back only when you save. Only remote configuration is changed — nothing is fetched or pushed.",
       render: (setting) => {
         const container = this.mountEditor(setting, "annex-remotes-section");
+        // The editor rebuilds only its own card, so the other editors keep their input.
         new RemotesEditor(container, {
           app: this.app,
           vaultRoot: () => this.host.vaultRoot(),
-          refresh: () => this.update(),
         }).render();
       },
     };
