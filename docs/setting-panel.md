@@ -100,7 +100,9 @@ Debug logging    [on/off]                    ← control（toggle，key = debugL
   special remote 的 **type** 不在 `.git/config`：git-annex 把它写在 git-annex 分支的 `remote.log` 里，
   插件本地只读 `git show git-annex:remote.log`；参数（如 `directory`）由 git-annex 存成
   `remote.<name>.annex-<param>`（`annex-directory`），主设置从这些键读。不是 git 仓库时整区禁用，提示先跑
-  「Initialize gallery」。所有新文案是英文。
+  「Initialize gallery」。**`.git/config` 读不出来**（例如语法损坏）时不是「没有 remote」：卡片用
+  `.annex-remotes-error` 逐字显示 git 的 stderr，不渲染编辑行 / Save / Add remote，也不显示
+  「No git remotes yet」或 no-repo 提示，只留 Reload；把配置修好后点 Reload 即恢复正常编辑。所有新文案是英文。
 - **metadata preset 区**（`.annex-profiles-section`）只有两样东西：
   1. **工具条**（`.annex-profiles-toolbar`）：`<input class="annex-profile-path-input">`（vault 相对 `.json`
      路径）+ `<button class="annex-profile-register">登记</button>` +
@@ -157,7 +159,7 @@ Debug logging    [on/off]                    ← control（toggle，key = debugL
 | 落点 | 内容 |
 |---|---|
 | `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → Metadata presets and gallery templates render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `baseTemplates` / `folderProfiles` / `folderSamples` / `folderBaseTemplates`，**不含 remotes**）；旧键检测（`detectLegacyInlineProfiles` / `detectLegacyMetadataTemplates`）；旧 `remotes` 键由 `main.ts` 的 `loadSettings()` 静默删掉并在有旧键时立即落盘一次；`SettingsHost` 暴露 `vaultRoot()` / `createVaultFile()`；remote 区把 `app` / `vaultRoot` / `refresh` 交给 `RemotesEditor` |
-| `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：打开时 `readRemotes()`；可编辑行（名称 / Fetch URL / Push URL）、待改标记、Save / Reload；多 URL 与 special remotes 只读列表（special remote 的类型来自 git-annex 分支 `remote.log`）；删除确认（annex-uuid 额外警告）；无仓库时禁用 |
+| `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：打开时 `readRemotes()`；可编辑行（名称 / Fetch URL / Push URL）、待改标记、Save / Reload；多 URL 与 special remotes 只读列表（special remote 的类型来自 git-annex 分支 `remote.log`）；删除确认（annex-uuid 额外警告）；无仓库时禁用；快照带 `configError` 时只渲染 git stderr + Reload（编辑行 / Save 全部不出现） |
 | `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-row`、`-name` / `-id` / `-path` / `-open` / `-del` / `-error` / `-warn`；登记 / Create from preset / 打开 / 取消登记 |
 | `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card[data-kind=base]`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-open` / `-del`、`.annex-template-add-row` / `-path-input` / `-add` / `-preset`；`TEMPLATE_FOLDER`（`AnnexGalleryTemplates/`）、`uniqueTemplateId()` |
 | `src/core/external-files.ts` | 外部文件的路径规范化与校验：`normalizeVaultRelPath()` / `validateVaultRelPath()` / `resolveVaultFile()` / `readVaultTextFile()`（vault 相对路径、扩展名、存在性）；三类文件：metadata preset `.json` / 正文模板 `.md` / gallery template `.base` |
@@ -242,7 +244,8 @@ Debug logging    [on/off]                    ← control（toggle，key = debugL
     删掉旧键并立即落盘一次（文件不再留着它）。每次 Save 前重新读一遍 `.git/config` 与 git-annex 分支的
     `remote.log`；和打开时的快照不一致（含 push URL、special remotes 的类型）就一条命令都不执行，
     提示用户在别处改过，然后按 git 现状重新加载。删 remote 要确认对话框；带 annex-uuid 的 remote 额外
-    警告 git-annex 正在用它。没仓库时编辑器禁用。
+    警告 git-annex 正在用它。没仓库时编辑器禁用。`.git/config` 读失败时显示 git 的 stderr 与 Reload，
+    不把「读不了」冒充成「没有 remote」（空列表 + 永远禁用的 Save 会把坏配置藏起来）。
 11. **`types` 只有 `number` / `date` / `text` 三种。** 旧格式里的 `type: "string"` 不再是 `text` 的
     同义写法 —— 新格式里类型只写在 `types` 对象里，值写错就是**硬错误**（不会被默默当成 text 放行）。
     不写 `types` 的变量一律按 `text` 处理（双引号字符串），这是最安全的默认。
@@ -351,6 +354,8 @@ Debug logging    [on/off]                    ← control（toggle，key = debugL
 - remote：打开读 git、Save 前不写盘（待删只是草稿，Undo 还原）、Save 后增删改、删除确认
   （带 annex-uuid 时多一条警告）、校验失败一条命令都不跑、外部改过则 Save 不执行并重载、无仓库禁用；
   编辑器直接用 esbuild 现场打包 `src/ui/remotes-editor.ts`，挂到临时真 git 仓库上跑
+- 坏 `.git/config`：错误卡片逐字显示 git stderr（不渲染编辑行 / Save / Add remote，也不显示
+  No git remotes yet），修好配置后点 Reload 恢复原来的编辑行；没有 remote 的仓库仍是正常空列表提示
 - 旧 `data.json` 的 `remotes` 键加载时静默丢弃并立即落盘（文件里不再有它）
 ```
 

@@ -22,6 +22,8 @@
  *   - Multi-URL remotes and git-annex special remotes are read-only: the plugin never
  *     creates, edits or removes them (manage those with `git remote` / `git annex initremote`
  *     in a terminal). No transfer operation is ever started from here.
+ *   - A `.git/config` git cannot parse is a read error, not "no remotes": the card shows
+ *     git's stderr and a Reload button, and no editor is rendered (annex-gallery-0sn).
  *
  * All user-facing strings are English (annex-gallery-5vm).
  */
@@ -57,6 +59,9 @@ const SAVE_HINT =
   "Read from .git/config. Changes are written back to git only when you click Save; " +
   "closing the settings page discards them.";
 const NO_REPO_TEXT = "This vault is not a git repo yet. Run Initialize gallery first.";
+const CONFIG_ERROR_HINT =
+  "Fix .git/config (or restore it from a backup), then click Reload. " +
+  "Remote editing stays disabled until git can read the config again.";
 const MULTI_URL_LABEL = "multiple URLs - edit with git";
 const NO_FETCH_URL_LABEL = "no fetch URL - edit with git";
 const SAVE_DISABLED_HINT = "No changes to save.";
@@ -222,6 +227,13 @@ export class RemotesEditor {
     }
     this.snapshot = snapshot;
 
+    // A broken `.git/config` is a real read error: show git's stderr instead of an empty
+    // editor that would claim "No git remotes yet" and keep Save permanently disabled.
+    if (snapshot.configError !== undefined) {
+      this.renderConfigError(snapshot.configError);
+      return;
+    }
+
     if (!snapshot.hasRepo) {
       const card = this.container.createDiv({ cls: "annex-remotes-card" });
       card.createEl("h3", { cls: "annex-remotes-title", text: SECTION_TITLE });
@@ -245,6 +257,25 @@ export class RemotesEditor {
     this.activeIndices = [];
     this.saveButton = null;
     this.summaryEl = null;
+  }
+
+  /**
+   * The broken-`.git/config` state: git's stderr, a recovery hint and Reload only.
+   *
+   * No editable rows, no Save / Add remote and no "No git remotes yet": when the config
+   * cannot be read the remotes are unknown, so an empty list would be a lie. Reload
+   * re-reads git, which is the way back once the config is repaired (annex-gallery-0sn).
+   */
+  private renderConfigError(message: string): void {
+    const card = this.container.createDiv({ cls: "annex-remotes-card" });
+    card.createEl("h3", { cls: "annex-remotes-title", text: SECTION_TITLE });
+    card.createDiv({ cls: "annex-remotes-error", text: `Could not read git remotes: ${message}` });
+    card.createDiv({ cls: "annex-remotes-hint", text: CONFIG_ERROR_HINT });
+
+    const toolbar = card.createDiv({ cls: "annex-remotes-toolbar" });
+    const reloadButton = toolbar.createEl("button", { cls: "annex-remotes-reload", text: RELOAD_TEXT });
+    reloadButton.setAttr("title", "Re-read git after fixing .git/config.");
+    reloadButton.addEventListener("click", () => this.reload());
   }
 
   /** Build the editor card from the in-memory draft (no git read). */
