@@ -7,7 +7,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/test-annex-functions.cjs",
+    "test": "node tests/test-remotes.cjs && node tests/test-annex-functions.cjs",
     "verify:annex": "node tools/verify-annex-ops.cjs",
     "verify:sidecar": "node tools/verify-sidecar-overwrite.cjs",
     "verify:gallery": "node tools/verify-gallery.cjs",
