@@ -629,6 +629,13 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       rawData !== null && typeof rawData === "object" && !Array.isArray(rawData)
         ? (rawData as Record<string, unknown>)
         : {};
+    // Did the loaded data.json actually carry the obsolete remotes key? If so, drop it and
+    // persist once at the end of this method so the file stops containing it immediately.
+    const hadLegacyRemotes =
+      rawData !== null &&
+      typeof rawData === "object" &&
+      !Array.isArray(rawData) &&
+      Object.prototype.hasOwnProperty.call(rawData, "remotes");
     // 顺序不变：用户已有的 data.json 优先，缺失的键才用 DEFAULT_SETTINGS，绝不冲掉现有配置。
     // 注意：旧的内联 `profiles`、旧的 `metadataTemplates` 会原样留在 data.json 里（不迁移、不删除），
     // 但运行时**只读** `profileFiles` 指向的外部 JSON —— 旧值永远不会被当成配置来源。
@@ -683,6 +690,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     this.settings.folderBaseTemplates = { ...this.settings.folderBaseTemplates };
     this.settings.profileFiles = [...this.settings.profileFiles];
     this.settings.baseTemplates = [...this.settings.baseTemplates];
+    // Silently drop the obsolete data.json copy from disk (no notice, no migration).
+    if (hadLegacyRemotes) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
