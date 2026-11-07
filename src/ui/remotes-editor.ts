@@ -6,14 +6,13 @@
  *   `new RemotesEditor(container, host).render()`
  *     - reads the snapshot synchronously via `readRemotes(host.vaultRoot())`;
  *     - keeps the draft rows in memory only — no data.json, no plugin settings;
- *     - calls `host.refresh()` after a successful save / Reload so the tab re-renders
- *       from a fresh git read.
+ *     - rebuilds **only this card** after a save / Reload / staleness abort, so the
+ *       metadata-preset and gallery-template editors keep their half-typed input.
  *
  * The settings tab mounts it with:
  *   new RemotesEditor(container, {
  *     app: this.app,
  *     vaultRoot: () => this.host.vaultRoot(),
- *     refresh: () => this.update(),
  *   }).render();
  *
  * Behaviour (annex-gallery-10m DESIGN 3/4/5/6/7/8/9):
@@ -48,8 +47,6 @@ export interface RemotesEditorHost {
   app: App;
   /** Absolute path of the vault (the git work tree root or a directory inside it). */
   vaultRoot(): string;
-  /** Re-render the settings tab from git state (after save / reload). */
-  refresh(): void;
 }
 
 /** The git-annex special-remotes documentation index. */
@@ -61,6 +58,7 @@ const SAVE_HINT =
   "closing the settings page discards them.";
 const NO_REPO_TEXT = "This vault is not a git repo yet. Run Initialize gallery first.";
 const MULTI_URL_LABEL = "multiple URLs - edit with git";
+const NO_FETCH_URL_LABEL = "no fetch URL - edit with git";
 const SAVE_DISABLED_HINT = "No changes to save.";
 const ADD_REMOTE_TEXT = "Add remote";
 const SAVE_TEXT = "Save";
@@ -100,6 +98,32 @@ function normalizePush(value: string | null): string {
   // `null` = no push URL configured, `""` = an empty (revealed) push field: both mean
   // "no push URL" for the dirty check; the plan decides whether a cleared URL needs a delete.
   return value ?? "";
+}
+
+/**
+ * The special remote's type, read leniently: the core model may expose it as `type`
+ * (plain / external) or as `baseType` / `externalType`.
+ */
+function specialRemoteType(remote: SpecialRemote): string {
+  const raw = remote as unknown as Record<string, unknown>;
+  for (const key of ["type", "baseType", "externalType"]) {
+    const value = raw[key];
+    if (typeof value === "string" && value !== "") return value;
+  }
+  return "";
+}
+
+/** The special remote's main setting (e.g. the directory path), when the model provides one. */
+function specialRemoteMainSetting(remote: SpecialRemote): { key: string; value: string } | null {
+  const raw = remote as unknown as Record<string, unknown>;
+  const main = raw["mainSetting"];
+  if (main !== null && typeof main === "object") {
+    const entry = main as { key?: unknown; value?: unknown };
+    if (typeof entry.key === "string" && entry.key !== "") {
+      return { key: entry.key, value: typeof entry.value === "string" ? entry.value : "" };
+    }
+  }
+  return null;
 }
 
 /** Documentation link for a special remote, falling back to the index page. */
@@ -205,7 +229,13 @@ export class RemotesEditor {
       return;
     }
 
-    this.rows = rowsFromSnapshot(snapshot).map((row) => ({ ...row, deleted: false }));
+    this.rows = rowsFromSnapshot(snapshot)
+      // A remote without exactly one fetch URL (multi-URL / pushurl-only) is read-only.
+      .filter((row) => {
+        const remote = snapshot.gitRemotes.find((entry) => entry.name === row.originalName);
+        return remote === undefined || remote.fetchUrls.length === 1;
+      })
+      .map((row) => ({ ...row, deleted: false }));
     this.buildCard();
   }
 
@@ -230,7 +260,7 @@ export class RemotesEditor {
     this.summaryEl = card.createDiv({ cls: "annex-remotes-summary" });
 
     this.renderEditableRows(card);
-    this.renderMultiUrlRemotes(card, snapshot);
+    this.renderReadOnlyRemotes(card, snapshot);
     this.renderSpecialRemotes(card, snapshot);
   }
 
@@ -404,29 +434,48 @@ export class RemotesEditor {
     this.saveButton.setAttr("title", dirty ? "Write the changes to .git/config." : SAVE_DISABLED_HINT);
   }
 
-  /** Deep compare the live draft with the snapshot the page was rendered from. */
+  /**
+   * Identity-based dirty check (never positional): the draft is dirty when it adds a remote,
+   * drops one, or changes a kept remote's name / fetch URL / push URL.
+   *
+   * Comparing by position was wrong: deleting "a" and adding a new "a" with the same URL
+   * lined up with the snapshot and left Save disabled, although the plan would have run
+   * `git remote remove a` + `git remote add a …` (real work).
+   */
   private isDirty(): boolean {
     if (this.snapshot === null) return false;
-    const baseline = rowsFromSnapshot(this.snapshot);
-    const active = this.rows.filter((row) => !row.deleted);
-    if (active.length !== baseline.length) return true;
-    return active.some((row, index) => {
-      const original = baseline[index];
-      return (
-        row.name !== original.name ||
-        row.fetchUrl !== original.fetchUrl ||
-        normalizePush(row.pushUrl) !== normalizePush(original.pushUrl)
-      );
-    });
+    const baseline = new Map<string, GitRemote>();
+    for (const remote of this.snapshot.gitRemotes) {
+      if (remote.kind === "git") baseline.set(remote.name, remote);
+    }
+
+    const kept = new Set<string>();
+    for (const row of this.rows) {
+      if (row.deleted) {
+        // A new row that was dropped again is net zero; an existing remote is a removal.
+        if (row.originalName !== "") return true;
+        continue;
+      }
+      if (row.originalName === "") return true; // a new remote to add
+      const original = baseline.get(row.originalName);
+      if (original === undefined) return true;
+      kept.add(row.originalName);
+      if (row.name.trim() !== original.name.trim()) return true;
+      if (row.fetchUrl.trim() !== (original.fetchUrls[0] ?? "").trim()) return true;
+      if (normalizePush(row.pushUrl).trim() !== normalizePush(original.pushUrls[0] ?? null).trim()) return true;
+    }
+
+    // Every remote the snapshot had must still be represented by a kept row.
+    if (kept.size !== baseline.size) return true;
+    for (const name of baseline.keys()) if (!kept.has(name)) return true;
+    return false;
   }
 
   // ── save / reload ───────────────────────────────────────────────────────────
 
+  /** Reload = Revert: re-read git and rebuild this card (other editors are untouched). */
   private reload(): void {
-    // A fresh git read first (so a caller whose refresh() is a no-op still sees git state),
-    // then let the settings tab rebuild itself from git as well.
     this.render();
-    this.host.refresh();
   }
 
   private save(): void {
@@ -434,16 +483,10 @@ export class RemotesEditor {
     const root = this.host.vaultRoot();
 
     // 1. Staleness: apply nothing if `.git/config` changed after this page was rendered.
-    let fresh: RemotesSnapshot;
-    try {
-      fresh = readRemotes(root);
-    } catch (error) {
-      new Notice(`Could not re-read git remotes: ${errorText(error)}`, 8000);
-      return;
-    }
+    const fresh = this.readSnapshot(root);
+    if (fresh === null) return;
     if (!fresh.hasRepo || !sameRemoteConfig(fresh, this.snapshot)) {
-      new Notice("Remotes changed outside settings - reloaded. Re-apply your edits.", 8000);
-      this.host.refresh();
+      this.abortStale();
       return;
     }
 
@@ -457,7 +500,7 @@ export class RemotesEditor {
 
     // 3. Nothing to do (e.g. only cosmetic edits the plan ignores).
     if (plan.steps.length === 0) {
-      this.host.refresh();
+      this.render();
       return;
     }
 
@@ -469,12 +512,55 @@ export class RemotesEditor {
           name: step.name,
           hasAnnexUuid: this.snapshot?.gitRemotes.find((remote) => remote.name === step.name)?.hasAnnexUuid ?? false,
         }));
-      new RemoveRemotesModal(this.host.app, removals, () => this.applyPlan(root, plan)).open();
+      new RemoveRemotesModal(this.host.app, removals, () => this.confirmRemoval(root)).open();
       return;
     }
 
     // 5. Apply.
     this.applyPlan(root, plan);
+  }
+
+  /**
+   * Confirm handler of the removal dialog.
+   *
+   * The dialog can stay open indefinitely, so git is re-read and the plan is rebuilt here:
+   * a terminal edit during the dialog must not lead to a stale `git remote remove` /
+   * `git remote rename` (annex-gallery-vps). Nothing is written when the config changed.
+   */
+  private confirmRemoval(root: string): void {
+    if (this.snapshot === null) return;
+
+    const fresh = this.readSnapshot(root);
+    if (fresh === null) return;
+    if (!fresh.hasRepo || !sameRemoteConfig(fresh, this.snapshot)) {
+      this.abortStale();
+      return;
+    }
+
+    const plan = planRemoteChanges(this.activeRows(), this.snapshot);
+    this.clearIssues();
+    if (plan.issues.length > 0) {
+      // The draft no longer validates (the repository changed underneath): write nothing.
+      this.abortStale();
+      return;
+    }
+    this.applyPlan(root, plan);
+  }
+
+  /** Re-read git; null when the read failed (a notice explains why). */
+  private readSnapshot(root: string): RemotesSnapshot | null {
+    try {
+      return readRemotes(root);
+    } catch (error) {
+      new Notice(`Could not re-read git remotes: ${errorText(error)}`, 8000);
+      return null;
+    }
+  }
+
+  /** Staleness abort: nothing is applied, this card is rebuilt from git. */
+  private abortStale(): void {
+    new Notice("Remotes changed outside settings - reloaded. Re-apply your edits.", 8000);
+    this.render();
   }
 
   private applyPlan(root: string, plan: RemotePlan): void {
@@ -486,7 +572,7 @@ export class RemotesEditor {
         `Remotes not fully saved: ${errorText(error)}. Applied 0 of ${plan.steps.length} commands.`,
         12000,
       );
-      this.host.refresh();
+      this.render();
       return;
     }
 
@@ -502,12 +588,12 @@ export class RemotesEditor {
           `Applied ${applied} of ${plan.steps.length} commands.`,
         12000,
       );
-      this.host.refresh();
+      this.render();
       return;
     }
 
     new Notice(`Saved remotes (${plan.steps.length} change${plan.steps.length === 1 ? "" : "s"}).`, 4000);
-    this.host.refresh();
+    this.render();
   }
 
   // ── validation feedback ─────────────────────────────────────────────────────
@@ -549,19 +635,26 @@ export class RemotesEditor {
 
   // ── read-only sections ──────────────────────────────────────────────────────
 
-  /** Multi-URL remotes: shown for transparency only; edit them with `git remote` in a terminal. */
-  private renderMultiUrlRemotes(card: HTMLElement, snapshot: RemotesSnapshot): void {
-    const multiUrl = snapshot.gitRemotes.filter((remote) => remote.kind === "multi-url");
-    if (multiUrl.length === 0) return;
+  /**
+   * Remotes the editor cannot edit, shown for transparency only:
+   *   - multi-URL remotes (more than one fetch URL or more than one push URL);
+   *   - pushurl-only remotes (no fetch URL at all).
+   * Both are edited with `git remote` in a terminal.
+   */
+  private renderReadOnlyRemotes(card: HTMLElement, snapshot: RemotesSnapshot): void {
+    const readOnly = snapshot.gitRemotes.filter(
+      (remote) => remote.kind !== "git" || remote.fetchUrls.length === 0,
+    );
+    if (readOnly.length === 0) return;
 
     const section = card.createDiv({ cls: "annex-remotes-multi" });
     section.createEl("h4", { cls: "annex-remotes-subtitle", text: "Read-only remotes" });
     section.createDiv({
       cls: "annex-remotes-hint",
-      text: "These remotes have more than one URL; the editor only handles single-URL remotes.",
+      text: "These remotes have no single fetch URL; the editor only handles single-URL remotes.",
     });
     const list = section.createDiv({ cls: "annex-remote-readonly-list" });
-    for (const remote of multiUrl) {
+    for (const remote of readOnly) {
       const row = list.createDiv({ cls: "annex-remote-readonly-row" });
       row.setAttr("data-remote", remote.name);
       row.createSpan({ cls: "annex-remote-readonly-name", text: remote.name });
@@ -571,7 +664,9 @@ export class RemotesEditor {
       for (const url of remote.pushUrls) {
         row.createSpan({ cls: "annex-remote-readonly-url", text: `push: ${url}` });
       }
-      row.createSpan({ cls: "annex-remote-readonly-badge", text: MULTI_URL_LABEL });
+      // A remote without any fetch URL gets its own label: it is not a "multiple URLs" case.
+      const label = remote.fetchUrls.length === 0 ? NO_FETCH_URL_LABEL : MULTI_URL_LABEL;
+      row.createSpan({ cls: "annex-remote-readonly-badge", text: label });
     }
   }
 
@@ -608,18 +703,20 @@ export class RemotesEditor {
       row.createSpan({ cls: "annex-special-remote-name", text: remote.name });
 
       const docUrl = docUrlFor(remote);
+      const type = specialRemoteType(remote);
       const typeLink = row.createEl("a", {
         cls: "annex-special-remote-type",
-        text: remote.type === "" ? "unknown type" : remote.type,
+        text: type === "" ? "unknown type" : type,
       });
       typeLink.setAttr("href", docUrl);
       typeLink.setAttr("target", "_blank");
       typeLink.setAttr("rel", "noopener");
 
-      if (remote.mainSetting !== null) {
+      const mainSetting = specialRemoteMainSetting(remote);
+      if (mainSetting !== null) {
         row.createSpan({
           cls: "annex-special-remote-setting",
-          text: `${remote.mainSetting.key}: ${remote.mainSetting.value}`,
+          text: `${mainSetting.key}: ${mainSetting.value}`,
         });
       }
       if (remote.hasAnnexUuid) {
