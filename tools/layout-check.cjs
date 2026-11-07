@@ -36,6 +36,8 @@ const CHROME_CANDIDATES = [
 
 let pass = 0;
 let fail = 0;
+/** Whether the layout vault got a real `git annex initremote` special remote. */
+let annexAvailable = false;
 function check(condition, message, detail) {
   if (condition) {
     pass += 1;
@@ -97,6 +99,30 @@ function seedVault() {
   write("AnnexGalleryTemplates/tecnaitem.md", fs.readFileSync(path.join(REPO, "tools/example-profiles/tecnaitem.md"), "utf8"));
   write("AnnexGalleryTemplates/plate.md", fs.readFileSync(path.join(REPO, "tools/example-profiles/plate.md"), "utf8"));
   write("Templates/base.base", "views:\n  - type: cards\n    name: Layout {{folder}}\n    cardSize: {{cardSize}}\n");
+  // The remotes editor reads `.git/config`, so the layout vault is a real git repo.
+  const git = (...args) => execFileSync("git", ["-C", VAULT, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  git("init", "-q");
+  git("config", "user.email", "layout@example.invalid");
+  git("config", "user.name", "Layout Check");
+  git("remote", "add", "origin", "ssh://nas.example/volume1/Data_lab_10");
+  git("remote", "add", "backup", "/Volumes/Backup/Data_lab_10");
+  git("config", "remote.backup.pushurl", "ssh://nas.example/volume1/Backup");
+  // Read-only shapes: a multi-URL remote and a git-annex special remote.
+  git("remote", "add", "multi", "ssh://a.example/multi");
+  git("config", "--add", "remote.multi.url", "ssh://b.example/multi");
+  // A real git-annex special remote (git annex initremote writes annex-* keys, not
+  // `type=`/`directory=`); the geometry check only needs the section to exist.
+  const specialDir = path.join(VAULT, "special-storage");
+  try {
+    git("annex", "version");
+    fs.mkdirSync(specialDir, { recursive: true });
+    git("annex", "init");
+    git("annex", "initremote", "archive", "type=directory", `directory=${specialDir}`, "encryption=none");
+    annexAvailable = true;
+  } catch {
+    annexAvailable = false;
+    console.log("SKIP: git-annex 不可用 → 跳过 git-annex special remote 的几何检查");
+  }
   return {
     profileFiles: [{ path: "Profiles/tecnaitem.json" }, { path: "Profiles/Other/platewell.json" }],
     baseTemplates: [{ id: "base", name: "base", path: "Templates/base.base" }],
@@ -137,13 +163,8 @@ function renderFragment() {
   return (async () => {
     await plugin.onload();
     const tab = stub.registry.tabs[0];
-    // 两条已登记外部预设 + 一份外部画廊模板。
+    // 两条已登记外部预设 + 一份外部画廊模板；remote 由 seedVault() 里的真实 .git/config 提供。
     Object.assign(plugin.settings, seeded);
-    // 两行 remote：量「一个 item 装多条」时的行内布局
-    plugin.settings.remotes = [
-      { name: "origin", url: "ssh://nas.example/volume1/Data_lab_10" },
-      { name: "backup", url: "/Volumes/Backup/Data_lab_10" },
-    ];
     tab.update();
     const out = [];
     for (const child of tab.containerEl.children) serialize(child, out);
@@ -251,14 +272,31 @@ const MEASURE = String.raw`(function () {
       const title = card.querySelector(".annex-remotes-title");
       const rows = [...card.querySelectorAll(".annex-remote-row")];
       const add = card.querySelector(".annex-remote-add");
+      const save = card.querySelector(".annex-remotes-save");
+      const readonlyRows = [...card.querySelectorAll(".annex-remote-readonly-row")];
+      const specialRows = [...card.querySelectorAll(".annex-special-remote-row")];
+      const typeLink = specialRows[0] ? specialRows[0].querySelector(".annex-special-remote-type") : null;
       return {
         card: box(card),
         cardPadLeft: getComputedStyle(card).paddingLeft,
         cardBorderLeft: getComputedStyle(card).borderLeftWidth,
         title: { text: text(title), box: box(title), pad: title ? getComputedStyle(title).paddingLeft : null },
         rows: rows.length,
-        rowBoxes: rows.map((r) => ({ box: box(r), name: box(r.querySelector(".annex-remote-name")), url: box(r.querySelector(".annex-remote-url")), del: box(r.querySelector(".annex-remote-del")) })),
+        rowBoxes: rows.map((r) => ({
+          box: box(r),
+          name: box(r.querySelector(".annex-remote-name")),
+          fetch: box(r.querySelector(".annex-remote-fetch")),
+          push: box(r.querySelector(".annex-remote-push-url")),
+          mark: box(r.querySelector(".annex-remote-mark")),
+          del: box(r.querySelector(".annex-remote-del")),
+        })),
         addButton: { text: add ? add.textContent.trim() : null, box: box(add) },
+        saveDisabled: save ? save.getAttribute("aria-disabled") : null,
+        readonlyRows: readonlyRows.length,
+        readonlyBadge: text(readonlyRows[0] ? readonlyRows[0].querySelector(".annex-remote-readonly-badge") : null),
+        specialTitle: text(card.querySelector(".annex-special-remotes-title")),
+        specialRows: specialRows.length,
+        specialTypeHref: typeLink ? typeLink.getAttribute("href") : null,
       };
     })(),
   }, null, 1) + "REPORT_JSON_END";
@@ -327,23 +365,31 @@ ${fragment}
   check(rep.groups[0].renderRows === 1 && rep.groups[1].renderRows === 2, "三个编辑器都挂在 render 行里（remote 1 + 模板 2）", JSON.stringify(rep.groups.map((g) => g.renderRows)));
   check(rep.settingRow.box !== null && Math.abs(rep.settingRow.box.left - rep.groups[2].box.left) < 2, "「缩略图边长」行贴住所属 group 的左边缘", `行=${rep.settingRow.box.left} group=${rep.groups[2].box.left}`);
 
-  // ── remote 设置：一个 item 装多条 ─────────────────────────────────────────
+  // ── remote 设置：一个 item 装多条（读 .git/config，Save 才写）───────────────
   const remotes = rep.remotes;
-  check(remotes !== null && remotes.title.text === "remote 设置", "最上方那一项的标题 = remote 设置", remotes === null ? "(缺)" : remotes.title.text);
+  check(remotes !== null && remotes.title.text === "Remotes", "最上方那一项的标题 = Remotes", remotes === null ? "(缺)" : remotes.title.text);
   check(remotes !== null && Math.abs(remotes.card.left - rep.groups[0].box.left) < 2, "remote 卡片与第一个 group 左对齐", remotes === null ? "(缺)" : `卡片=${remotes.card.left} group=${rep.groups[0].box.left}`);
-  check(remotes.rows === 2, "同一个 item 里装了 2 条 remote");
+  check(remotes.rows === 2, "同一个 item 里装了 2 条单 URL git remote");
   check(remotes.title.pad === "0px", "remote 设置的标题自己不带 padding（不做无谓缩进）");
   const cardInnerLeft = remotes.card.left + parseFloat(remotes.cardBorderLeft) + parseFloat(remotes.cardPadLeft);
   check(Math.abs(remotes.title.box.left - cardInnerLeft) < 0.5, "remote 设置的标题与卡片内容左边缘对齐（缩进只来自卡片自己的 padding）", `标题 left=${remotes.title.box.left} vs 卡片内容左=${cardInnerLeft}`);
   check(Math.abs(remotes.card.left - contentLeft) < 0.5, "remote 设置整块与内容左边缘对齐");
   const [row0, row1] = remotes.rowBoxes;
   check(row1.box.top > row0.box.top, "两行 remote 上下排列（第 2 行在第 1 行下面）");
-  check(row0.name.left < row0.url.left && row0.url.left < row0.del.left, "行内从左往右 = 名称 → 地址 → 删除", `${row0.name.left} / ${row0.url.left} / ${row0.del.left}`);
-  check(row0.url.width > row0.name.width, "地址那一格比名称宽（地址更长）", `${row0.url.width} vs ${row0.name.width}`);
-  check(row0.del.right <= remotes.card.right + 0.5, "「删除」没有溢出卡片");
-  check(remotes.addButton.text === "添加 remote", "列表下方是「添加 remote」");
-  check(Math.abs(remotes.addButton.box.left - remotes.title.box.left) < 0.5, "「添加 remote」与标题左对齐");
-  check(remotes.addButton.box.top > row1.box.top, "「添加 remote」在两行 remote 下面");
+  check(row0.name.left < row0.fetch.left && row0.fetch.left < row0.del.left, "行内从左往右 = 名称 → fetch URL → 删除", `${row0.name.left} / ${row0.fetch.left} / ${row0.del.left}`);
+  check(row0.fetch.width > row0.name.width, "fetch URL 那一格比名称宽（地址更长）", `${row0.fetch.width} vs ${row0.name.width}`);
+  check(row1.push !== null && row1.push.left > row1.name.left && row1.push.right <= remotes.card.right + 0.5, "有 pushurl 的行多一格 push 输入框（不溢出卡片）", row1.push === null ? "(缺)" : `${row1.push.left}..${row1.push.right}`);
+  check(row0.del.right <= remotes.card.right + 0.5, "「Delete」没有溢出卡片");
+  check(remotes.addButton.text === "Add remote", "列表下方是「Add remote」");
+  check(remotes.saveDisabled === "true", "未改动时 Save 是禁用态（aria-disabled=true）", String(remotes.saveDisabled));
+  check(Math.abs(remotes.addButton.box.left - remotes.title.box.left) < 0.5, "「Add remote」与标题左对齐");
+  check(remotes.addButton.box.top > row1.box.top, "「Add remote」在两行 remote 下面");
+  check(remotes.readonlyRows === 1 && remotes.readonlyBadge === "multiple URLs - edit with git", "multi-URL remote 在只读列表里，标注 multiple URLs - edit with git", `${remotes.readonlyRows} / ${remotes.readonlyBadge}`);
+  check(remotes.specialTitle === "git-annex special remotes", "git-annex special remotes 有自己的只读区标题", String(remotes.specialTitle));
+  if (annexAvailable) {
+    check(remotes.specialRows === 1, "真实的 git annex initremote remote 渲染成 1 行", String(remotes.specialRows));
+    check(/special_remotes\//.test(String(remotes.specialTypeHref)), "special remote 的 type 链接到 git-annex 文档", String(remotes.specialTypeHref));
+  }
 
   // ── 元数据预设：外部 JSON 工具条 + 每文件一行 ──────────────────────────────
   check(rep.toolbar.length === 3, "工具条只有 3 个控件（路径输入 / 登记 / 从预设创建）", `${rep.toolbar.length} 个`);

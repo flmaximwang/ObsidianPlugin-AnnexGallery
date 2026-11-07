@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -51,6 +52,23 @@ def check(ok, message, detail=""):
     else:
         fail_count += 1
         print(f"  ✗ {message}  —— {detail}")
+
+
+def single_url_git_remotes(vault_path):
+    """Names of the remotes the editor shows as editable rows (one fetch URL, <=1 push URL)."""
+    result = subprocess.run(["git", "-C", vault_path, "config", "--get-regexp", r"^remote\."],
+                            capture_output=True, text=True)
+    urls, pushes = {}, {}
+    for line in result.stdout.splitlines():
+        key, _, value = line.partition(" ")
+        match = re.match(r"^remote\.(.*)\.url$", key)
+        if match:
+            urls.setdefault(match.group(1), []).append(value)
+            continue
+        match = re.match(r"^remote\.(.*)\.pushurl$", key)
+        if match:
+            pushes.setdefault(match.group(1), []).append(value)
+    return {name for name, values in urls.items() if len(values) == 1 and len(pushes.get(name, [])) <= 1}
 
 
 def targets():
@@ -172,8 +190,19 @@ PROBE = r"""JSON.stringify((() => {
       })(),
     })),
     legacyWarning: pane.querySelector('.annex-legacy-profiles-warning') ? text(pane.querySelector('.annex-legacy-profiles-warning')) : null,
-    remoteRows: remotes ? [...remotes.querySelectorAll('.annex-remote-row')].map(r => ({name: r.querySelector('.annex-remote-name').value, url: r.querySelector('.annex-remote-url').value, box: box(r)})) : null,
-    remoteAdd: remotes ? remotes.querySelector('.annex-remote-add').textContent.trim() : null,
+    remoteTitle: remotes ? text(remotes.querySelector('.annex-remotes-title')) : null,
+    remoteRows: remotes ? [...remotes.querySelectorAll('.annex-remote-row')].map(r => ({
+      name: r.querySelector('.annex-remote-name') ? r.querySelector('.annex-remote-name').value : null,
+      fetch: r.querySelector('.annex-remote-fetch') ? r.querySelector('.annex-remote-fetch').value : null,
+      push: r.querySelector('.annex-remote-push-url') ? r.querySelector('.annex-remote-push-url').value : null,
+      box: box(r),
+      del: box(r.querySelector('.annex-remote-del')),
+    })) : null,
+    remoteAdd: remotes ? text(remotes.querySelector('.annex-remote-add')) : null,
+    remoteSaveDisabled: remotes && remotes.querySelector('.annex-remotes-save') ? remotes.querySelector('.annex-remotes-save').disabled : null,
+    remoteReadonlyBadge: remotes && remotes.querySelector('.annex-remote-readonly-badge') ? text(remotes.querySelector('.annex-remote-readonly-badge')) : null,
+    remoteSpecialTitle: remotes ? text(remotes.querySelector('.annex-special-remotes-title')) : null,
+    remoteSpecialRows: remotes ? remotes.querySelectorAll('.annex-special-remote-row').length : null,
     plainSettings: [...pane.querySelectorAll('.setting-item')].map(s => s.getAttribute('data-name') || (s.querySelector('.setting-item-name') ? s.querySelector('.setting-item-name').textContent.trim() : null)),
   };
 })())"""
@@ -197,7 +226,6 @@ def main():
         loaded: Boolean(p),
         version: p ? p.manifest.version : null,
         settingsKeys: p ? Object.keys(p.settings) : null,
-        remotes: p ? p.settings.remotes : null,
         profileFiles: p ? p.settings.profileFiles : null,
         baseTemplates: p ? p.settings.baseTemplates : null,
         legacyPresent: p ? Boolean(p.legacyInlineProfiles && p.legacyInlineProfiles.present) : null,
@@ -238,7 +266,7 @@ def main():
         check(headings == [None, "元数据预设与画廊模板", "常规"],
               f"三个 group 的 heading = 无 → 元数据预设与画廊模板 → 常规：{headings}")
         item_names = [g["items"] for g in groups]
-        check(item_names == [["remote 设置"], ["元数据预设", "画廊模板"], ["缩略图边长", "调试日志"]],
+        check(item_names == [["Remotes"], ["元数据预设", "画廊模板"], ["缩略图边长", "调试日志"]],
               f"每个 group 的设置项：{item_names}")
         render_rows = [g["renderRows"] for g in groups]
         check(render_rows == [1, 2, 0],
@@ -318,10 +346,24 @@ def main():
 
     rows = rep["remoteRows"]
     repo_remotes = subprocess.run(["git", "-C", env["vaultPath"], "remote"], capture_output=True, text=True).stdout.split()
+    check(rep.get("remoteTitle") == "Remotes", f"remote 卡片标题 = Remotes：{rep.get('remoteTitle')}")
     check(rows is not None and len(rows) > 0, f"remote 设置里有 {0 if rows is None else len(rows)} 行")
-    check(set(r["name"] for r in rows or []) >= set(repo_remotes),
-          f"仓库里存在的 remote 都被识别出来了：仓库={repo_remotes} 设置页={[r['name'] for r in rows or []]}")
-    check(rep.get("remoteAdd") == "添加 remote", "列表下方是「添加 remote」")
+    editable = single_url_git_remotes(env["vaultPath"])
+    shown = {r["name"] for r in rows or []}
+    check(shown == editable,
+          f"编辑行 = .git/config 里单 URL 的 git remote：仓库={sorted(editable)} 设置页={sorted(shown)}")
+    check(shown <= set(repo_remotes),
+          f"设置页每行都对应仓库里真实存在的 remote：仓库={repo_remotes} 设置页={sorted(shown)}")
+    check(all(r["fetch"] for r in rows or []), f"每行都显示 fetch URL：{[r['fetch'] for r in rows or []]}")
+    check(all(r["del"] and r["del"]["right"] <= r["box"]["right"] + 1 for r in rows or []),
+          "每行的 Delete 都没有溢出本行")
+    check(rep.get("remoteAdd") == "Add remote", f"列表下方是「Add remote」：{rep.get('remoteAdd')}")
+    check(rep.get("remoteSaveDisabled") is True, f"未改动时 Save 是禁用态：{rep.get('remoteSaveDisabled')}")
+    if rep.get("remoteReadonlyBadge") is not None:
+        check(rep["remoteReadonlyBadge"] == "multiple URLs - edit with git",
+              f"multi-URL remote 只读列表标注正确：{rep['remoteReadonlyBadge']}")
+    check(rep.get("remoteSpecialTitle") == "git-annex special remotes",
+          f"git-annex special remotes 区标题正确：{rep.get('remoteSpecialTitle')}")
     check(rep["plainSettings"] == ["缩略图边长"], f"只有「缩略图边长」一个普通设置项：{rep['plainSettings']}")
 
     # 截图前先把设置窗口提到前台：窗口被遮挡/最小化时 Chromium 会推迟渲染，

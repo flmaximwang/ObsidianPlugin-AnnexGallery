@@ -48,7 +48,6 @@ import {
   type ParseProfile,
   pickProfile,
 } from "./src/core/profiles";
-import { mergeScannedRemotes, scanRemotes } from "./src/core/remotes";
 import {
   AnnexGallerySettingTab,
   DEFAULT_SETTINGS,
@@ -452,16 +451,6 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     await this.loadSettings();
     this.addSettingTab(new AnnexGallerySettingTab(this.app, this));
 
-    // 插件加载时扫一遍：当前仓库本来就有 remote（有些仓库确实有），别让它显示成「没有 remote」。
-    // 只补设置里没有的，不覆盖同名的；不是 git 仓库就静默跳过。
-    void this.scanVaultRemotes()
-      .then((added) => {
-        if (added > 0) {
-          new Notice(`已从当前仓库读到 ${added} 条 remote（设置页「remote 设置」里可见）。`, 8000);
-        }
-      })
-      .catch((error) => console.error(error));
-
     // 状态栏（spec: docs/status-bar.md）：未提交 / 未跟踪 / 未入库 largefiles。
     // 30 秒轮询 + 点击立即刷新；`registerInterval` 让框架在卸载时替我清掉这个定时器。
     this.setupStatusBar();
@@ -640,6 +629,13 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       rawData !== null && typeof rawData === "object" && !Array.isArray(rawData)
         ? (rawData as Record<string, unknown>)
         : {};
+    // Did the loaded data.json actually carry the obsolete remotes key? If so, drop it and
+    // persist once at the end of this method so the file stops containing it immediately.
+    const hadLegacyRemotes =
+      rawData !== null &&
+      typeof rawData === "object" &&
+      !Array.isArray(rawData) &&
+      Object.prototype.hasOwnProperty.call(rawData, "remotes");
     // 顺序不变：用户已有的 data.json 优先，缺失的键才用 DEFAULT_SETTINGS，绝不冲掉现有配置。
     // 注意：旧的内联 `profiles`、旧的 `metadataTemplates` 会原样留在 data.json 里（不迁移、不删除），
     // 但运行时**只读** `profileFiles` 指向的外部 JSON —— 旧值永远不会被当成配置来源。
@@ -650,6 +646,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     delete legacy.gitattributesPath;
     delete legacy.gitignorePath;
     delete legacy.defaultSample;
+    // Remotes now live only in .git/config. Drop the obsolete data.json copy silently.
+    delete legacy.remotes;
     // 元数据预设：只保留 vault 相对路径；真正的路径/存在性/内容校验发生在每次操作前的
     // `loadProfileFiles`（那时出错才可见）。
     this.settings.profileFiles = profileFileRefs(this.settings.profileFiles);
@@ -684,23 +682,16 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     if (folderBaseTemplates === null || typeof folderBaseTemplates !== "object" || Array.isArray(folderBaseTemplates)) {
       this.settings.folderBaseTemplates = {};
     }
-    // remotes：必须是 { name, url } 数组；旧 data.json 没这个键 ⇒ 空数组。
-    if (!Array.isArray(this.settings.remotes)) {
-      this.settings.remotes = [];
-    } else {
-      this.settings.remotes = this.settings.remotes
-        .filter((entry) => entry !== null && typeof entry === "object")
-        .map((entry) => ({ name: String(entry.name ?? ""), url: String(entry.url ?? "") }));
-    }
     // ⚠️ `DEFAULT_SETTINGS` 里的数组/对象是**模块级常量**：`Object.assign` 只把引用拷过来，
     // 一次运行里写入的「按文件夹记忆」会污染模块常量 —— 下一个插件实例（新窗口 / 重载）就会读到
     // 上一轮的残留记忆（甚至把「模板没登记」的错误掩盖掉）。这里统一换成各自的副本。
     this.settings.folderProfiles = { ...this.settings.folderProfiles };
     this.settings.folderSamples = { ...this.settings.folderSamples };
     this.settings.folderBaseTemplates = { ...this.settings.folderBaseTemplates };
-    this.settings.remotes = [...this.settings.remotes];
     this.settings.profileFiles = [...this.settings.profileFiles];
     this.settings.baseTemplates = [...this.settings.baseTemplates];
+    // Silently drop the obsolete data.json copy from disk (no notice, no migration).
+    if (hadLegacyRemotes) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
@@ -771,28 +762,6 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     throw new Error("拿不到系统默认应用：既没有 electron.shell.openPath，也没有 app.openWithDefaultApp");
   }
 
-  /**
-   * 插件加载/打开设置页时扫一遍仓库里的 remote：仓库有、设置里还没有的补进设置（不覆盖同名的）。
-   * 返回补进去了几条。vault 不是 git 仓库 / git 不可用 ⇒ 0，不报错。
-   */
-  async scanVaultRemotes(): Promise<number> {
-    let root: string;
-    try {
-      root = this.vaultRoot();
-    } catch {
-      return 0;
-    }
-    const top = git(["rev-parse", "--show-toplevel"], root);
-    const repoDir = top.code === 0 && top.stdout.trim() !== "" ? top.stdout.trim() : root;
-    const scanned = scanRemotes(repoDir);
-    if (scanned.length === 0) return 0;
-    const { remotes, added } = mergeScannedRemotes(this.settings.remotes, scanned);
-    if (added.length === 0) return 0;
-    this.settings.remotes = remotes;
-    await this.saveSettings();
-    return added.length;
-  }
-
   private folderPath(folder: TFolder): string {
     return path.join(this.vaultRoot(), folder.path === "/" ? "" : folder.path);
   }
@@ -822,11 +791,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const root = this.vaultRoot();
     try {
       const result = await initGallery(root, {
-        remotes: this.settings.remotes,
         progress: (message) => this.logProgress(message),
       });
-      const remotes = result.remotes;
-      const remoteCount = (action: string): number => remotes.filter((entry) => entry.action === action).length;
       this.notifyReport("初始化 gallery 完成", [
         `仓库根：${result.root}`,
         `git init：${result.createdRepo ? "已新建" : "已存在，跳过"}`,
@@ -845,15 +811,6 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
             ]),
         `.gitattributes：补 ${result.gitattributes.added.length} 条规则`,
         `.gitignore：补 ${result.gitignore.added.length} 条规则`,
-        ...(remotes.length === 0
-          ? []
-          : [
-              `remote：新增 ${remoteCount("added")} · 改地址 ${remoteCount("updated")} · 未变 ${remoteCount("unchanged")} · 跳过 ${remoteCount("skipped")} · 失败 ${remoteCount("failed")}`,
-            ]),
-        ...remotes
-          .filter((entry) => entry.action === "failed" || entry.action === "skipped")
-          .slice(0, 3)
-          .map((entry) => `remote ${entry.name || "(空)"}：${entry.detail ?? entry.action}`),
         ...result.notes,
       ]);
     } catch (error) {

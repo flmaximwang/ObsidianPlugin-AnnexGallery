@@ -39,7 +39,10 @@
   border: none;
 }
 
-/* ── remote 设置（最上方的一项，可装多条）────────────────────────────────── */
+/* ── remote 设置（最上方的一项；.git/config 是唯一事实来源）─────────────────
+ * 结构：卡片标题 → 说明 → 校验摘要 → 可编辑行（name / fetch / push / 待办标记）→
+ * 工具条（Add remote / Save / Reload）→ 只读的多 URL remote → 只读的 git-annex
+ * special remote。编辑器的草稿只在内存里，Save 才写 git；关闭设置页即丢弃。 */
 
 .annex-remotes-section {
   margin: 0 0 1em 0;
@@ -66,49 +69,297 @@
   font-size: var(--font-ui-smaller);
 }
 
+/* 没有仓库：只显示 run Initialize gallery 的提示，不渲染编辑器。 */
+.annex-remotes-no-repo {
+  padding: 0.5em 0;
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
+}
+
+.annex-remotes-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+/* 校验摘要：plan 的 issues 在这里汇总一行；空的时候不占高度。 */
+.annex-remotes-summary {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.annex-remotes-summary:empty {
+  display: none;
+}
+
 .annex-remote-list {
   display: flex;
   flex-direction: column;
-  gap: 0.4em;
-}
-
-.annex-remote-row {
-  display: flex;
-  align-items: center;
   gap: 0.5em;
 }
 
+/* 一行 = 名称 + fetch URL（+ 可选 push URL）+ 待办标记 + 删除。允许换行，
+ * 窄窗口下 push URL / 标记会落到下一行，而不是把输入框挤没。 */
+.annex-remote-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.45em 0.55em;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-s);
+  background-color: var(--background-primary);
+}
+
 .annex-remote-name {
-  flex: 0 0 12em;
+  flex: 0 1 11em;
   min-width: 8em;
 }
 
 .annex-remote-url {
-  flex: 1 1 auto;
+  flex: 1 1 16em;
   min-width: 12em;
 }
 
-.annex-remote-note {
+.annex-remote-push-add {
   flex: 0 0 auto;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+  cursor: pointer;
 }
 
-.annex-remote-note-warn {
+.annex-remote-mark {
+  flex: 0 0 auto;
+  padding: 0 0.4em;
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.annex-remote-row .annex-remote-del {
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+/* 行错误（plan 的 issue）：单独占一行，不把输入框撑出卡片。 */
+.annex-remote-error {
+  flex-basis: 100%;
   color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  overflow-wrap: anywhere;
+}
+
+.annex-remote-error:empty {
+  display: none;
+}
+
+/* 待办标记：颜色 + 左侧色条，`.is-*` 同时挂在行和标记上（供测试 / 主题覆盖）。 */
+.annex-remote-row.is-new {
+  border-left-color: var(--interactive-accent);
+}
+
+.annex-remote-row.is-changed {
+  border-left-color: var(--text-warning);
+}
+
+.annex-remote-row.is-renamed {
+  border-left-color: var(--text-accent);
+}
+
+.annex-remote-mark.is-new {
+  color: var(--text-on-accent);
+  background-color: var(--interactive-accent);
+}
+
+.annex-remote-mark.is-changed {
+  color: var(--text-warning);
+  background-color: var(--background-modifier-error-hover);
+}
+
+.annex-remote-mark.is-renamed {
+  color: var(--text-accent);
+}
+
+/* 待删除：只标记草稿（git 直到 Save 并确认后才动），所以用划线 + 淡化。 */
+.annex-remote-row.is-deleted {
+  border-left-color: var(--text-error);
+  opacity: 0.65;
+}
+
+.annex-remote-row.is-deleted input {
+  text-decoration: line-through;
+}
+
+.annex-remote-mark.is-deleted {
+  color: var(--text-error);
+}
+
+/* 校验失败的行 / 字段（annex-gallery-10m DESIGN 4：出错就一条命令都不跑）。 */
+.annex-remote-row.annex-remote-row-invalid {
+  border-color: var(--text-error);
+  border-left-color: var(--text-error);
+}
+
+input.annex-remote-field-invalid {
+  border-color: var(--text-error);
+  box-shadow: 0 0 0 1px var(--text-error);
 }
 
 .annex-remotes-empty {
   color: var(--text-muted);
 }
 
-.annex-remote-add {
-  margin-top: 0.8em;
+/* 工具条：Add remote 靠左，Save / Reload 靠右。 */
+.annex-remotes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.9em;
+}
+
+.annex-remotes-toolbar .annex-remote-add {
+  margin-right: auto;
   cursor: pointer;
 }
 
-.annex-remote-row button {
+.annex-remotes-toolbar button {
   cursor: pointer;
+}
+
+.annex-remotes-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── 只读 remote：多 URL 的 remote（label 说明去终端用 git 改）────────────── */
+
+.annex-remotes-subtitle,
+.annex-special-remotes-title {
+  margin: 1.1em 0 0.2em 0;
+  padding: 0;
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.annex-remote-readonly-list,
+.annex-special-remote-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.annex-remote-readonly-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.4em 0.55em;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-remote-readonly-name,
+.annex-special-remote-name {
+  font-weight: var(--font-semibold);
+}
+
+.annex-remote-readonly-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  overflow-wrap: anywhere;
+}
+
+.annex-remote-readonly-badge {
+  flex: 0 0 auto;
+  padding: 0 0.4em;
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── git-annex special remote：只读列表（插件从不创建 / 编辑 / 删除）────────── */
+
+.annex-special-remotes {
+  margin-top: 0.4em;
+}
+
+.annex-special-remotes-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-bottom: 0.6em;
+}
+
+.annex-special-remotes-hint code {
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-special-remotes-doc-link,
+.annex-special-remote-type {
+  color: var(--text-accent);
+  cursor: pointer;
+}
+
+.annex-special-remote-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.4em 0.55em;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-special-remote-type {
+  font-family: var(--font-monospace);
+}
+
+.annex-special-remote-setting {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  overflow-wrap: anywhere;
+}
+
+.annex-special-remote-uuid {
+  flex: 0 0 auto;
+  padding: 0 0.4em;
+  border-radius: var(--radius-s);
+  background-color: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.annex-special-remotes-empty {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* ── 移除确认弹窗（列出待删除的 remote；annex-uuid 时额外警告）─────────────── */
+
+.annex-remotes-confirm-list {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.annex-remotes-confirm-warning {
+  padding: 0.5em 0.75em;
+  border-left: 4px solid var(--text-warning);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+}
+
+.annex-remotes-confirm-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
 }
 
 /* ── 模板区（画廊 .base 模板）：与 remote 设置同一套卡片口径 ─────────────── */

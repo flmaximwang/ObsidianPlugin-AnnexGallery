@@ -17,7 +17,9 @@
  */
 const fs = require("fs");
 const Module = require("module");
+const os = require("os");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const stubPath = path.join(__dirname, "obsidian-stub.cjs");
 const stub = require(stubPath);
@@ -84,6 +86,56 @@ const writeJson = (relPath, value) => writeText(relPath, `${JSON.stringify(value
 const readJson = (relPath) => JSON.parse(fs.readFileSync(rel(relPath), "utf8"));
 const lastNotice = () => stub.registry.notices[stub.registry.notices.length - 1] ?? "";
 const lastModal = () => stub.registry.modals[stub.registry.modals.length - 1];
+
+/** Temporary git repos / dirs created by the remotes-editor checks (removed at the end). */
+const TEMP_REMOTE_DIRS = [];
+
+function gitRun(dir, args) {
+  return execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+function gitConfigGet(dir, key) {
+  try {
+    return gitRun(dir, ["config", "--get", key]);
+  } catch {
+    return null;
+  }
+}
+function makeTempGitRepo(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  TEMP_REMOTE_DIRS.push(dir);
+  gitRun(dir, ["init", "-q"]);
+  gitRun(dir, ["config", "user.email", "smoke@example.invalid"]);
+  gitRun(dir, ["config", "user.name", "Annex Gallery Smoke"]);
+  return dir;
+}
+/**
+ * Bundle the TypeScript remotes editor so this headless test can mount it against a temporary
+ * real git repo. The rest of the smoke test goes through the built main.js; the editor is the
+ * one UI class whose behaviour depends on `.git/config`, so it is exercised directly.
+ */
+function loadRemotesEditor() {
+  const esbuild = require("esbuild");
+  const outfile = path.join(os.tmpdir(), `annex-remotes-editor-${process.pid}.cjs`);
+  try {
+    esbuild.buildSync({
+      entryPoints: [path.join(repo, "src/ui/remotes-editor.ts")],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      target: "node18",
+      external: ["obsidian"],
+      outfile,
+      logLevel: "silent",
+    });
+    return require(outfile);
+  } finally {
+    fs.rmSync(outfile, { force: true });
+  }
+}
+function cleanupTempRemoteDirs() {
+  for (const dir of TEMP_REMOTE_DIRS) fs.rmSync(dir, { recursive: true, force: true });
+  TEMP_REMOTE_DIRS.length = 0;
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -195,7 +247,7 @@ writeText("Templates/broken.base", "views: [\n");
   const defs = tab.getSettingDefinitions();
   console.log(`设置定义：${defs.map((d) => (d.type === "group" ? `group(${d.heading ?? "无标题"})` : d.name)).join(" | ")}`);
   assert(defs.length === 3, "设置页顶层 = 3 个区块（remote / 元数据预设与画廊模板 / 常规）");
-  assert(defs[0].type === "group" && defs[0].items?.[0]?.name === "remote 设置", "第一个区块是 remote 设置（render 项）");
+  assert(defs[0].type === "group" && defs[0].items?.[0]?.name === "Remotes", "第一个区块是 Remotes（render 项）");
   assert(
     defs[1].type === "group" &&
       defs[1].heading === "元数据预设与画廊模板" &&
@@ -225,47 +277,399 @@ writeText("Templates/broken.base", "views: [\n");
   assert(byClass(tab.containerEl, "annex-settings-divider").length === 0 && byClass(tab.containerEl, "annex-remotes-divider").length === 0, "旧的 hr 分割线已删除（改用 group heading）");
 
   const remotesSection = one(tab.containerEl, "annex-remotes-section");
-  assert(remotesSection !== undefined, "设置页有「remote 设置」这一项");
-  assert(one(tab.containerEl, "annex-remotes-title").textContent === "remote 设置", "这一项的标题 = 「remote 设置」");
-  assert(byClass(tab.containerEl, "annex-remote-row").length === 0, "默认 0 条 remote");
-  assert(byClass(tab.containerEl, "annex-remotes-empty").length === 1, "空列表给一句提示");
+  assert(remotesSection !== undefined, "设置页有「Remotes」这一项");
+  assert(one(tab.containerEl, "annex-remotes-title").textContent === "Remotes", "这一项的标题 = Remotes");
+  // The smoke vault itself is a plain directory: the editor must show the hint, not rows.
+  assert(
+    one(tab.containerEl, "annex-remotes-no-repo").textContent === "This vault is not a git repo yet. Run Initialize gallery first.",
+    "无仓库时给出 Initialize gallery 提示",
+  );
+  assert(byClass(tab.containerEl, "annex-remote-row").length === 0, "无仓库时不渲染编辑行");
+  assert(one(tab.containerEl, "annex-remotes-save") === undefined, "无仓库时没有 Save");
 
-  one(tab.containerEl, "annex-remote-add").click();
-  await settle();
-  assert(byClass(tab.containerEl, "annex-remote-row").length === 1, "点「添加 remote」出现 1 行");
-  assert(plugin.settings.remotes.length === 1 && stub.registry.savedData.remotes.length === 1, "这行空 remote 已落进 data.json（草稿行）");
-  let remoteRows = byClass(tab.containerEl, "annex-remote-row");
-  assert(byClass(remoteRows[0], "annex-remote-name").length === 1 && byClass(remoteRows[0], "annex-remote-url").length === 1, "一行 = 名称 + 地址 两个输入框");
-  assert(byClass(remoteRows[0], "annex-remote-del").length === 1, "行尾有「删除」");
+  // ── 2b. remote 编辑器：直接对着临时 git 仓库验证真实读写 ─────────────────────
+  {
+    const { RemotesEditor } = loadRemotesEditor();
+    const editorContainer = new stub.FakeEl("div");
+    const app = stub.makeApp(vaultPath);
+    // The editor refreshes only its own card — the host has nothing to refresh.
+    const hostFor = (dir) => ({
+      app,
+      vaultRoot: () => dir,
+    });
+    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "annex-remotes-plain-"));
+    TEMP_REMOTE_DIRS.push(plainDir);
+    try {
+      const noRepoEditor = new RemotesEditor(editorContainer, hostFor(plainDir));
+      noRepoEditor.render();
+      assert(
+        one(editorContainer, "annex-remotes-no-repo").textContent === "This vault is not a git repo yet. Run Initialize gallery first.",
+        "编辑器：普通目录 → no-repo 提示",
+      );
+      assert(
+        byClass(editorContainer, "annex-remote-row").length === 0 && one(editorContainer, "annex-remotes-save") === undefined,
+        "编辑器：no-repo 时不显示编辑行 / Save",
+      );
+      assert(byClass(editorContainer, "annex-special-remotes").length === 0, "编辑器：no-repo 时不显示 special remotes 区");
 
-  let nameIn = byClass(tab.containerEl, "annex-remote-name")[0];
-  let urlIn = byClass(tab.containerEl, "annex-remote-url")[0];
-  nameIn.value = "origin";
-  nameIn.dispatchEvent({ type: "input" });
-  await tick();
-  assert(stub.registry.savedData.remotes[0].name === "origin", "名称输入即落盘");
-  assert(one(tab.containerEl, "annex-remote-note-warn") !== undefined, "只填名称时行尾提示「缺地址」");
-  urlIn.value = "ssh://nas.example/volume1/Data_lab_10";
-  urlIn.dispatchEvent({ type: "input" });
-  await tick();
-  assert(stub.registry.savedData.remotes[0].url === "ssh://nas.example/volume1/Data_lab_10", "地址输入即落盘");
-  assert(one(tab.containerEl, "annex-remote-note-warn") === undefined, "名称与地址都填全后提示消失");
+      // A real repository with every remote shape the editor has to deal with.
+      const repoDir = makeTempGitRepo("annex-remotes-repo-");
+      gitRun(repoDir, ["remote", "add", "origin", "https://example.com/origin.git"]);
+      gitRun(repoDir, ["remote", "add", "nas", "ssh://nas.example/volume1/Data"]);
+      gitRun(repoDir, ["config", "remote.nas.pushurl", "https://nas.example/push.git"]);
+      gitRun(repoDir, ["remote", "add", "annexed", "ssh://annex.example/repo"]);
+      gitRun(repoDir, ["config", "remote.annexed.annex-uuid", "11111111-2222-3333-4444-555555555555"]);
+      gitRun(repoDir, ["remote", "add", "multi", "https://a.example/multi.git"]);
+      gitRun(repoDir, ["config", "--add", "remote.multi.url", "https://b.example/multi.git"]);
+      // A remote with a push URL but no fetch URL (git calls it "pushonly").
+      gitRun(repoDir, ["config", "remote.pushonly.pushurl", "ssh://push.example/only.git"]);
+      const configFile = path.join(repoDir, ".git", "config");
 
-  one(tab.containerEl, "annex-remote-add").click();
-  await settle();
-  assert(byClass(tab.containerEl, "annex-remote-row").length === 2, "「remote 设置」可以装多条（第 2 行）");
-  nameIn = byClass(tab.containerEl, "annex-remote-name")[1];
-  urlIn = byClass(tab.containerEl, "annex-remote-url")[1];
-  nameIn.value = "backup";
-  nameIn.dispatchEvent({ type: "input" });
-  urlIn.value = "/Volumes/Backup/Data_lab_10";
-  urlIn.dispatchEvent({ type: "input" });
-  await tick();
-  assert(plugin.settings.remotes.length === 2 && stub.registry.savedData.remotes[1].name === "backup", "第 2 条也落盘");
-  byClass(tab.containerEl, "annex-remote-del")[0].click();
-  await settle();
-  assert(plugin.settings.remotes.length === 1 && plugin.settings.remotes[0].name === "backup", "删掉的是第一行（剩下的那条 = backup）");
-  assert(stub.registry.savedData.remotes.length === 1, "删除也落盘");
+      // A real git-annex special remote (not a fabricated config layout).
+      const specialDir = path.join(repoDir, "special-storage");
+      const annexAvailable = (() => {
+        try {
+          gitRun(repoDir, ["annex", "version"]);
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+      if (annexAvailable) {
+        fs.mkdirSync(specialDir, { recursive: true });
+        gitRun(repoDir, ["annex", "init"]);
+        gitRun(repoDir, [
+          "annex",
+          "initremote",
+          "archive",
+          "type=directory",
+          `directory=${specialDir}`,
+          "encryption=none",
+        ]);
+      } else {
+        console.log("  SKIP: git-annex 不可用（git annex version 失败）→ 跳过真实 special remote 用例");
+      }
+
+      let editor = new RemotesEditor(editorContainer, hostFor(repoDir));
+      editor.render();
+      const rows = () => byClass(editorContainer, "annex-remote-row");
+      const rowFor = (name) => rows().find((row) => row.getAttr("data-remote") === name);
+      const saveButton = () => one(editorContainer, "annex-remotes-save");
+      const inputValue = (el) => (el === undefined || el === null ? null : el.value);
+
+      console.log(`  remote 编辑行：${rows().map((row) => row.getAttr("data-remote")).join(" | ")}`);
+      assert(one(editorContainer, "annex-remotes-title").textContent === "Remotes", "编辑器：卡片标题 = Remotes");
+      assert(rows().length === 3, "编辑器：只有单 URL 的 git remote 进编辑行（origin / nas / annexed）");
+      assert(
+        rowFor("origin") !== undefined && rowFor("nas") !== undefined && rowFor("annexed") !== undefined,
+        "编辑器：3 条 git remote 各有 1 行",
+      );
+      assert(rowFor("multi") === undefined, "编辑器：multi-URL remote 不进编辑行");
+      assert(rowFor("pushonly") === undefined, "编辑器：只有 push URL 的 remote 不进编辑行");
+      assert(one(rowFor("origin"), "annex-remote-push-add") !== undefined, "编辑器：无 push URL 的行给「+ push URL」");
+      assert(one(rowFor("nas"), "annex-remote-push-url") !== undefined, "编辑器：有 pushurl 的行直接显示 push 输入框");
+      assert(rows().every((row) => one(row, "annex-remote-mark").textContent === ""), "编辑器：初始状态没有待办标记");
+      assert(saveButton().disabled === true, "编辑器：没改任何东西时 Save 禁用");
+      assert(saveButton().getAttr("aria-disabled") === "true", "编辑器：禁用态同时写 aria-disabled");
+
+      // Read-only remotes: multi-URL and push-URL-only.
+      const readonlyRows = byClass(editorContainer, "annex-remote-readonly-row");
+      const readonlyFor = (name) => readonlyRows.find((row) => row.getAttr("data-remote") === name);
+      assert(readonlyFor("multi") !== undefined, "编辑器：multi-URL remote 显示在只读列表");
+      assert(
+        one(readonlyFor("multi"), "annex-remote-readonly-badge").textContent === "multiple URLs - edit with git",
+        "编辑器：只读列表标注 multiple URLs - edit with git",
+      );
+      assert(
+        /https:\/\/a\.example\/multi\.git/.test(stub.walk(readonlyFor("multi")).map((el) => el.textContent).join(" ")),
+        "编辑器：只读列表显示 URL",
+      );
+      assert(readonlyFor("pushonly") !== undefined, "编辑器：只有 push URL 的 remote 也出现在只读列表（不再是隐形 remote）");
+      assert(
+        one(readonlyFor("pushonly"), "annex-remote-readonly-badge").textContent === "no fetch URL - edit with git",
+        "编辑器：只有 push URL 的 remote 标注 no fetch URL - edit with git",
+      );
+      assert(
+        /ssh:\/\/push\.example\/only\.git/.test(stub.walk(readonlyFor("pushonly")).map((el) => el.textContent).join(" ")),
+        "编辑器：只读列表显示它的 push URL",
+      );
+
+      // Special remotes: read-only list with the type linked to the git-annex docs.
+      assert(
+        one(editorContainer, "annex-special-remotes-title").textContent === "git-annex special remotes",
+        "编辑器：special remotes 标题 = git-annex special remotes",
+      );
+      const specialRows = byClass(editorContainer, "annex-special-remote-row");
+      if (annexAvailable) {
+        assert(
+          specialRows.length === 1 && specialRows[0].getAttr("data-remote") === "archive",
+          "编辑器：真实的 git annex initremote remote 单独一行（archive）",
+        );
+        const typeLink = one(specialRows[0], "annex-special-remote-type");
+        assert(
+          typeLink.textContent === "directory",
+          "编辑器：special remote 的 type 是 directory（来自真实的 git annex initremote）",
+        );
+        assert(
+          /special_remotes\/directory\//.test(String(typeLink.getAttr("href"))),
+          "编辑器：special remote type 链接到 git-annex 的 directory 文档",
+        );
+        assert(
+          stub.walk(specialRows[0]).map((el) => el.textContent).join(" ").includes(specialDir),
+          "编辑器：special remote 显示主设置（directory 路径）",
+        );
+      } else {
+        assert(specialRows.length === 0, "编辑器：没有 git-annex 时没有 special remote 行");
+      }
+      const specialHintText = stub.walk(one(editorContainer, "annex-special-remotes-hint")).map((el) => el.textContent).join(" ");
+      assert(
+        /git annex initremote/.test(specialHintText) && /git annex enableremote/.test(specialHintText),
+        "编辑器：hint 说明用 git annex initremote / enableremote 管理",
+      );
+      assert(
+        /never creates, edits or removes/.test(specialHintText),
+        "编辑器：hint 写明插件从不创建 / 编辑 / 删除 special remotes",
+      );
+      assert(
+        one(editorContainer, "annex-special-remotes-doc-link").getAttr("href") ===
+          "https://git-annex.branchable.com/special_remotes/",
+        "编辑器：hint 链接到 git-annex special remotes 文档",
+      );
+
+      // Revealing an empty push URL is not a change (Save stays disabled).
+      one(rowFor("origin"), "annex-remote-push-add").click();
+      assert(one(rowFor("origin"), "annex-remote-push-url") !== undefined, "编辑器：点「+ push URL」显示 push 输入框");
+      assert(saveButton().disabled === true, "编辑器：仅展开空 push 框不算改动（Save 仍禁用）");
+
+      // Reload = Revert: the draft is dropped and the card shows git again.
+      const reloadFetch = one(rowFor("origin"), "annex-remote-fetch");
+      reloadFetch.value = "https://example.com/dropped.git";
+      reloadFetch.dispatchEvent({ type: "input" });
+      assert(saveButton().disabled === false, "编辑器：改完 URL 后 Save 可用");
+      one(editorContainer, "annex-remotes-reload").click();
+      assert(
+        inputValue(one(rowFor("origin"), "annex-remote-fetch")) === "https://example.com/origin.git",
+        "编辑器：Reload 丢掉草稿，输入框回到 git 里的值",
+      );
+      assert(saveButton().disabled === true, "编辑器：Reload 之后 Save 重新禁用");
+      assert(
+        gitConfigGet(repoDir, "remote.origin.url") === "https://example.com/origin.git",
+        "编辑器：Reload 不写 git",
+      );
+
+      // Change a fetch URL: marker + Save runs the real git command.
+      const configBefore = fs.readFileSync(configFile, "utf8");
+      const originFetch = one(rowFor("origin"), "annex-remote-fetch");
+      originFetch.value = "https://example.com/origin-updated.git";
+      originFetch.dispatchEvent({ type: "input" });
+      assert(one(rowFor("origin"), "annex-remote-mark").textContent === "URL changed", "编辑器：改 fetch URL 后行上标 URL changed");
+      assert(rowFor("origin").hasClass("is-changed"), "编辑器：改 URL 的行带 is-changed");
+      assert(saveButton().disabled === false, "编辑器：有改动后 Save 可用");
+      saveButton().click();
+      assert(
+        gitConfigGet(repoDir, "remote.origin.url") === "https://example.com/origin-updated.git",
+        "编辑器：Save 真的执行 git remote set-url",
+      );
+      assert(fs.readFileSync(configFile, "utf8") !== configBefore, "编辑器：Save 真的改了 .git/config");
+      assert(saveButton().disabled === true, "编辑器：Save 后卡片自己重画（Save 重新禁用）");
+
+      // Push URL: set it (with a regex metacharacter), then clear it again.
+      one(rowFor("origin"), "annex-remote-push-add").click();
+      const pushInput = one(rowFor("origin"), "annex-remote-push-url");
+      pushInput.value = "git@h:foo/bar+baz.git";
+      pushInput.dispatchEvent({ type: "input" });
+      assert(one(rowFor("origin"), "annex-remote-mark").textContent === "URL changed", "编辑器：改 push URL 也标 URL changed");
+      saveButton().click();
+      assert(
+        gitConfigGet(repoDir, "remote.origin.pushurl") === "git@h:foo/bar+baz.git",
+        "编辑器：Save 真的执行 git remote set-url --push（URL 里的 + 被原样写入）",
+      );
+      const clearPush = one(rowFor("origin"), "annex-remote-push-url");
+      clearPush.value = "";
+      clearPush.dispatchEvent({ type: "input" });
+      saveButton().click();
+      assert(
+        gitConfigGet(repoDir, "remote.origin.pushurl") === null,
+        "编辑器：清空 push URL 真的删掉了 remote.origin.pushurl",
+      );
+
+      // Rename: `git remote rename` keeps the remote and its URL.
+      const nasName = one(rowFor("nas"), "annex-remote-name");
+      nasName.value = "nas2";
+      nasName.dispatchEvent({ type: "input" });
+      assert(one(rowFor("nas"), "annex-remote-mark").textContent === "renamed", "编辑器：改名后行上标 renamed");
+      saveButton().click();
+      assert(
+        gitConfigGet(repoDir, "remote.nas.url") === null && gitConfigGet(repoDir, "remote.nas2.url") === "ssh://nas.example/volume1/Data",
+        "编辑器：Save 执行 git remote rename（URL 跟着走）",
+      );
+      assert(gitConfigGet(repoDir, "remote.nas2.pushurl") === "https://nas.example/push.git", "编辑器：rename 后 push URL 也跟着走");
+      assert(rowFor("nas2") !== undefined && rowFor("nas") === undefined, "编辑器：rename 后卡片重画为新名字");
+
+      // A pending delete is a draft only; Undo reverts it without touching git.
+      one(rowFor("annexed"), "annex-remote-del").click();
+      const annexedDeleted = rowFor("annexed");
+      assert(
+        annexedDeleted.hasClass("is-deleted") && one(annexedDeleted, "annex-remote-mark").textContent === "pending delete",
+        "编辑器：Delete 只把草稿行标成待删除（删除线）",
+      );
+      assert(gitConfigGet(repoDir, "remote.annexed.url") === "ssh://annex.example/repo", "编辑器：未 Save 前 git remote 仍在");
+      assert(one(annexedDeleted, "annex-remote-del").textContent === "Undo", "编辑器：待删除行给 Undo");
+      one(annexedDeleted, "annex-remote-del").click();
+      assert(
+        !rowFor("annexed").hasClass("is-deleted") && gitConfigGet(repoDir, "remote.annexed.url") === "ssh://annex.example/repo",
+        "编辑器：Undo 取消待删除、git 未动",
+      );
+
+      // Removal: confirm modal with the annex-uuid warning; Cancel keeps the draft, Remove writes git.
+      one(rowFor("annexed"), "annex-remote-del").click();
+      saveButton().click();
+      const removalModal = lastModal();
+      assert(
+        removalModal !== undefined && removalModal.titleEl.textContent === "Remove git remotes?",
+        "编辑器：removal 打开确认 Modal",
+      );
+      const removalText = stub.walk(removalModal.contentEl).map((el) => el.textContent).join(" ");
+      assert(/annexed/.test(removalText), "编辑器：确认 Modal 列出待删除的 remote");
+      assert(/git-annex uses/.test(removalText) && /annex-uuid/.test(removalText), "编辑器：annex-uuid remote 的删除有额外警告");
+      assert(
+        gitConfigGet(repoDir, "remote.annexed.url") === "ssh://annex.example/repo",
+        "编辑器：确认前 git 没删 remote",
+      );
+      const cancelButton = stub.walk(removalModal.contentEl).find((el) => el.tagName === "BUTTON" && el.textContent === "Cancel");
+      assert(cancelButton !== undefined, "编辑器：确认 Modal 有 Cancel");
+      cancelButton.click();
+      assert(gitConfigGet(repoDir, "remote.annexed.url") === "ssh://annex.example/repo", "编辑器：Cancel 不删除 remote");
+      assert(rowFor("annexed").hasClass("is-deleted"), "编辑器：Cancel 后草稿行仍是待删除");
+
+      // vps: git changes while the confirm dialog is open ⇒ nothing is applied.
+      saveButton().click();
+      const staleModal = lastModal();
+      gitRun(repoDir, ["remote", "add", "outside", "https://outside.example/repo.git"]);
+      const noticesBeforeStaleModal = stub.registry.notices.length;
+      const staleRemove = stub.walk(staleModal.contentEl).find((el) => el.tagName === "BUTTON" && el.textContent === "Remove");
+      assert(staleRemove !== undefined, "编辑器：确认 Modal 有 Remove");
+      staleRemove.click();
+      assert(
+        gitConfigGet(repoDir, "remote.annexed.url") === "ssh://annex.example/repo",
+        "编辑器：弹窗期间 git 变了 ⇒ 一条命令都不跑（不删 remote）",
+      );
+      assert(
+        lastNotice() === "Remotes changed outside settings - reloaded. Re-apply your edits.",
+        "编辑器：弹窗期间 git 变了 ⇒ 提示 Relotes changed outside settings",
+      );
+      assert(stub.registry.notices.length === noticesBeforeStaleModal + 1, "编辑器：弹窗 staleness 只多一条 Notice");
+      assert(rowFor("annexed") !== undefined && !rowFor("annexed").hasClass("is-deleted"), "编辑器：弹窗 staleness 后卡片按 git 重画");
+
+      // Add remote: appended draft row -> Save runs `git remote add`.
+      one(editorContainer, "annex-remote-add").click();
+      const newRow = rows().find((row) => row.getAttr("data-remote") === "");
+      assert(newRow !== undefined && one(newRow, "annex-remote-mark").textContent === "new", "编辑器：Add remote 追加一行并标 new");
+      const newName = one(newRow, "annex-remote-name");
+      newName.value = "backup";
+      newName.dispatchEvent({ type: "input" });
+      const newFetch = one(newRow, "annex-remote-fetch");
+      newFetch.value = "/Volumes/Backup/Data";
+      newFetch.dispatchEvent({ type: "input" });
+      assert(saveButton().disabled === false, "编辑器：填了新 remote 后 Save 可用");
+      saveButton().click();
+      assert(gitConfigGet(repoDir, "remote.backup.url") === "/Volumes/Backup/Data", "编辑器：Save 执行 git remote add");
+
+      // Invalid name: git rejects "a..b", so nothing may be written.
+      one(editorContainer, "annex-remote-add").click();
+      const invalidRow = rows().find((row) => row.getAttr("data-remote") === "");
+      assert(invalidRow !== undefined, "编辑器：再加一行用于校验");
+      const invalidName = one(invalidRow, "annex-remote-name");
+      invalidName.value = "a..b";
+      invalidName.dispatchEvent({ type: "input" });
+      const invalidFetch = one(invalidRow, "annex-remote-fetch");
+      invalidFetch.value = "https://example.com/bad.git";
+      invalidFetch.dispatchEvent({ type: "input" });
+      const configBeforeInvalid = fs.readFileSync(configFile, "utf8");
+      saveButton().click();
+      assert(
+        fs.readFileSync(configFile, "utf8") === configBeforeInvalid,
+        "编辑器：非法名称 a..b 时一条命令都不跑（.git/config 没变）",
+      );
+      const invalidRowNow = rows().find((row) => row.getAttr("data-remote") === "");
+      assert(
+        (invalidRowNow !== undefined && invalidRowNow.hasClass("annex-remote-row-invalid")) ||
+          /Remotes not fully saved/.test(lastNotice()),
+        "编辑器：非法名称要么被标红、要么报出失败（不能静默吞掉）",
+      );
+
+      // Closing the settings page discards the draft: a fresh editor sees git again.
+      const closedFetch = one(rowFor("origin"), "annex-remote-fetch");
+      closedFetch.value = "https://example.com/never-saved.git";
+      closedFetch.dispatchEvent({ type: "input" });
+      assert(saveButton().disabled === false, "编辑器：未保存的改动让 Save 可用");
+      const reopenedContainer = new stub.FakeEl("div");
+      const reopenedEditor = new RemotesEditor(reopenedContainer, hostFor(repoDir));
+      reopenedEditor.render();
+      assert(
+        inputValue(one(reopenedContainer, "annex-remote-fetch")) === "https://example.com/origin-updated.git",
+        "编辑器：关掉设置页再打开 ⇒ 草稿没了（回到 git 的值）",
+      );
+      assert(
+        gitConfigGet(repoDir, "remote.origin.url") === "https://example.com/origin-updated.git",
+        "编辑器：未保存的草稿从不写进 git",
+      );
+
+      // Staleness: git changed after render => apply nothing, notice, re-render the card.
+      const staleFetch = one(rowFor("origin"), "annex-remote-fetch");
+      staleFetch.value = "https://example.com/stale.git";
+      staleFetch.dispatchEvent({ type: "input" });
+      gitRun(repoDir, ["remote", "add", "outside2", "https://outside2.example/repo.git"]);
+      const noticesBeforeStale = stub.registry.notices.length;
+      saveButton().click();
+      assert(
+        lastNotice() === "Remotes changed outside settings - reloaded. Re-apply your edits.",
+        "编辑器：外部改了 git config ⇒ Save 应用 0 条并提示重载",
+      );
+      assert(
+        gitConfigGet(repoDir, "remote.origin.url") === "https://example.com/origin-updated.git",
+        "编辑器：staleness 时旧 URL 没变",
+      );
+      assert(
+        inputValue(one(rowFor("origin"), "annex-remote-fetch")) === "https://example.com/origin-updated.git",
+        "编辑器：staleness 后卡片按 git 重画",
+      );
+      assert(stub.registry.notices.length === noticesBeforeStale + 1, "编辑器：staleness 只多一条 Notice");
+
+      // c22: delete + identical re-add is real work (`remote remove` + `remote add`), so the
+      // identity-based dirty check must keep Save enabled even though the rows line up.
+      const c22Repo = makeTempGitRepo("annex-remotes-c22-");
+      gitRun(c22Repo, ["remote", "add", "origin", "https://example.com/origin.git"]);
+      const c22Container = new stub.FakeEl("div");
+      new RemotesEditor(c22Container, hostFor(c22Repo)).render();
+      assert(one(c22Container, "annex-remotes-save").disabled === true, "编辑器：c22 前置 —— 未改动时 Save 禁用");
+      one(c22Container, "annex-remote-del").click();
+      assert(
+        one(c22Container, "annex-remote-row").hasClass("is-deleted"),
+        "编辑器：c22 前置 —— 原有 remote 标为待删除",
+      );
+      one(c22Container, "annex-remote-add").click();
+      const c22Rows = byClass(c22Container, "annex-remote-row");
+      const c22NewRow = c22Rows[c22Rows.length - 1];
+      const c22Name = one(c22NewRow, "annex-remote-name");
+      const c22Fetch = one(c22NewRow, "annex-remote-fetch");
+      c22Name.value = "origin";
+      c22Name.dispatchEvent({ type: "input" });
+      c22Fetch.value = "https://example.com/origin.git";
+      c22Fetch.dispatchEvent({ type: "input" });
+      assert(
+        one(c22Container, "annex-remotes-save").disabled === false,
+        "编辑器：删除 + 新增同值 remote 仍算改动（Save 可用，c22）",
+      );
+      one(c22Container, "annex-remotes-save").click();
+      assert(
+        gitConfigGet(c22Repo, "remote.origin.url") === "https://example.com/origin.git",
+        "编辑器：c22 的 remove + add 真的执行了（origin 仍是同一地址）",
+      );
+    } finally {
+      fs.rmSync(plainDir, { recursive: true, force: true });
+    }
+  }
 
   const names = settingNames(tab.containerEl);
   console.log(`渲染出的设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
@@ -823,12 +1227,19 @@ writeText("Templates/broken.base", "views: [\n");
   stub.registry.savedData = {
     thumbnailEdge: 256,
     profiles: [JSON.parse(JSON.stringify(tec))],
+    // 旧版本把 remote 列表存在 data.json 里：加载时必须静默丢掉（.git/config 是唯一真相），
+    // 不提示、不迁移，而且加载后就把清理过的设置写回磁盘（键当场消失，不拖到下一次落盘）。
+    remotes: [{ name: "origin", url: "ssh://old.example/gallery" }],
     folderSamples: {},
     folderProfiles: { [legacyVault]: tec.id },
   };
   const legacyPlugin = new PluginClass(stub.makeApp(legacyVault), { id: "annex-gallery", version: "0.1.0" });
   await legacyPlugin.onload();
   instances += 1;
+  assert(
+    stub.registry.savedData.remotes === undefined,
+    "旧 data.json 的 remotes 键在 onload 后就写回磁盘（不再拖到下一次无关的落盘）",
+  );
   const legacyTab = stub.registry.tabs[stub.registry.tabs.length - 1];
   legacyTab.update();
   const legacyWarning = one(legacyTab.containerEl, "annex-legacy-profiles-warning");
@@ -838,6 +1249,7 @@ writeText("Templates/broken.base", "views: [\n");
   assert(legacyWarningBody !== undefined && /不会读取、不会自动迁移/.test(legacyWarningBody.textContent), "提示写明不读取、不自动迁移");
   assert(legacyWarningBody !== undefined && /分别保存成 vault 里的一个 \.json 文件/.test(legacyWarningBody.textContent), "提示引导手工登记外部 JSON");
   assert(legacyPlugin.settings.profileFiles.length === 0, "旧内联 profiles 没有变成 profileFiles（不迁移）");
+  assert(legacyPlugin.settings.remotes === undefined, "旧 data.json 的 remotes 键在加载时被静默丢弃（插件照常工作）");
   assert(byClass(legacyTab.containerEl, "annex-profile-row").length === 0, "旧内联 profiles 不渲染成外部模板行");
   modalsBefore = stub.registry.modals.length;
   const legacyMenu = new stub.Menu();
@@ -847,7 +1259,9 @@ writeText("Templates/broken.base", "views: [\n");
   console.log(`  旧内联 profiles 生成 → ${lastNotice().split("\n")[0]}`);
   assert(/还没有登记任何元数据预设/.test(lastNotice()), "旧内联 profiles 不参与运行时（不 fallback）");
   assert(stub.registry.modals.length === modalsBefore, "旧内联 profiles 不打开生成弹窗");
-  assert(stub.registry.savedData.profiles.length === 1 && stub.registry.savedData.profileFiles === undefined, "旧 data.json 的 profiles 原样保留、没有被迁移成 profileFiles");
+  assert(stub.registry.savedData.profiles.length === 1 && (stub.registry.savedData.profileFiles ?? []).length === 0, "旧 data.json 的 profiles 原样保留、没有被迁移成 profileFiles（profileFiles 仍为空）");
+  await legacyPlugin.saveSettings();
+  assert(stub.registry.savedData.remotes === undefined, "再次落盘后 data.json 里依然没有 remotes");
   stub.registry.savedData = mainSavedData;
   rmrf(legacyVault);
 
@@ -861,7 +1275,8 @@ writeText("Templates/broken.base", "views: [\n");
   assert(plugin2.settings.folderSamples[path.join(vaultPath, runtimeDir)] === "smoke-sample", "folderSamples 读回正确");
   assert(plugin2.settings.folderBaseTemplates[rel(rereadFolder)] === "base", "folderBaseTemplates 读回正确（无效旧记忆已被有效选择替代）");
   assert(plugin2.settings.thumbnailEdge === 256, "缩略图边长默认值 256 读回正确");
-  assert(plugin2.settings.remotes.length === 1 && plugin2.settings.remotes[0].name === "backup", "remote 设置读回正确");
+  assert(plugin2.settings.remotes === undefined, "插件设置里不再有 remotes（git config 是唯一事实来源）");
+  assert(stub.registry.savedData.remotes === undefined, "data.json 不再写 remotes");
   assert(plugin2.legacyInlineProfiles.present === false, "当前 data.json 没有旧内联 profiles 提示");
 
   // ── 12. Drop largefiles：非 annex 仓库时只给一条清楚的 Notice ─────────────
@@ -905,10 +1320,12 @@ writeText("Templates/broken.base", "views: [\n");
   assert(stub.registry.statusBarItems.length === statusItemsAtStart + instances, `每个插件实例只加 1 行状态栏项（本次建了 ${instances} 个实例）`);
 
   assert(plugin.vaultRoot() === vaultPath, `vaultRoot() = ${plugin.vaultRoot()}`);
+  cleanupTempRemoteDirs();
   console.log(`\n断言全部通过 · NOTICES=${stub.registry.notices.length}`);
   console.log("SMOKE OK");
   process.exit(0);
 })().catch((error) => {
+  cleanupTempRemoteDirs();
   console.error("\nSMOKE FAILED:", error);
   process.exit(1);
 });

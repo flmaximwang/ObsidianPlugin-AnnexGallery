@@ -17,19 +17,20 @@
 
 - 目录 / git 仓库 / annex 仓库**存在**；
 - annex 的**形态设置**（此后新文件以 unlocked 入库）收敛到标准状态；
-- 两条规则文件（`.gitattributes` / `.gitignore`）补到齐；
-- 设置页里配的 remote 写进配置。
+- 两条规则文件（`.gitattributes` / `.gitignore`）补到齐。
 
 **它明确不管**
 
 - 不 `git add` / 不 `git commit` / 不 `git annex add` —— 工作树不被代劳，init 之前就在目录里的文件跑完
   仍是未跟踪（`verify:init` 场景 1 钉住这点）；
-- 不 `fetch` / 不 `push` —— remote 只写配置，网络动作是使用者自己的决定；
+- 不碰 remote 配置 —— 远端只活在 `.git/config` 里，由设置页在显式 Save 时修改；init 既不
+  `git remote add`、也不 `set-url`，也不改 git-annex 分支的 `remote.log`（special remote 的类型来源）；
+- 不 `fetch` / 不 `push` —— 插件不提供任何传输操作，网络动作是使用者自己的决定；
 - **不回头解锁**已 locked 的老文件（批量解锁是另一条命令，见 [`docs/context-menu.md`](context-menu.md) 的
   `Unlock largefiles`）；
 - 不判断这个库「该不该」初始化 —— 只判断目录能不能当仓库根（见下条）。
 
-## 一条命令里的 7 步（其中 2 步是 annex 命令）
+## 一条命令里的 6 步（其中 2 步是 annex 命令）
 
 | 步 | 动作 | 已经满足时 |
 |---|---|---|
@@ -39,7 +40,6 @@
 | 4 | **把 annex 的「设置」核对并修复到标准状态**（← **annex 命令 2**，见下节） | 三条都合口径 → 零写入，报告写「未改动」 |
 | 5 | 合并 `.gitattributes`（目标不存在 / 为空 → 原样写入内置模板；否则只追加缺的行） | 规则齐了 → 补 0 行 |
 | 6 | 合并 `.gitignore`（只 `.obsidian`） | 同上 |
-| 7 | 按设置页「remote 设置」逐条 `git remote add` / `set-url`（只写配置，不 fetch / 不 push） | 同名同地址 → 一个字节都不碰 |
 
 第 2 步的「子目录」判断是必须的：`git init` 在一个已有仓库的子目录里会造出嵌套仓库，之后 annex 的两层
 配置会落在错的地方 —— 这种状态修起来比报错贵得多，所以宁可停在这一步。
@@ -55,7 +55,6 @@
 | annex 仓库 | 已有 → `git annex init` 跳过（它会写 `.git/annex` 与配置，没必要重跑） |
 | annex 设置 | 逐条核对**生效值**，偏离才修；三条都合口径 → 零写入 |
 | 两条规则文件 | **合并**语义：只追加缺的行，已有的行不删、不重排、不重复写（`mergeRuleText` + `writeIfChanged`，内容没变就不落盘） |
-| remote | 同名同地址 → 不碰；同名不同地址 → `set-url`；缺 → `add` |
 | 工作树 | 全程不碰（除步骤 5/6 那两个文件本身） |
 
 由此得到可核对的现象：在标准态仓库上连跑三次 —— 零报错、零写入（git-annex 分支提交哈希不变、本机
@@ -204,7 +203,7 @@ CLI（`node tools/annex-gallery.mjs init <dir>`）连跑两次的差别 —— �
 
 | 位置 | 承担什么 |
 |---|---|
-| `src/core/init.ts` | 7 步的编排；第 4 步是 `applyAnnexShape()` —— 读分支值、读本机/全局值、合成生效值、按标准状态决定 set / unset / 兜底，并把「做了什么、为什么」写进报告 |
+| `src/core/init.ts` | 6 步的编排；第 4 步是 `applyAnnexShape()` —— 读分支值、读本机/全局值、合成生效值、按标准状态决定 set / unset / 兜底，并把「做了什么、为什么」写进报告 |
 | `src/core/rules.ts` | 两条规则文件的内置模板与**合并**实现（`mergeRuleText` / `ensureRulesFile` / `writeIfChanged`）—— 幂等语义在这里，不在调用点 |
 | `scripts/cli.ts` | 同名子命令（`node tools/annex-gallery.mjs init <dir>`），与命令面板共用 `init.ts` 的同一条路径，带 `--dry-run` |
 | `tools/verify-init.cjs` | 判据侧，不是运行时的一部分 |

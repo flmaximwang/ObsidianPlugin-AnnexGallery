@@ -6,15 +6,16 @@
 
 - 设置页的**顶层顺序**：从第一个 group 到最后一条普通设置项，各区块的落点与前后关系；
 - 区块内部的几何**关系式**：左边缘对齐、上下间隙相等、跨行同列、撑满内容宽、不横向溢出；
-- 控件的行为契约：工具条三个入口、每行（外部文件）的打开 / 取消登记、remote 行的增删与落盘、
-  「模板」区的登记 / 从预设创建 / 打开 / 取消登记、「初始化 gallery」对 remote 的写入语义；
+- 控件的行为契约：工具条三个入口、每行（外部文件）的打开 / 取消登记、remote 编辑器（读 `.git/config`
+  与 git-annex 分支的 `remote.log`、内存草稿、Save / Reload 的写入语义）、「模板」区的登记 / 从预设创建 /
+  打开 / 取消登记；
 - 每条契约由哪条命令钉住、钉到什么程度。
 
 **不管什么**
 
 - 解析引擎本身（正则怎么匹配、字段怎么进 frontmatter）的算法；
 - 主题配色、字体、截图观感 —— 这部分没有自动判据，只能人眼看；
-- git 远端的网络行为：remote 只写配置，不 fetch、不 push。
+- git 远端的网络行为：插件不 fetch、不 push；设置页只读写 remote 配置。
 
 本文件**不含任何随环境变化的具体数值**。像素、耗时、坐标随主题与窗口尺寸变化，写进来既会过期也会误导；
 判据一律是「相等 / 对齐 / 同序 / 撑满」这类关系式，命令与配置里的路径一律是占位符
@@ -43,11 +44,13 @@
 ```
 .setting-group（无 heading）
 ┌ .annex-remotes-card ────────────────────────────────────────────┐
-│ remote 设置                                                      │
-│ 「初始化 gallery」会逐个 git remote add / set-url…                 │
-│ [名称: <remote>] [地址: ssh://<host>/<volume>/<path>] [删除]      │  ← 一行一条，可多条
-│ [名称: <remote>] [地址: /Volumes/<volume>/<path>]     [删除]      │
-│ [添加 remote]                                                     │
+│ Remotes                                                          │
+│ Read from .git/config; written only when you save.               │
+│ [名称: <remote>] [Fetch URL: ssh://<host>/<volume>/<path>] … [Delete]│  ← 一行一条单 URL git remote
+│ [名称: <remote>] [Fetch URL: /Volumes/<volume>/<path>] [Push URL] [待改标记] [Delete]│
+│                                                            [+ push URL] │
+│ [Add remote]                                    [Save] [Reload]  │
+│ 只读：multi-URL remotes / git-annex special remotes（带文档链接）  │
 └─────────────────────────────────────────────────────────────────┘
 .setting-group（heading「元数据预设与画廊模板」）
 ┌ .annex-profiles-section ─────────────────────────────────────────┐
@@ -85,10 +88,15 @@
   两项的 name/desc 非空且 `searchable` 不为 false，设置搜索能按「缩略图」「调试」命中。
 - **`getControlValue()` / `setControlValue()` 被覆写**，读写 `host.settings` 后统一走
   `host.saveSettings()`（不依赖框架默认的 `plugin.saveData()` 路径）。
-- **remote 区**是一张 `.annex-remotes-card`：`h3.annex-remotes-title` + 一行 `.annex-remotes-hint` +
-  N 行 `.annex-remote-row`（名称 / 地址 / 删除）+ 一个「添加 remote」。行内三列跨行同列对齐；名称列定宽，
-  地址列吃掉剩余宽度。输入即写 `data.json` 的 `remotes`。名称或地址缺一半 ⇒ 行尾红字提示
-  （缺名称 / 缺地址 / 名称里有空白字符）。
+- **remote 区**是一张 `.annex-remotes-card`，git remote 的数据来源是 `<vault>/.git/config`，不是
+  `data.json`：打开时读 `git config --get-regexp '^remote\.'`，一行一条 git remote（名称 / Fetch URL /
+  可选 Push URL）。改动只留在内存里并标在行上（新增 / 地址变了 / 改名 / 待删除划掉），Save 之前不写盘；
+  Save 把草稿与打开时的快照做 diff，按 remove → rename → set-url（fetch / push）→ add 的顺序执行；
+  Reload 丢弃草稿重新读 git。多 URL remote 与 git-annex special remote 各有一段只读列表，不给编辑入口。
+  special remote 的 **type** 不在 `.git/config`：git-annex 把它写在 git-annex 分支的 `remote.log` 里，
+  插件本地只读 `git show git-annex:remote.log`；参数（如 `directory`）由 git-annex 存成
+  `remote.<name>.annex-<param>`（`annex-directory`），主设置从这些键读。不是 git 仓库时整区禁用，提示先跑
+  「初始化 gallery」。所有新文案是英文。
 - **元数据预设区**（`.annex-profiles-section`）只有两样东西：
   1. **工具条**（`.annex-profiles-toolbar`）：`<input class="annex-profile-path-input">`（vault 相对 `.json`
      路径）+ `<button class="annex-profile-register">登记</button>` +
@@ -129,7 +137,7 @@
 - **「打开」走系统默认应用**：`electron.shell.openPath(<绝对路径>)`；只有在拿不到 electron 且路径确实落在
   vault 内时，才退回 `app.openWithDefaultApp(<vault 相对路径>)`（那个 API 只认相对路径）。
   打开前重新做路径与存在性检查，失败 ⇒ Notice 指名 vault 路径与原因，**绝不自动创建文件**。
-- **模板区没有「保存」按钮**：改动即写 `data.json`，口径与 remote 区一致。
+- **模板区没有「保存」按钮**：改动即写 `data.json`（remote 区相反：编辑只在内存里，点 Save 才写 `.git/config`）。
 - **「生成元数据」弹窗只问两件事**：一个**元数据预设下拉**（默认按 `match` 预选，其次是按文件夹记住的
   `folderProfiles`，再其次是第一条已登记）+ 该预设的 **ask 字段**（默认 `["sample"]`，
   按文件夹记住上次填的值）。**没有模板下拉** —— 正文由预设自己的 `template` 决定，
@@ -144,8 +152,8 @@
 
 | 落点 | 内容 |
 |---|---|
-| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → 元数据预设与画廊模板 render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`hide()` 重置 remote 扫描守卫；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `baseTemplates` / `folderProfiles` / `folderSamples` / `folderBaseTemplates`）；旧键检测（`detectLegacyInlineProfiles` / `detectLegacyMetadataTemplates`）；`SettingsHost` 暴露 `vaultRoot()` / `scanVaultRemotes()` / `createVaultFile()` |
-| `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：`.annex-remotes-card`、`.annex-remote-list`、`.annex-remote-row`、`.annex-remote-note(-warn)`、`.annex-remote-add` |
+| `src/ui/settings.ts` | `AnnexGallerySettingTab`：`getSettingDefinitions()` 返回三个 group（remote render → 元数据预设与画廊模板 render ×2 → 常规 control ×2）；覆写 `getControlValue()` / `setControlValue()` 统一走 `host.saveSettings()`；`PluginSettings` / `DEFAULT_SETTINGS`（含 `profileFiles` / `baseTemplates` / `folderProfiles` / `folderSamples` / `folderBaseTemplates`，**不含 remotes**）；旧键检测（`detectLegacyInlineProfiles` / `detectLegacyMetadataTemplates`）；旧 `remotes` 键由 `main.ts` 的 `loadSettings()` 静默删掉并在有旧键时立即落盘一次；`SettingsHost` 暴露 `vaultRoot()` / `createVaultFile()`；remote 区把 `app` / `vaultRoot` / `refresh` 交给 `RemotesEditor` |
+| `src/ui/remotes-editor.ts` | `RemotesEditor.render()`：打开时 `readRemotes()`；可编辑行（名称 / Fetch URL / Push URL）、待改标记、Save / Reload；多 URL 与 special remotes 只读列表（special remote 的类型来自 git-annex 分支 `remote.log`）；删除确认（annex-uuid 额外警告）；无仓库时禁用 |
 | `src/ui/profile-editor.ts` | `ProfileEditor.render()`：`.annex-profiles-toolbar`、`.annex-profile-list`、`.annex-profile-row`、`-name` / `-id` / `-path` / `-open` / `-del` / `-error` / `-warn`；登记 / 从预设创建 / 打开 / 取消登记 |
 | `src/ui/templates-editor.ts` | `TemplatesEditor.render()`：`.annex-templates-section`、`.annex-templates-card[data-kind=base]`、`-title` / `-hint`、`.annex-template-list` / `-row` / `-name` / `-id` / `-path` / `-open` / `-del`、`.annex-template-add-row` / `-path-input` / `-add` / `-preset`；`TEMPLATE_FOLDER`（`AnnexGalleryTemplates/`）、`uniqueTemplateId()` |
 | `src/core/external-files.ts` | 外部文件的路径规范化与校验：`normalizeVaultRelPath()` / `validateVaultRelPath()` / `resolveVaultFile()` / `readVaultTextFile()`（vault 相对路径、扩展名、存在性）；三类文件：元数据预设 `.json` / 正文模板 `.md` / 画廊模板 `.base` |
@@ -154,19 +162,18 @@
 | `src/core/presets.ts` | 「从预设创建」的素材：`PRESET_PROFILES`（`tecnaitem` / `tecnaitem-embed` / `minimal`，各带一份正文）、`presetJsonText()` |
 | `src/core/templates.ts` | 画廊模板 id / 预设素材 / `TemplateRef`（`id` · `name` · vault 相对 `path`）/ `listTemplates()`（只有登记项）/ `resolveTemplate()`（无内置兜底）/ `readTemplateFile()` / 占位符填充（从 `placeholders.ts` 转出） |
 | `src/defaults/presets/*.json`、`src/defaults/presets/*.body.md`、`src/defaults/base/*.base` | 预设素材原文 —— 源码里的唯一一份，构建时由 `defaults-text` 内联（与 `.gitattributes` 同一条路） |
-| `src/core/remotes.ts` | `scanRemotes()` / `mergeScannedRemotes()` / `applyRemotes()` |
+| `src/core/remotes.ts` | remote 的唯一读取 / 规划 / 执行入口：`readRemotes()` 读 `.git/config`（`config: Record<string, string[]>`，保留重复键）与 git-annex 分支的 `remote.log`（快照带 `remoteLog`，读取失败时带 `configError`）；`SpecialRemote` 带 `baseType` / `externalType`；`parseRemoteConfig()` / `rowsFromSnapshot()` / `planRemoteChanges()` / `applyRemotePlan()` / `sameRemoteConfig()`（同时比对 `remote.log`）/ `specialRemoteDocUrl()` |
 | `src/core/stems.ts` | `stemOf()` —— 全插件唯一的 stem 实现 |
 | `styles.css` | 本页全部选择器；与 app.css 的对抗关系写在注释里 |
 | `esbuild.config.mjs` | `defaults-text` 插件把 `src/defaults/presets/*.body.md`、`src/defaults/base/*.base` 内联成字符串（预设素材只有源码这一份）；`src/defaults/presets/*.json` 走 esbuild 的 JSON loader |
 | `tools/layout-check.cjs` | 离屏几何（`npm run layout`） |
 | `tools/real-gui-check.py` | 真机结构（`npm run gui`） |
-| `tools/smoke-test.cjs` / `tools/remotes-check.cjs` | 无头结构与落盘、remote 写入语义 |
+| `tools/smoke-test.cjs` / `tools/remotes-check.cjs` | 无头结构与落盘；remote 的读取 / 解析 / diff 顺序 / 校验 / 写入语义 |
 
 ### 关键选择器与特异度
 
 | 选择器 | 特异度 | 压掉谁 |
 |---|---|---|
-| `.vertical-tab-content h3.annex-remotes-title` | (0,2,1) | app.css 给 h3 的行内 padding |
 | `.vertical-tab-content h3.annex-templates-title` | (0,2,1) | 同上（模板区卡片的标题） |
 | `.setting-item.annex-editor-row` | (0,2,0) | app 给 `.setting-item` 的内边距 / 背景 / 边框；render 项整行交给编辑器卡片 |
 | `.setting-item.annex-editor-row > .setting-item-info` | (0,2,0) | 隐藏只用于设置搜索的 name/desc（编辑器自带标题） |
@@ -219,12 +226,19 @@
    `window.open(abs, "_external")`）；传 `TMPDIR` 那种绝对路径会被拼到 vault 根后面，指向不存在的文件
    —— **静默失败**：返回成功、什么都不弹。因此「把 API 换成探针」只能证明它被调用，证明不了它有效；
    有效性只能在真机上看副作用（`lsof` / 进程表）。
-9. **remote 只写配置，幂等。** 「初始化 gallery」逐个 `git remote add`；同名已存在且地址不同 ⇒
-   `git remote set-url`，地址相同 ⇒ `unchanged`（一个字节都不碰）；名称/地址缺一半、名称带空白 ⇒
-   `skipped` 并写明原因；同名重复只认第一条；dry-run 只报不写。不做 fetch/push，也不整段重写配置。
-10. **加载时扫描只补不覆盖。** `onload` 与每次打开设置页都跑 `scanRemotes()`：仓库里有、设置里没有的补进
-    `data.json`，同名条目**不覆盖**维护者改过的地址，补进来时给一条 Notice。只看 `data.json` 会让仓库里
-    本来就存在的 remote 显示成「没有 remote」，这是这套设计必须避免的假阴性。
+9. **remote 只在 Save 时写，`.git/config` 是唯一真相。** 设置页打开时读
+   `git config --get-regexp '^remote\.'` 建快照；编辑留在内存里，Save 才对快照与草稿做 diff，按
+   remove → rename → set-url（fetch / push）→ add 的顺序执行（先删再改再新增，删除 + 重建同一个名字才
+   不会撞车）。rename 用 `git remote rename`，保留 `remote.<name>.*`（包括 annex-uuid / annex-ignore 与
+   tracking refs）；push URL 用 `set-url --push` 写、用 `git config --unset-all remote.<name>.pushurl`
+   清（不经正则）。执行前先整批校验
+   （空名称/地址、名称带空白、重名、与现有 remote 撞名），有问题一条命令都不跑。不做 fetch / push，
+   也不整段重写配置。
+10. **打开即读，Save 前再核对一次。** 不扫描、不合并、不迁移：`data.json` 里不再有 remote，加载时静默
+    删掉旧键并立即落盘一次（文件不再留着它）。每次 Save 前重新读一遍 `.git/config` 与 git-annex 分支的
+    `remote.log`；和打开时的快照不一致（含 push URL、special remotes 的类型）就一条命令都不执行，
+    提示用户在别处改过，然后按 git 现状重新加载。删 remote 要确认对话框；带 annex-uuid 的 remote 额外
+    警告 git-annex 正在用它。没仓库时编辑器禁用。
 11. **`types` 只有 `number` / `date` / `text` 三种。** 旧格式里的 `type: "string"` 不再是 `text` 的
     同义写法 —— 新格式里类型只写在 `types` 对象里，值写错就是**硬错误**（不会被默默当成 text 放行）。
     不写 `types` 的变量一律按 `text` 处理（双引号字符串），这是最安全的默认。
@@ -269,18 +283,21 @@
 
 ## 6. 字段与默认值（`data.json`）
 
-落进 `data.json` 的只有八项：
+落进 `data.json` 的只有七项：
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | 缩略图边长（`thumbnailEdge`） | `256` | 生成 `.thumbnail.png` 的边长（px）；建议与 `.base` 的 `cardSize` 保持一致。 |
 | 调试日志（`debugLogging`） | `false` | 把 git / git-annex 的进度输出到开发者控制台；默认关闭，避免默认配置下刷屏。 |
-| remote 设置（`remotes`） | 插件加载时从仓库自动扫 | 一条 = 名称 + 地址，可多条；加载时扫当前仓库的 `git remote`，把设置里没有的补进来（同名不覆盖手改过的地址）；初始化时逐个 `git remote add`（同名已存在就 `set-url`，地址相同则一个字节都不碰）。 |
 | 已登记的元数据预设（`profileFiles`） | `[]` | 一条 = `{ path }`：**vault 相对路径**，正斜杠；一条预设一个 `.json`（顶层一条 `ParseProfile` 对象，含 frontmatter 字典与可选的 `template`）。 |
 | `folderSamples` | `{}` | 按文件夹记住现场填过的 ask 值（`sample` 用目录本身当键，其余 ask 键用 `<目录>\u0001<键>`）。**没有**全局的「默认样品名」：每次生成 metadata 都要在弹窗里填。 |
 | `folderProfiles` | `{}` | 按文件夹记住上次选的**元数据预设 id**；「生成元数据」弹窗的预设下拉预选它。 |
 | 已登记的画廊模板（`baseTemplates`） | `[]` | 一条 = `{ id, name, path }`；`path` 是 vault 相对路径（`.base`）。 |
 | 按文件夹记住的画廊模板（`folderBaseTemplates`） | `{}` | 文件夹绝对路径 → 模板 id；「创建画廊」的模板选择预选它。 |
+
+**remote 不落 `data.json`**：`.git/config` 是唯一真相；旧 `data.json` 里的 `remotes` 键在
+`loadSettings()` 里被静默删掉（不提示、不迁移、不比较），检测到旧键时立即落盘一次，文件里不再留着它；
+`Initialize gallery` 也不再写 remote。
 
 **旧 `profiles` 数组**：旧版把 profile 内联在 `data.json` 里。新版**不读、不迁移、不删除**它 ——
 它在 `data.json` 里原样留着（用户想删可以自己删），设置页只显示一条失效提示，运行时不参与。
@@ -299,7 +316,7 @@
 | `npm run smoke` | 无头加载构建产物：设置定义（3 个 group、两个 control key）、remote 区、元数据预设区、模板区、两类外部文件的登记 / 从预设创建 / 打开 / 取消登记、元数据预设 JSON 的各种坏法、右键菜单、弹窗、落盘、状态栏 | 几何、原生控件宽度 |
 | `npm run layout` | 离屏几何：真实 app.css + 真实 DOM + headless Chromium，只回答「结构没塌」 | 下拉宽度、控件外观、运行时行为 |
 | `npm run verify:core` | 核心层契约：缺 `template` / `profiles` 时直接报错，不回退内置默认 | UI 与几何 |
-| `npm run remotes` | 真 git 仓库上的 add / set-url / 幂等 / dry-run / 扫描合并 / 非仓库不报错 | 设置页 UI |
+| `npm run remotes` | 真 git 仓库上的 `.git/config` + `remote.log` 解析（pushurl / 多 URL / special remote 类型 / annex-uuid）、diff 顺序、校验、执行失败停止、非仓库不报错 | 设置页 UI |
 | `npm run gui` | 真机：原生 select 的宽度与外观、设置页与 `data.json` 的行数对应、重载后的 CSS | 配色与审美 |
 | 截图 + 人眼 | 配色与观感 | — |
 
@@ -327,7 +344,10 @@
 - 运行时：坏文件、重复 id、空列表 ⇒ 弹窗都不开，更不写盘；外部改 id/name 后下一次生成读到新值
 - 旧内联 profiles：显示失效提示、不迁移、不参与运行时
 - 常规 group 里渲染出「缩略图边长」「调试日志」两个 setting-item
-- remote 的增删改、落盘、读回
+- remote：打开读 git、Save 前不写盘（待删只是草稿，Undo 还原）、Save 后增删改、删除确认
+  （带 annex-uuid 时多一条警告）、校验失败一条命令都不跑、外部改过则 Save 不执行并重载、无仓库禁用；
+  编辑器直接用 esbuild 现场打包 `src/ui/remotes-editor.ts`，挂到临时真 git 仓库上跑
+- 旧 `data.json` 的 `remotes` 键加载时静默丢弃并立即落盘（文件里不再有它）
 ```
 
 ### 离屏几何（`npm run layout`）
@@ -347,12 +367,15 @@
 - 面板没有横向溢出
 ```
 
-remote 区同一套量法（装两条时）：
+remote 区同一套量法（布局 vault 是真 git 仓库，种了 2 条单 URL remote + 1 条多 URL + 1 条 special remote）：
 
 ```
-- remote 卡片撑满内容宽；标题「remote 设置」左 = 卡片内容左，标题自身 padding=0
-- 每一行的 name / url / 删除 三列跨行同列对齐
-- 「添加 remote」与标题同列，排在所有行下面
+- remote 卡片撑满内容宽；标题左 = 卡片内容左，标题自身 padding=0
+- 每一行的控件从左往右 = 名称 → Fetch URL →（有 pushurl 时多一格 Push URL）→ 待改标记 → Delete；
+  窄行允许换行（push / 标记 / Delete 折到第二行），断言的是「左→右顺序不变」与「不横向溢出卡片」
+- 行内 fetch URL 那一格比名称宽（地址更长）；有 pushurl 的行多一格 push 输入框
+- [Add remote] 与标题左对齐，排在所有可编辑行下面；未改动时 Save 是禁用态（aria-disabled=true）
+- 只读列表（多 URL / special remotes）与可编辑行分开，不混排；special remote 的 type 带文档链接
 ```
 
 `node tools/layout-check.cjs --json` 另把原始几何打出来，用来检查字段齐不齐 —— 具体数值不作为断言。
@@ -368,7 +391,7 @@ remote 区同一套量法（装两条时）：
 - 已登记行数 = data.json 里 profileFiles 的条数，且每行 path 一一对应
 - 模板区卡片：行数 = data.json 里 baseTemplates 的条数，id 一一对应
 - 没有旧内联编辑器 / 内置模板行 / 查看 / 复制为自定义
-- remote 行: 每行的 name / url / 删除 同列对齐；行数 = `git -C <vault> remote` 的条数
+- remote 行: 每行的 name / Fetch URL / Push URL 同列对齐；可编辑行数 = `git -C <vault> remote` 里单 URL 的条数（多 URL / special remote 在只读区）
 ```
 
 脚本**不点「打开」**（那会拉起系统默认应用）；打开行为的成功 / 失败由 `npm run smoke` 用可替换的
@@ -380,7 +403,7 @@ remote 区同一套量法（装两条时）：
 ```bash
 npm run build     # 出 main.js / styles.css
 npm run smoke     # 无头加载构建产物：设置定义（3 个 group）+ remote 设置 + 右键菜单 + 弹窗 + 落盘 + 状态栏
-npm run remotes   # remote 设置的核心行为：真 git 仓库上验 add / set-url / 幂等 / dry-run / 扫描合并
+npm run remotes   # remote 设置的核心行为：真 git 仓库上验解析 / diff 顺序 / 校验 / 写入 / 非仓库
 npm run layout    # 离屏布局几何：真实 app.css + 真实 DOM + headless Chromium
 node tools/layout-check.cjs --json   # 另把原始几何 JSON 打出来（看字段齐不齐，别拿数值当断言）
 ```

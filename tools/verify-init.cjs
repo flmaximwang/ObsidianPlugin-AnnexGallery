@@ -171,6 +171,10 @@ async function main() {
     );
     check(fs.readFileSync(path.join(fresh, ".gitignore"), "utf8").includes(".obsidian"), ".gitignore 合并进了 .obsidian");
     check(
+      git(["remote"], fresh).stdout.trim() === "",
+      "init 不写 remote（remotes 只由设置页显式 Save 写，init 跑完 `git remote` 为空）",
+    );
+    check(
       git(["status", "--porcelain", "--", "photo.bin"], fresh)
         .stdout.trim()
         .startsWith("??"),
@@ -212,6 +216,8 @@ async function main() {
     // ── 4. 只管以后 add 的：已 locked 的老文件不动 ────────────────────────
     console.log("4. 已 locked 的老文件 → 仍在 locked");
     makeAnnexRepo(legacy, "legacy");
+    // init 之前就配好的 remote：命令跑完必须原样（init 不再碰 remote 配置）。
+    git(["remote", "add", "origin", "ssh://example.com/gallery"], legacy);
     writeRandom(path.join(legacy, "old.bin"), 1024);
     git(["annex", "add", "--", "old.bin"], legacy);
     check(indexMode("old.bin", legacy) === "120000", "（前置）addunlocked 没设时 add 的是 locked 符号链接 120000");
@@ -219,6 +225,10 @@ async function main() {
     check(branchSetting("annex.addunlocked", legacy) === "true", "跑命令后分支配置变成 true");
     check(indexMode("old.bin", legacy) === "120000", "已经 locked 的 old.bin 仍是 120000（addunlocked 只管以后 add 的）");
     check(/分支已设为 true/.test(notice4), "报告写的是「分支已设为 true」（这一次真的写了配置）");
+    check(
+      git(["remote", "get-url", "origin"], legacy).stdout.trim() === "ssh://example.com/gallery",
+      "init 不碰已有的 remote（origin 地址逐字节未变）",
+    );
 
     // ── 5. 本机覆盖把分支的 true 压掉 → 命令把它修回标准状态 ──────────────
     console.log("5. 本机覆盖 annex.addunlocked=false → 修回标准状态");

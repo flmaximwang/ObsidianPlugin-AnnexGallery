@@ -1,7 +1,6 @@
 import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
 import type { SettingDefinitionControl, SettingDefinitionItem, SettingDefinitionRender } from "obsidian";
 import type { ProfileFileRef } from "../core/profile-files";
-import type { RemoteEntry } from "../core/remotes";
 import type { TemplateRef } from "../core/templates";
 import { ProfileEditor, type ProfileEditorHost } from "./profile-editor";
 import { RemotesEditor } from "./remotes-editor";
@@ -16,8 +15,6 @@ import { TemplatesEditor, type TemplatesEditorHost } from "./templates-editor";
 export interface PluginSettings {
   /** Thumbnail edge length in px — keep equal to `.base`'s `cardSize`. */
   thumbnailEdge: number;
-  /** 「remote 设置」：可以有多条，一条 = 名称 + 地址；「初始化 gallery」时逐个 git remote add/set-url。 */
-  remotes: RemoteEntry[];
   /** 按文件夹记住的现场填写值（`sample` 用目录本身当键，兼容旧 data.json）。 */
   folderSamples: Record<string, string>;
   /**
@@ -40,7 +37,6 @@ export interface PluginSettings {
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   thumbnailEdge: 256,
-  remotes: [],
   folderSamples: {},
   profileFiles: [],
   folderProfiles: {},
@@ -140,16 +136,10 @@ export interface SettingsHost extends ProfileEditorHost, TemplatesEditorHost {
    * 同样只用于显示非阻塞提示；旧键原样留在 data.json 里，不迁移、不删除。
    */
   legacyMetadataTemplates: LegacyMetadataTemplatesInfo;
-  /** 扫当前仓库的 remote，把设置里没有的补进来；返回补了几条。 */
-  scanVaultRemotes(): Promise<number>;
 }
 
 export class AnnexGallerySettingTab extends PluginSettingTab {
   private readonly host: SettingsHost;
-  /** 本次「打开设置页」是否已经扫过仓库 remote；hide() 重置。 */
-  private remotesScanDone = false;
-  /** 扫描在途：update() 重渲染时不再并发触发。 */
-  private remotesScanInFlight = false;
 
   constructor(app: App, plugin: Plugin & SettingsHost) {
     super(app, plugin);
@@ -166,7 +156,7 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       {
-        // 没有 heading：RemotesEditor 卡片自带「remote 设置」标题，避免重复。
+        // 没有 heading：RemotesEditor 卡片自带「Remotes」标题，避免重复。
         type: "group",
         cls: "annex-editors-group",
         items: [this.remotesDefinition()],
@@ -213,20 +203,17 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     return undefined;
   }
 
-  /** 关闭设置页后允许下一次打开再扫一遍仓库 remote（口径与旧 `display()` 一致）。 */
-  hide(): void {
-    this.remotesScanDone = false;
-    super.hide();
-  }
-
   private remotesDefinition(): SettingDefinitionRender {
     return {
-      name: "remote 设置",
-      desc: "「初始化 gallery」会逐个执行 git remote add（同名已存在就 git remote set-url）；只写配置、不 fetch 也不 push。名称与地址都填了才生效。",
+      name: "Remotes",
+      desc: "Read from .git/config and written back only when you save. Only remote configuration is changed — nothing is fetched or pushed.",
       render: (setting) => {
         const container = this.mountEditor(setting, "annex-remotes-section");
-        new RemotesEditor(container, this.host).render();
-        this.scheduleRemoteScan();
+        // The editor rebuilds only its own card, so the other editors keep their input.
+        new RemotesEditor(container, {
+          app: this.app,
+          vaultRoot: () => this.host.vaultRoot(),
+        }).render();
       },
     };
   }
@@ -291,29 +278,6 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
   private mountEditor(setting: Setting, cls: string): HTMLElement {
     setting.settingEl.addClass("annex-editor-row");
     return setting.controlEl.createDiv({ cls });
-  }
-
-  /**
-   * 打开设置页时扫一遍仓库 remote（口径与旧 `display()` 末尾一致）；补进新条目才 `update()`。
-   *
-   * 递归保护：本次打开只扫一轮（`remotesScanDone`），在途时不再触发；`hide()` 后才允许下一次。
-   * 因此 `update()` → 重渲染 → render 回调不会再次发起扫描。
-   */
-  private scheduleRemoteScan(): void {
-    if (this.remotesScanDone || this.remotesScanInFlight) return;
-    this.remotesScanInFlight = true;
-    void this.host
-      .scanVaultRemotes()
-      .then((added) => {
-        this.remotesScanInFlight = false;
-        this.remotesScanDone = true;
-        if (added > 0) this.update();
-      })
-      .catch((error) => {
-        this.remotesScanInFlight = false;
-        this.remotesScanDone = true;
-        console.error(error);
-      });
   }
 
   /**
