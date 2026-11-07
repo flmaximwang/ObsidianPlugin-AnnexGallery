@@ -36,6 +36,8 @@ const CHROME_CANDIDATES = [
 
 let pass = 0;
 let fail = 0;
+/** Whether the layout vault got a real `git annex initremote` special remote. */
+let annexAvailable = false;
 function check(condition, message, detail) {
   if (condition) {
     pass += 1;
@@ -108,9 +110,19 @@ function seedVault() {
   // Read-only shapes: a multi-URL remote and a git-annex special remote.
   git("remote", "add", "multi", "ssh://a.example/multi");
   git("config", "--add", "remote.multi.url", "ssh://b.example/multi");
-  git("config", "remote.archive.type", "directory");
-  git("config", "remote.archive.directory", "/Volumes/Archive");
-  git("config", "remote.archive.annex-uuid", "aaaa-bbbb");
+  // A real git-annex special remote (git annex initremote writes annex-* keys, not
+  // `type=`/`directory=`); the geometry check only needs the section to exist.
+  const specialDir = path.join(VAULT, "special-storage");
+  try {
+    git("annex", "version");
+    fs.mkdirSync(specialDir, { recursive: true });
+    git("annex", "init");
+    git("annex", "initremote", "archive", "type=directory", `directory=${specialDir}`, "encryption=none");
+    annexAvailable = true;
+  } catch {
+    annexAvailable = false;
+    console.log("SKIP: git-annex 不可用 → 跳过 git-annex special remote 的几何检查");
+  }
   return {
     profileFiles: [{ path: "Profiles/tecnaitem.json" }, { path: "Profiles/Other/platewell.json" }],
     baseTemplates: [{ id: "base", name: "base", path: "Templates/base.base" }],
@@ -373,8 +385,11 @@ ${fragment}
   check(Math.abs(remotes.addButton.box.left - remotes.title.box.left) < 0.5, "「Add remote」与标题左对齐");
   check(remotes.addButton.box.top > row1.box.top, "「Add remote」在两行 remote 下面");
   check(remotes.readonlyRows === 1 && remotes.readonlyBadge === "multiple URLs - edit with git", "multi-URL remote 在只读列表里，标注 multiple URLs - edit with git", `${remotes.readonlyRows} / ${remotes.readonlyBadge}`);
-  check(remotes.specialTitle === "git-annex special remotes" && remotes.specialRows === 1, "git-annex special remotes 单独只读列表", `${remotes.specialTitle} / ${remotes.specialRows}`);
-  check(/special_remotes\//.test(String(remotes.specialTypeHref)), "special remote 的 type 链接到 git-annex 文档", String(remotes.specialTypeHref));
+  check(remotes.specialTitle === "git-annex special remotes", "git-annex special remotes 有自己的只读区标题", String(remotes.specialTitle));
+  if (annexAvailable) {
+    check(remotes.specialRows === 1, "真实的 git annex initremote remote 渲染成 1 行", String(remotes.specialRows));
+    check(/special_remotes\//.test(String(remotes.specialTypeHref)), "special remote 的 type 链接到 git-annex 文档", String(remotes.specialTypeHref));
+  }
 
   // ── 元数据预设：外部 JSON 工具条 + 每文件一行 ──────────────────────────────
   check(rep.toolbar.length === 3, "工具条只有 3 个控件（路径输入 / 登记 / 从预设创建）", `${rep.toolbar.length} 个`);
