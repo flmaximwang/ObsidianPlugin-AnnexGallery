@@ -95,11 +95,11 @@ function applyRulesFile(
   const required = templateLines(template);
   if (dryRun) {
     const { result } = mergeRuleText(readIfExists(file), required, file, template);
-    progress(`${label}：补 ${result.added.length} 行（dry-run：未写盘）`);
+    progress(`${label}: added ${result.added.length} line(s) (dry-run: nothing written)`);
     return result;
   }
   const result = ensureRulesFile(file, required, template);
-  progress(`${label}：补 ${result.added.length} 行`);
+  progress(`${label}: added ${result.added.length} line(s)`);
   return result;
 }
 
@@ -175,7 +175,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
   const branchPrevious = readAnnexConfig(root, ADD_UNLOCKED_KEY);
   let addUnlocked: SettingRepair;
   if (branchPrevious === ADD_UNLOCKED_VALUE) {
-    progress(`${ADD_UNLOCKED_KEY}（分支）已是 ${ADD_UNLOCKED_VALUE}，未改动`);
+    progress(`${ADD_UNLOCKED_KEY} (branch) is already ${ADD_UNLOCKED_VALUE}, unchanged`);
     addUnlocked = {
       key: ADD_UNLOCKED_KEY,
       scope: "annex-branch",
@@ -185,7 +185,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
       action: "unchanged",
     };
   } else if (dryRun) {
-    progress(`git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE}（dry-run：未执行）`);
+    progress(`git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE} (dry-run: not executed)`);
     addUnlocked = {
       key: ADD_UNLOCKED_KEY,
       scope: "annex-branch",
@@ -193,14 +193,14 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
       previous: branchPrevious,
       changed: false,
       action: "planned",
-      detail: branchPrevious === null ? "分支上没设过" : `分支上现在是 ${branchPrevious}`,
+      detail: branchPrevious === null ? "not set on the branch" : `currently ${branchPrevious} on the branch`,
     };
   } else {
     progress(`git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE}`);
     const r = git(["annex", "config", "--set", ADD_UNLOCKED_KEY, ADD_UNLOCKED_VALUE], root);
     if (r.code !== 0) {
       throw new Error(
-        `git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE} 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`,
+        `git annex config --set ${ADD_UNLOCKED_KEY} ${ADD_UNLOCKED_VALUE} failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`,
       );
     }
     addUnlocked = {
@@ -210,7 +210,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
       previous: branchPrevious,
       changed: true,
       action: "set",
-      detail: branchPrevious === null ? "分支上没设过" : `分支上原来是 ${branchPrevious}`,
+      detail: branchPrevious === null ? "not set on the branch" : `was ${branchPrevious} on the branch`,
     };
   }
 
@@ -225,13 +225,13 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
         root,
         ADD_UNLOCKED_KEY,
         localAddUnlocked,
-        `本机覆盖是 ${localAddUnlocked}，优先于分支、会把新文件压成 locked`,
+        `Local override is ${localAddUnlocked}; it takes precedence over the branch and forces newly added files to be locked`,
         dryRun,
         progress,
       ),
     );
   } else if (localAddUnlocked !== null) {
-    progress(`${ADD_UNLOCKED_KEY}（本机）是 ${localAddUnlocked}，与分支一致，未改动`);
+    progress(`${ADD_UNLOCKED_KEY} (local) is ${localAddUnlocked}; matches the branch, unchanged`);
   }
 
   // ── 3. 本机的 annex.thin（口径是「不 thin」）──────────────────────────
@@ -239,10 +239,10 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
   const localThinOn = localThin !== null && isTruthyValue(localThin);
   if (localThinOn) {
     localRepairs.push(
-      clearLocalSetting(root, THIN_KEY, localThin, "本机开着 thin（hardlink 模式），口径是不 thin", dryRun, progress),
+      clearLocalSetting(root, THIN_KEY, localThin, "annex.thin is enabled locally (hardlink mode); the policy is non-thin", dryRun, progress),
     );
   } else if (localThin !== null) {
-    progress(`${THIN_KEY}（本机）是 ${localThin}，已经是「不 thin」，未改动`);
+    progress(`${THIN_KEY} (local) is ${localThin}; already non-thin, unchanged`);
   }
 
   // ── 4. 兜底：算出**生效值**，还不合口径（全局 / 系统在头上）就压一条本机值 ──
@@ -253,14 +253,14 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
     localAddUnlocked !== null && !localAddUnlockedOff ? localAddUnlocked : readNonLocalSetting(root, ADD_UNLOCKED_KEY);
   let effectiveAddUnlocked = gitLayerAddUnlocked ?? ADD_UNLOCKED_VALUE; // 第 1 步保证分支上是 true
   if (!isTruthyValue(effectiveAddUnlocked)) {
-    const from = `生效值 ${effectiveAddUnlocked}（全局 / 系统配置）`;
+    const from = `effective value ${effectiveAddUnlocked} (global / system config)`;
     localRepairs.push(
       writeLocalSetting(
         root,
         ADD_UNLOCKED_KEY,
         ADD_UNLOCKED_VALUE,
         localAddUnlocked,
-        `${from} —— 本机再压一条，保证新文件以 unlocked 入库`,
+        `${from} — write a local override to keep new files unlocked`,
         dryRun,
         progress,
       ),
@@ -273,7 +273,7 @@ function applyAnnexShape(root: string, dryRun: boolean, progress: Progress): Ann
   let effectiveThin = gitLayerThin;
   if (isTruthyValue(effectiveThin)) {
     localRepairs.push(
-      writeLocalSetting(root, THIN_KEY, "false", localThin, `生效值 ${String(effectiveThin)}（全局 / 系统配置）—— 本机压成 false`, dryRun, progress),
+      writeLocalSetting(root, THIN_KEY, "false", localThin, `effective value ${String(effectiveThin)} (global / system config) — override locally to false`, dryRun, progress),
     );
     if (!dryRun) effectiveThin = "false";
   }
@@ -298,13 +298,13 @@ function clearLocalSetting(
 ): SettingRepair {
   const base = { key, scope: "local" as const, standard: null, previous, detail };
   if (dryRun) {
-    progress(`git config --local --unset ${key}（dry-run：未执行）`);
+    progress(`git config --local --unset ${key} (dry-run: not executed)`);
     return { ...base, changed: false, action: "planned" };
   }
-  progress(`git config --local --unset ${key}（原值 ${previous}）`);
+  progress(`git config --local --unset ${key} (previous value ${previous})`);
   const r = git(["config", "--local", "--unset", key], root);
   if (r.code !== 0) {
-    throw new Error(`git config --local --unset ${key} 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`);
+    throw new Error(`git config --local --unset ${key} failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`);
   }
   return { ...base, changed: true, action: "unset" };
 }
@@ -321,13 +321,13 @@ function writeLocalSetting(
 ): SettingRepair {
   const base = { key, scope: "local" as const, standard: value, previous, detail };
   if (dryRun) {
-    progress(`git config --local ${key} ${value}（dry-run：未执行）`);
+    progress(`git config --local ${key} ${value} (dry-run: not executed)`);
     return { ...base, changed: false, action: "planned" };
   }
   progress(`git config --local ${key} ${value}`);
   const r = git(["config", "--local", key, value], root);
   if (r.code !== 0) {
-    throw new Error(`git config --local ${key} ${value} 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`);
+    throw new Error(`git config --local ${key} ${value} failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`);
   }
   return { ...base, changed: true, action: "set" };
 }
@@ -389,10 +389,10 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   try {
     stat = fs.statSync(root);
   } catch {
-    throw new Error(`目标目录不存在：${root}`);
+    throw new Error(`Target directory does not exist: ${root}`);
   }
   if (!stat.isDirectory()) {
-    throw new Error(`目标不是目录：${root}`);
+    throw new Error(`Target is not a directory: ${root}`);
   }
   const absRoot = path.resolve(root);
 
@@ -401,20 +401,20 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   if (isInsideWorkTree(absRoot)) {
     if (!isRepoRoot(absRoot)) {
       throw new Error(
-        `目标目录已在某个 git 仓库里，但不是该仓库的根：${absRoot}（不要在子目录上再 init；请在仓库根上运行，或换一个目录）`,
+        `Target directory is inside a git repository but is not its root: ${absRoot} (do not initialize a subdirectory; run this on the repository root or choose another directory)`,
       );
     }
-    notes.push(`已是 git 仓库，跳过 git init：${absRoot}`);
-    progress("已是 git 仓库，跳过 git init");
+    notes.push(`Already a git repository, skipping git init: ${absRoot}`);
+    progress("Already a git repository, skipping git init");
   } else {
     createdRepo = true;
     if (dryRun) {
-      progress("git init -b main（dry-run：未执行）");
+      progress("git init -b main (dry-run: not executed)");
     } else {
       progress("git init -b main");
       const r = git(["init", "-b", "main"], absRoot);
       if (r.code !== 0) {
-        throw new Error(`git init -b main 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`);
+        throw new Error(`git init -b main failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`);
       }
     }
   }
@@ -423,17 +423,17 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   const repoName = path.basename(absRoot) || absRoot;
   let initedAnnex = false;
   if (isAnnexRepo(absRoot)) {
-    notes.push("已是 annex 仓库，跳过 git annex init");
-    progress("已是 annex 仓库，跳过 git annex init");
+    notes.push("Already an annex repository, skipping git annex init");
+    progress("Already an annex repository, skipping git annex init");
   } else {
     initedAnnex = true;
     if (dryRun) {
-      progress(`git annex init ${repoName}（dry-run：未执行）`);
+      progress(`git annex init ${repoName} (dry-run: not executed)`);
     } else {
       progress(`git annex init ${repoName}`);
       const r = git(["annex", "init", repoName], absRoot);
       if (r.code !== 0) {
-        throw new Error(`git annex init 失败（exit ${r.code}）：${(r.stderr || r.stdout).trim()}`);
+        throw new Error(`git annex init failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`);
       }
     }
   }
@@ -463,13 +463,13 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
   );
 
   if (dryRun) {
-    notes.push("dry-run：只计算不写盘，createdRepo / initedAnnex / shape / added 表示「将会怎样」");
+    notes.push("dry-run: computes only and writes nothing; createdRepo / initedAnnex / shape / added describe what would happen");
   } else {
     if (shape.addUnlocked.changed) {
-      notes.push(`${ADD_UNLOCKED_KEY}=${ADD_UNLOCKED_VALUE} 已写进 git-annex 分支（此后 add 的文件以 unlocked 入库）`);
+      notes.push(`${ADD_UNLOCKED_KEY}=${ADD_UNLOCKED_VALUE} written to the git-annex branch (files added from now on are stored unlocked)`);
     }
     for (const repair of shape.localRepairs) {
-      notes.push(`本机「${repair.key}」原值 ${repair.previous ?? "(无)"} → ${repair.action === "unset" ? "已删掉" : `已设为 ${repair.standard}`}（${repair.detail ?? ""}）`);
+      notes.push(`Local "${repair.key}" was ${repair.previous ?? "(none)"} → ${repair.action === "unset" ? "removed" : `set to ${repair.standard}`} (${repair.detail ?? ""})`);
     }
   }
 

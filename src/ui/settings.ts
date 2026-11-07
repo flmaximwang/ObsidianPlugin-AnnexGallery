@@ -163,13 +163,13 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
       },
       {
         type: "group",
-        heading: "元数据预设与画廊模板",
+        heading: "Metadata presets and gallery templates",
         cls: "annex-editors-group",
         items: [this.profilesDefinition(), this.templatesDefinition()],
       },
       {
         type: "group",
-        heading: "常规",
+        heading: "General",
         items: [this.thumbnailEdgeDefinition(), this.debugLoggingDefinition()],
       },
     ];
@@ -220,8 +220,8 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   private profilesDefinition(): SettingDefinitionRender {
     return {
-      name: "元数据预设",
-      desc: "每条元数据预设是 vault 里的一个 .json 文件（frontmatter 与可选正文模板都写在里面）；在这里登记路径，或从预设创建。",
+      name: "Metadata presets",
+      desc: "Each metadata preset is a .json file in the vault (frontmatter and an optional body template live inside); register its path here, or create one from a preset.",
       render: (setting) => {
         // ProfileEditor 会清空自己的容器，所以旧配置提示和编辑器各用一个子容器。
         const container = this.mountEditor(setting, "annex-profiles-section");
@@ -235,8 +235,8 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   private templatesDefinition(): SettingDefinitionRender {
     return {
-      name: "画廊模板",
-      desc: "画廊模板是 vault 里的 .base；在这里登记或从预设创建。",
+      name: "Gallery templates",
+      desc: "Gallery templates are .base files in the vault; register one here or create one from a preset.",
       render: (setting) => {
         const container = this.mountEditor(setting, "annex-templates-section");
         new TemplatesEditor(container, this.host).render();
@@ -246,23 +246,23 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
 
   private thumbnailEdgeDefinition(): SettingDefinitionControl<"thumbnailEdge"> {
     return {
-      name: "缩略图边长",
-      desc: "生成 .thumbnail.png 时的边长（px）。建议与 .base 的 cardSize 保持一致，默认 256。",
+      name: "Thumbnail edge",
+      desc: "Edge length in pixels for generated .thumbnail.png files. Keeping it equal to the .base cardSize is recommended; default 256.",
       control: {
         type: "number",
         key: "thumbnailEdge",
         defaultValue: DEFAULT_SETTINGS.thumbnailEdge,
         min: 1,
         step: 1,
-        validate: (value) => (Number.isInteger(value) && value > 0 ? undefined : "请输入正整数（px）"),
+        validate: (value) => (Number.isInteger(value) && value > 0 ? undefined : "Enter a positive integer (px)"),
       },
     };
   }
 
   private debugLoggingDefinition(): SettingDefinitionControl<"debugLogging"> {
     return {
-      name: "调试日志",
-      desc: "把 git / git-annex 的进度输出到开发者控制台。默认关闭。",
+      name: "Debug logging",
+      desc: "Write git / git-annex progress to the developer console. Off by default.",
       control: {
         type: "toggle",
         key: "debugLogging",
@@ -291,13 +291,13 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     warning.setAttr("data-count", String(legacy.count));
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-title",
-      text: "旧版内联元数据预设已不再生效",
+      text: "Legacy inline metadata presets are no longer active",
     });
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-body",
       text:
-        `data.json 里还有 ${legacy.count} 条内联 profiles。本版本不会读取、不会自动迁移，也不会回退到预设。` +
-        "请把每条配置分别保存成 vault 里的一个 .json 文件，然后在下面逐条「登记」。",
+        `data.json still contains ${legacy.count} inline profiles. This version does not read or migrate them, and does not fall back to presets.` +
+        "Save each configuration as its own .json file in the vault, then register them one by one below.",
     });
   }
 
@@ -315,14 +315,14 @@ export class AnnexGallerySettingTab extends PluginSettingTab {
     warning.setAttr("data-count", String(legacy.count));
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-title",
-      text: "旧版 metadata 模板登记表已不再生效",
+      text: "The legacy metadata template registry is no longer active",
     });
     warning.createDiv({
       cls: "annex-legacy-profiles-warning-body",
       text:
-        `data.json 里还有 ${legacy.count} 条 metadataTemplates。本版本不会读取它们，也不会自动迁移` +
-        "（data.json 里的旧键原样保留，vault 里的旧正文文件也还在）。" +
-        "请改用「从预设创建」生成新的元数据预设：正文模板由预设自己的 template 字段指定。",
+        `data.json still contains ${legacy.count} metadataTemplates. This version does not read or migrate them` +
+        " (the old key stays in data.json and the old body files remain in the vault)." +
+        "Use Create from preset to generate a new metadata preset: the body template is specified by the preset template field.",
     });
   }
 }

@@ -429,17 +429,17 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
 
   const frontmatter = profile.frontmatter;
   if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
-    throw new Error(`预设 ${profile.id} 的 frontmatter 必须是对象`);
+    throw new Error(`Preset ${profile.id} frontmatter must be an object`);
   }
   const fmLines = renderFrontmatter(frontmatter as Record<string, unknown>, renderCtx, state);
 
   const notes: string[] = [];
-  if (!parsed.matched) notes.push(`stem "${stem}" 不符合预设 ${profile.id} 的正则`);
-  if (parsed.missingGroups.length > 0) notes.push(`正则组没参与匹配：${parsed.missingGroups.join(",")}`);
-  if (state.emptyPaths.length > 0) notes.push(`空值（写成 YAML null）：${state.emptyPaths.join("、")}`);
-  if (state.droppedListPaths.length > 0) notes.push(`列表里的空项已丢弃：${state.droppedListPaths.join("、")}`);
+  if (!parsed.matched) notes.push(`stem "${stem}" does not match the regex of preset ${profile.id}`);
+  if (parsed.missingGroups.length > 0) notes.push(`Regex groups did not participate in the match: ${parsed.missingGroups.join(",")}`);
+  if (state.emptyPaths.length > 0) notes.push(`Empty values (written as YAML null): ${state.emptyPaths.join(", ")}`);
+  if (state.droppedListPaths.length > 0) notes.push(`Empty list entries were dropped: ${state.droppedListPaths.join(", ")}`);
   if (state.missingVars.length > 0) {
-    notes.push(`没有来源的占位符：${state.missingVars.map((name) => `{{${name}}}`).join("、")}`);
+    notes.push(`Placeholders with no source: ${state.missingVars.map((name) => `{{${name}}}`).join(", ")}`);
   }
 
   let text = ["---", ...fmLines, "---"].join("\n") + "\n";
@@ -449,13 +449,13 @@ export function buildSidecarText(image: string, profile: ParseProfile, opts: Bui
   if (body.trim() !== "") {
     const filled = fillPlaceholders(body, (name) => resolve(name));
     if (filled.missing.length > 0) {
-      notes.push(`模板里的 ${filled.missing.map((name) => `{{${name}}}`).join("、")} 取不到值，已留空`);
+      notes.push(`Template placeholders ${filled.missing.map((name) => `{{${name}}}`).join(", ")} have no value and were left empty`);
     }
     text += filled.text;
     if (!text.endsWith("\n")) text += "\n";
   }
 
-  const detail = notes.length > 0 ? notes.join("；") : undefined;
+  const detail = notes.length > 0 ? notes.join("; ") : undefined;
   return detail === undefined
     ? { text, matched: parsed.matched, profileId: profile.id }
     : { text, detail, matched: parsed.matched, profileId: profile.id };
@@ -505,7 +505,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
   // 没有候选预设 ⇒ 直接报错，没有内置兜底：
   // 预设必须由调用方显式给（插件给外部文件，CLI 给显式预设）。
   const profiles = opts.profiles ?? [];
-  if (profiles.length === 0) throw new Error("没有可用的元数据预设：请显式传入 profiles");
+  if (profiles.length === 0) throw new Error("No metadata preset available: pass profiles explicitly");
   const ask: Record<string, string> = { ...(opts.ask ?? {}) };
   if (opts.sample !== undefined && opts.sample !== "" && !hasOwn(ask, "sample")) ask.sample = opts.sample;
 
@@ -517,7 +517,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
     if (bodyCache.has(rel)) return bodyCache.get(rel);
     const file = readVaultTextFile(opts.vaultRoot, rel, "metadata");
     if (startsWithFrontmatter(file.text)) {
-      throw new Error(`正文模板 ${file.relPath} 不能自带 frontmatter（frontmatter 由预设的 frontmatter 字典生成）`);
+      throw new Error(`Body template ${file.relPath} must not include frontmatter (frontmatter is generated from the preset frontmatter object)`);
     }
     bodyCache.set(rel, file.text);
     return file.text;
@@ -528,7 +528,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
   for (const profile of candidates) bodyFor(profile);
 
   const images = collectImages(dir);
-  progress(`开始生成 sidecar：${dir}（${images.length} 张，${apply ? "写入" : "dry-run"}）`);
+  progress(`Starting sidecar generation: ${dir} (${images.length} image(s), ${apply ? "writing" : "dry-run"})`);
 
   const entries: SidecarEntry[] = [];
   const stemCounts = new Map<string, number>();
@@ -543,7 +543,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
     const label = `[${i + 1}/${images.length}]`;
     try {
       const profile = opts.profile ?? pickProfile(profiles, contextFor(image, opts.vaultRoot)) ?? profiles[0];
-      if (profile === undefined) throw new Error("没有可用预设");
+      if (profile === undefined) throw new Error("No preset available");
       usedIds.add(profile.id);
       const body = bodyFor(profile);
       const built = buildSidecarText(image, profile, {
@@ -559,9 +559,9 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
           image,
           sidecar,
           action: "skipped-mismatch",
-          detail: built.detail ?? `stem 不符合预设 ${profile.id} 的正则（onMismatch=skip，跳过）`,
+          detail: built.detail ?? `stem does not match the regex of preset ${profile.id} (onMismatch=skip, skipped)`,
         });
-        progress(`${label} 跳过（正则没命中） ${stem}.md`);
+        progress(`${label} skipped (regex did not match) ${stem}.md`);
         continue;
       }
 
@@ -574,9 +574,9 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
               image,
               sidecar,
               action: "planned",
-              detail: mergeDetail("overwrite：将覆盖已存在的 .md", built.detail),
+              detail: mergeDetail("overwrite: existing .md will be overwritten", built.detail),
             });
-            progress(`${label} 计划覆盖 ${stem}.md`);
+            progress(`${label} plans to overwrite ${stem}.md`);
             continue;
           }
           fs.writeFileSync(sidecar, built.text, "utf8");
@@ -584,9 +584,9 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
             image,
             sidecar,
             action: "overwritten",
-            detail: mergeDetail(dirty ? "覆盖已存在的 .md（git 报脏）" : "覆盖已存在的 .md", built.detail),
+            detail: mergeDetail(dirty ? "overwrote existing .md (git reports changes)" : "overwrote existing .md", built.detail),
           });
-          progress(`${label} 覆盖 ${stem}.md`);
+          progress(`${label} overwrote ${stem}.md`);
           continue;
         }
         if (dirty && !force) {
@@ -594,9 +594,9 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
             image,
             sidecar,
             action: "skipped-dirty",
-            detail: mergeDetail("目标 .md 已被修改（git 报脏），未覆盖；需 --force", built.detail),
+            detail: mergeDetail("target .md has local changes (git reports dirty); not overwritten without --force", built.detail),
           });
-          progress(`${label} 跳过（脏，未覆盖） ${stem}.md`);
+          progress(`${label} skipped (dirty, not overwritten) ${stem}.md`);
           continue;
         }
         if (dirty && force) {
@@ -605,31 +605,31 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
             image,
             sidecar,
             action: "created",
-            detail: mergeDetail("--force 覆盖脏文件", built.detail),
+            detail: mergeDetail("--force overwrote a dirty file", built.detail),
           });
-          progress(`${label} 覆盖（--force） ${stem}.md`);
+          progress(`${label} overwrote (--force) ${stem}.md`);
           continue;
         }
         entries.push({
           image,
           sidecar,
           action: "skipped-existing",
-          detail: mergeDetail("目标 .md 已存在且干净，不重写", built.detail),
+          detail: mergeDetail("target .md exists and is clean; not rewritten", built.detail),
         });
-        progress(`${label} 跳过（已存在） ${stem}.md`);
+        progress(`${label} skipped (already exists) ${stem}.md`);
         continue;
       }
       if (apply) {
         fs.writeFileSync(sidecar, built.text, "utf8");
         entries.push({ image, sidecar, action: "created", ...(built.detail === undefined ? {} : { detail: built.detail }) });
-        progress(`${label} 写入 ${stem}.md`);
+        progress(`${label} wrote ${stem}.md`);
       } else {
         entries.push({ image, sidecar, action: "planned", ...(built.detail === undefined ? {} : { detail: built.detail }) });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       entries.push({ image, sidecar, action: "failed", detail: message });
-      progress(`${label} 失败 ${stem}.md：${message}`);
+      progress(`${label} failed ${stem}.md: ${message}`);
     }
   }
 
@@ -640,7 +640,7 @@ export async function generateSidecars(dir: string, opts: SingleSidecarOptions):
 
   const counts: Record<string, number> = {};
   for (const entry of entries) counts[entry.action] = (counts[entry.action] ?? 0) + 1;
-  progress(`完成：${JSON.stringify(counts)}${Object.keys(duplicateStems).length > 0 ? ` 重名 stem=${JSON.stringify(duplicateStems)}` : ""}`);
+  progress(`Done: ${JSON.stringify(counts)}${Object.keys(duplicateStems).length > 0 ? ` duplicate stems=${JSON.stringify(duplicateStems)}` : ""}`);
 
   const ids = [...usedIds];
   const profileId = ids.length === 1 ? ids[0] : ids.length === 0 ? profiles[0]?.id ?? "?" : "auto";

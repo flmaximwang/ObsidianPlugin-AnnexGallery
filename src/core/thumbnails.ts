@@ -91,10 +91,10 @@ function errorSummary(error: unknown): string {
 }
 
 const ACTION_LABEL: Record<ThumbnailEntry["action"], string> = {
-  created: "已生成",
-  planned: "计划中",
-  skipped: "已跳过",
-  failed: "失败",
+  created: "Created",
+  planned: "Planned",
+  skipped: "Skipped",
+  failed: "Failed",
 };
 
 function generateOne(
@@ -109,11 +109,11 @@ function generateOne(
 
   // Skip rule first (it also holds under --dry-run so the plan is accurate).
   if (!force && thumbMtime !== null && sourceMtime !== null && thumbMtime >= sourceMtime) {
-    return { source, thumbnail, action: "skipped", detail: "缩略图不旧于源图（mtime >= 源图）" };
+    return { source, thumbnail, action: "skipped", detail: "Thumbnail is not older than the source (mtime >= source)" };
   }
 
   if (dryRun) {
-    return { source, thumbnail, action: "planned", detail: `dry-run：将执行 magick -resize ${edge}x${edge}` };
+    return { source, thumbnail, action: "planned", detail: `dry-run: would run magick -resize ${edge}x${edge}` };
   }
 
   const result = run(magickBinary(), [
@@ -126,8 +126,8 @@ function generateOne(
     thumbnail,
   ]);
   if (result.code !== 0) {
-    const detail = firstLine(result.stderr) || firstLine(result.stdout) || "无输出";
-    return { source, thumbnail, action: "failed", detail: `magick 退出码 ${result.code}：${detail}` };
+    const detail = firstLine(result.stderr) || firstLine(result.stdout) || "no output";
+    return { source, thumbnail, action: "failed", detail: `magick exited with code ${result.code}: ${detail}` };
   }
   return { source, thumbnail, action: "created" };
 }
@@ -151,7 +151,7 @@ export async function generateThumbnails(dir: string, opts: ThumbnailOptions = {
   const progress = opts.progress;
 
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
-    throw new Error(`generateThumbnails: 不是目录：${dir}`);
+    throw new Error(`generateThumbnails: not a directory: ${dir}`);
   }
 
   const sources = listImages(dir);
@@ -170,7 +170,7 @@ export async function generateThumbnails(dir: string, opts: ThumbnailOptions = {
     entries.push(entry);
     done += 1;
     if (progress !== undefined) {
-      progress(`进度 ${done}/${total}：${path.basename(thumbnail)} ${ACTION_LABEL[entry.action]}`);
+      progress(`Progress ${done}/${total}: ${path.basename(thumbnail)} ${ACTION_LABEL[entry.action]}`);
     }
   }
 

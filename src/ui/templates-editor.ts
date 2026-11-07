@@ -31,11 +31,11 @@ export interface TemplatesEditorHost {
 /** 从预设创建时落在哪个文件夹（spec 要求无空格）。 */
 export const TEMPLATE_FOLDER = "AnnexGalleryTemplates";
 
-const KIND_TITLE = "画廊模板";
+const KIND_TITLE = "Gallery templates";
 const KIND_EXT = ".base";
 const KIND_HINT =
-  "创建画廊时 .base 的模板：可用 {{folder}} / {{cardSize}} / {{properties}}；" +
-  "顶层 filters 由插件加上文件夹 + 标签作用域，模板自己的 filters 只能收窄。";
+  "Template for the .base created by Create Gallery: supports {{folder}} / {{cardSize}} / {{properties}}; " +
+  "the plugin adds folder + tag scope to top-level filters, and the template filters can only narrow it.";
 
 function listOf(settings: PluginSettings): TemplateRef[] {
   return settings.baseTemplates;
@@ -90,7 +90,7 @@ export class TemplatesEditor {
     if (refs.length === 0) {
       list.createDiv({
         cls: "annex-templates-empty",
-        text: "还没有登记画廊模板。填 vault 里的 .base 文件路径点「登记」，或用「从预设创建…」生成一份。",
+        text: "No gallery templates registered yet. Enter a vault .base path and press Register, or create one with Create from preset…",
       });
     }
 
@@ -98,8 +98,8 @@ export class TemplatesEditor {
 
     const addRow = card.createDiv({ cls: "annex-template-add-row" });
     const input = addRow.createEl("input", { cls: "annex-template-path-input", type: "text" });
-    input.setAttr("placeholder", `vault 里的画廊模板文件路径（${KIND_EXT}）`);
-    const add = addRow.createEl("button", { cls: "annex-template-add", text: "登记" });
+    input.setAttr("placeholder", `Vault path to a gallery template (${KIND_EXT})`);
+    const add = addRow.createEl("button", { cls: "annex-template-add", text: "Register" });
     const submit = (): void => void this.register(input.value);
     add.addEventListener("click", submit);
     input.addEventListener("keydown", (event) => {
@@ -107,9 +107,9 @@ export class TemplatesEditor {
     });
 
     const presetSelect = addRow.createEl("select", { cls: "dropdown annex-template-preset" });
-    presetSelect.createEl("option", { text: "从预设创建…", value: "" });
+    presetSelect.createEl("option", { text: "Create from preset…", value: "" });
     for (const preset of presetTemplates("base")) {
-      presetSelect.createEl("option", { text: `${preset.name}（${preset.id}）`, value: preset.id });
+      presetSelect.createEl("option", { text: `${preset.name} (${preset.id})`, value: preset.id });
     }
     presetSelect.addEventListener("change", () => {
       const chosen = presetTemplates("base").find((preset) => preset.id === presetSelect.value);
@@ -124,7 +124,7 @@ export class TemplatesEditor {
     row.setAttr("data-template-path", ref.path);
     row.setAttr("data-state", "ok");
 
-    row.createSpan({ cls: "annex-template-name", text: ref.name.trim() === "" ? "（未命名）" : ref.name });
+    row.createSpan({ cls: "annex-template-name", text: ref.name.trim() === "" ? "(unnamed)" : ref.name });
     row.createSpan({ cls: "annex-template-id", text: `id: ${ref.id}` });
     row.createSpan({ cls: "annex-template-path", text: ref.path });
 
@@ -137,12 +137,12 @@ export class TemplatesEditor {
       row.addClass("annex-template-row-error");
     }
 
-    const open = row.createEl("button", { cls: "annex-template-open", text: "打开" });
-    open.setAttr("aria-label", "用系统默认应用打开这份模板（改完保存即生效）");
+    const open = row.createEl("button", { cls: "annex-template-open", text: "Open" });
+    open.setAttr("aria-label", "Open this template with the system default application (saving changes applies immediately)");
     open.addEventListener("click", () => void this.open(ref));
 
-    const del = row.createEl("button", { cls: "annex-template-del mod-warning", text: "删除" });
-    del.setAttr("aria-label", "取消登记（不删除文件）");
+    const del = row.createEl("button", { cls: "annex-template-del mod-warning", text: "Remove" });
+    del.setAttr("aria-label", "Unregister (the file is not deleted)");
     del.addEventListener("click", () => void this.remove(index));
 
     if (problem !== "") row.createDiv({ cls: "annex-template-error", text: problem });
@@ -158,13 +158,13 @@ export class TemplatesEditor {
     try {
       relPath = resolveVaultFile(this.host.vaultRoot(), raw, "base").relPath;
     } catch (error) {
-      new Notice(`登记失败：${errText(error)}`, 10000);
+      new Notice(`Registration failed: ${errText(error)}`, 10000);
       return;
     }
 
     const list = listOf(this.host.settings);
     if (list.some((ref) => ref.path === relPath || normalizedOrNull(ref.path) === relPath)) {
-      new Notice(`这个文件已经登记过：${relPath}`);
+      new Notice(`This file is already registered: ${relPath}`);
       return;
     }
 
@@ -172,7 +172,7 @@ export class TemplatesEditor {
     list.push({ id: uniqueTemplateId(name, this.takenIds()), name, path: relPath });
     await this.host.saveSettings();
     this.render();
-    new Notice(`已登记：${relPath}`);
+    new Notice(`Registered: ${relPath}`);
   }
 
   /** 从预设创建一份独立文件：一个预设一个文件，冲突加序号不覆盖，创建后不自动打开。 */
@@ -183,14 +183,14 @@ export class TemplatesEditor {
       const name = stemOfPath(written);
       listOf(this.host.settings).push({
         id: uniqueTemplateId(name === "" ? preset.id : name, this.takenIds()),
-        name: written === target ? preset.name : `${preset.name}（副本）`,
+        name: written === target ? preset.name : `${preset.name} (copy)`,
         path: written,
       });
       await this.host.saveSettings();
       this.render();
-      new Notice(`已从预设创建：${written}`);
+      new Notice(`Created from preset: ${written}`);
     } catch (error) {
-      new Notice(`从预设创建失败：${errText(error)}`, 12000);
+      new Notice(`Create from preset failed: ${errText(error)}`, 12000);
     }
   }
 
@@ -200,7 +200,7 @@ export class TemplatesEditor {
       const file = resolveVaultFile(this.host.vaultRoot(), ref.path, "base");
       await this.host.openWithDefaultApp(file.absPath);
     } catch (error) {
-      new Notice(`打不开「${ref.path}」：${errText(error)}`, 12000);
+      new Notice(`Cannot open "${ref.path}": ${errText(error)}`, 12000);
     }
   }
 
@@ -212,6 +212,6 @@ export class TemplatesEditor {
     list.splice(index, 1);
     await this.host.saveSettings();
     this.render();
-    new Notice(`已取消登记（文件未删除）：${target.path}`);
+    new Notice(`Unregistered (file not deleted): ${target.path}`);
   }
 }

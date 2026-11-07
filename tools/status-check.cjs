@@ -141,14 +141,14 @@ async function main() {
     // ── 1. 干净仓库 ───────────────────────────────────────────────────────
     const galleryPlugin = await withPlugin(gallery);
     console.log(`  干净仓库 → ${textOf(galleryPlugin.el)}`);
-    check(textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 0 · 未入库 largefiles 0", "干净仓库：三项全 0");
+    check(textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 0 · Annex-missing largefiles 0", "干净仓库：三项全 0");
     check(galleryPlugin.el.getAttr("data-level") === "zero", "干净仓库：data-level=zero（配色用）");
     check(
-      /每 30 秒自动刷新/.test(String(galleryPlugin.el.getAttr("aria-label"))),
+      /refreshes every 30 s/i.test(String(galleryPlugin.el.getAttr("aria-label"))),
       "悬停提示写明「每 30 秒自动刷新」",
     );
     check(
-      /未入库 largefiles：git annex add --dry-run/.test(String(galleryPlugin.el.getAttr("aria-label"))),
+      /Annex-missing largefiles: files that would enter annex/.test(String(galleryPlugin.el.getAttr("aria-label"))),
       "悬停提示写明「未入库 largefiles」的口径",
     );
 
@@ -158,22 +158,22 @@ async function main() {
     fs.writeFileSync(path.join(gallery, "sub/ses2/b.md"), `---\nsample: "b"\n---\n`);
     await galleryPlugin.plugin.refreshStatus();
     console.log(`  2 图 + 1 md（未跟踪）→ ${textOf(galleryPlugin.el)}`);
-    check(textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 2", "未跟踪 3 个，其中 2 个是未入库 largefiles");
-    check(!/未入库 largefiles 3/.test(textOf(galleryPlugin.el)), "未跟踪的 .md 不算 largefile（它按 .gitattributes 进 git）");
+    check(textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 3 · Annex-missing largefiles 2", "未跟踪 3 个，其中 2 个是未入库 largefiles");
+    check(!/Annex-missing largefiles 3/.test(textOf(galleryPlugin.el)), "未跟踪的 .md 不算 largefile（它按 .gitattributes 进 git）");
 
     // ── 3. 已 add 未 commit ───────────────────────────────────────────────
     git(["annex", "add", "."], gallery);
     await galleryPlugin.plugin.refreshStatus();
     console.log(`  git annex add 之后（未 commit）→ ${textOf(galleryPlugin.el)}`);
     check(
-      textOf(galleryPlugin.el) === "未提交 3 · 未跟踪 0 · 未入库 largefiles 0",
+      textOf(galleryPlugin.el) === "Uncommitted 3 · Untracked 0 · Annex-missing largefiles 0",
       "已 add 未 commit：未提交 3、未入库 0（「未入库」= 还没 add 进 annex，不是「还没 commit」）",
     );
 
     // ── 4. commit 后归零 → 改一张已 annexed 的图 ──────────────────────────
     commit(gallery, "add b/c");
     await galleryPlugin.plugin.refreshStatus();
-    check(textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 0 · 未入库 largefiles 0", "commit 后三项归零");
+    check(textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 0 · Annex-missing largefiles 0", "commit 后三项归零");
     // 真实工作流：annex 文件先 `git annex unlock`（locked 时是指向 .git/annex/objects 的只读软链，
     // 直接写会 EACCES），再写新内容 —— 这时它在 index 里还没被重新 add。
     git(["annex", "unlock", "sub/ses1/a.tif"], gallery);
@@ -181,21 +181,21 @@ async function main() {
     await galleryPlugin.plugin.refreshStatus();
     console.log(`  改一张已 annexed 的图（解锁后改内容，未重新 add）→ ${textOf(galleryPlugin.el)}`);
     check(
-      textOf(galleryPlugin.el) === "未提交 1 · 未跟踪 0 · 未入库 largefiles 1",
+      textOf(galleryPlugin.el) === "Uncommitted 1 · Untracked 0 · Annex-missing largefiles 1",
       "已跟踪但改过还没重新 add 的大文件：未提交 1、未入库 1",
     );
     git(["annex", "add", "."], gallery);
     await galleryPlugin.plugin.refreshStatus();
-    check(textOf(galleryPlugin.el) === "未提交 1 · 未跟踪 0 · 未入库 largefiles 0", "重新 add 后未入库归 0（未提交仍 1）");
+    check(textOf(galleryPlugin.el) === "Uncommitted 1 · Untracked 0 · Annex-missing largefiles 0", "重新 add 后未入库归 0（未提交仍 1）");
     commit(gallery, "re-add a");
     await galleryPlugin.plugin.refreshStatus();
-    check(textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 0 · 未入库 largefiles 0", "再 commit 后三项归零");
+    check(textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 0 · Annex-missing largefiles 0", "再 commit 后三项归零");
 
     // ── 5. 未跟踪目录：一个文件一行（-uall）────────────────────────────────
     for (const name of ["x.tif", "y.tif", "z.tif"]) writeRandom(path.join(gallery, "sub/ses3", name), 64 * 1024);
     await galleryPlugin.plugin.refreshStatus();
     console.log(`  未跟踪目录里 3 个文件 → ${textOf(galleryPlugin.el)}`);
-    check(textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3", "未跟踪目录按文件计数（3，不是 1）");
+    check(textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 3 · Annex-missing largefiles 3", "未跟踪目录按文件计数（3，不是 1）");
     check(
       git(["status", "--porcelain"], gallery).stdout.trim() === "?? sub/ses3/",
       "对照：不带 -uall 的 porcelain 只给一行 `?? sub/ses3/`（所以状态栏用的是 -uall）",
@@ -207,7 +207,7 @@ async function main() {
     writeRandom(path.join(gallery, ".obsidian/plugins/x/big.bin"), 32 * 1024);
     await galleryPlugin.plugin.refreshStatus();
     check(
-      textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
+      textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 3 · Annex-missing largefiles 3",
       "被 .gitignore 忽略的 .obsidian 下的文件一个都不算（数字与上一步相同）",
     );
 
@@ -229,7 +229,7 @@ async function main() {
       await galleryPlugin.plugin.refreshStatus();
       console.log(`  GUI 式 PATH（只剩 launchd 那四个目录）→ ${textOf(galleryPlugin.el)}`);
       check(
-        textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
+        textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 3 · Annex-missing largefiles 3",
         "同一份 PATH 下仍然量出三个数（子进程 PATH 末尾补了 /opt/homebrew/bin 等目录）",
       );
       check(galleryPlugin.el.getAttr("data-level") === "dirty", "data-level=dirty，不是 unavailable");
@@ -238,7 +238,7 @@ async function main() {
       await galleryPlugin.plugin.refreshStatus();
       console.log(`  关掉补 PATH 之后 → ${textOf(galleryPlugin.el)}`);
       check(
-        textOf(galleryPlugin.el) === "无法统计：找不到 git-annex 命令（brew install git-annex）",
+        textOf(galleryPlugin.el) === "Cannot count: git-annex was not found (brew install git-annex)",
         "真的找不到 git-annex 时，报「找不到 git-annex 命令（brew install git-annex）」",
       );
       check(
@@ -255,7 +255,7 @@ async function main() {
     }
     await galleryPlugin.plugin.refreshStatus();
     check(
-      textOf(galleryPlugin.el) === "未提交 0 · 未跟踪 3 · 未入库 largefiles 3",
+      textOf(galleryPlugin.el) === "Uncommitted 0 · Untracked 3 · Annex-missing largefiles 3",
       "PATH 恢复后数字与之前一致（补 PATH 是纯追加，不改变原有解析顺序）",
     );
 
@@ -280,7 +280,7 @@ async function main() {
       );
       await galleryPlugin.plugin.refreshStatus();
       check(
-        textOf(galleryPlugin.el) === "无法统计：找不到 git-annex 命令（brew install git-annex）",
+        textOf(galleryPlugin.el) === "Cannot count: git-annex was not found (brew install git-annex)",
         "git status 这一路失败时也报「找不到 git-annex 命令」，不是「git status 失败：…」",
       );
     } finally {
@@ -290,28 +290,28 @@ async function main() {
     await galleryPlugin.plugin.refreshStatus();
     console.log(`  解锁改一张图之后（补了 PATH）→ ${textOf(galleryPlugin.el)}`);
     check(
-      textOf(galleryPlugin.el) === "未提交 1 · 未跟踪 3 · 未入库 largefiles 4",
+      textOf(galleryPlugin.el) === "Uncommitted 1 · Untracked 3 · Annex-missing largefiles 4",
       "补 PATH 之后 git status 正常跑完：改过的 a.tif 计入未提交，dry-run 把它与 3 个未跟踪图一起算 4",
     );
 
     // ── 6. 非 annex 仓库 / 非 git 目录 ─────────────────────────────────────
     const notAnnexPlugin = await withPlugin(notAnnex);
     console.log(`  非 annex 仓库 → ${textOf(notAnnexPlugin.el)}`);
-    check(textOf(notAnnexPlugin.el) === "未初始化 · 点击初始化 gallery", "非 annex 仓库：提示「未初始化 · 点击初始化 gallery」");
+    check(textOf(notAnnexPlugin.el) === "Not initialized · click to initialize gallery", "非 annex 仓库：提示「未初始化 · 点击初始化 gallery」");
     check(notAnnexPlugin.el.getAttr("data-level") === "uninitialized", "data-level=uninitialized");
     check(
-      /不是 git-annex 仓库/.test(String(notAnnexPlugin.el.getAttr("aria-label"))),
+      /Not a git-annex repository/.test(String(notAnnexPlugin.el.getAttr("aria-label"))),
       "悬停提示写明原因（不是 git-annex 仓库）",
     );
 
     const notRepoPlugin = await withPlugin(notRepo);
     console.log(`  非 git 目录 → ${textOf(notRepoPlugin.el)}`);
-    check(textOf(notRepoPlugin.el) === "未初始化 · 点击初始化 gallery", "非 git 目录：同样提示未初始化");
-    check(/不是 git 仓库/.test(String(notRepoPlugin.el.getAttr("aria-label"))), "悬停提示写明原因（不是 git 仓库）");
+    check(textOf(notRepoPlugin.el) === "Not initialized · click to initialize gallery", "非 git 目录：同样提示未初始化");
+    check(/Not a git repository/.test(String(notRepoPlugin.el.getAttr("aria-label"))), "悬停提示写明原因（不是 git 仓库）");
 
     // ── 7. 空目录上点击状态栏 → 真跑「初始化 gallery」──────────────────────
     const freshPlugin = await withPlugin(fresh);
-    check(textOf(freshPlugin.el) === "未初始化 · 点击初始化 gallery", "fresh 目录：未初始化");
+    check(textOf(freshPlugin.el) === "Not initialized · click to initialize gallery", "fresh 目录：未初始化");
     const noticesBefore = stub.registry.notices.length;
     freshPlugin.el.click();
     await freshPlugin.plugin.refreshStatus();
@@ -319,11 +319,11 @@ async function main() {
     await freshPlugin.plugin.refreshStatus();
     const clickNotice = stub.registry.notices.slice(noticesBefore).join(" | ");
     console.log(`  点击后 → ${clickNotice.split(" | ")[0]?.split("\n")[0] ?? "(没有 Notice)"}`);
-    check(/初始化 gallery 完成/.test(clickNotice), "点击未初始化的状态栏 → 跑完「初始化 gallery」并给出完成报告");
+    check(/Initialize gallery complete/.test(clickNotice), "点击未初始化的状态栏 → 跑完「初始化 gallery」并给出完成报告");
     check(fs.existsSync(path.join(fresh, ".git/annex")), "点击之后 fresh 真的是 annex 仓库了（盘上复核）");
     console.log(`  初始化之后 → ${textOf(freshPlugin.el)}`);
     check(
-      textOf(freshPlugin.el) === "未提交 0 · 未跟踪 2 · 未入库 largefiles 0",
+      textOf(freshPlugin.el) === "Uncommitted 0 · Untracked 2 · Annex-missing largefiles 0",
       "初始化之后：.gitattributes / .gitignore 两个未跟踪 dotfile 进 git，不算 largefile",
     );
 

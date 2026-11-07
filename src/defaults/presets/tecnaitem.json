@@ -1,6 +1,6 @@
 {
   "id": "tecnaitem",
-  "name": "TECNAI 电镜（<放大倍数>X-<标记>-<序号>）",
+  "name": "TECNAI microscope (<magnification>X-<marker>-<number>)",
   "source": "stem",
   "regex": "^(?<magnification>\\d+)X-(?<marker>.+)-(?<index>\\d+)$",
   "types": {

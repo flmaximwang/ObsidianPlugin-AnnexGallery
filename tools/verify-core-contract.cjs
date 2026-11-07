@@ -170,9 +170,9 @@ async function main() {
   check(/^  inner:$/m.test(empty.text), "嵌套对象里的空值同样写 YAML null");
   check(/^list:\n {2}- "08"\n {2}- 3$/m.test(empty.text), "列表里的空项整项丢弃，其余项照写（顺序不变）");
   check(/^emptyList: \[\]$/m.test(empty.text), "空列表写成 `[]`");
-  check(/空值（写成 YAML null）：sample、tag、blank、missingvar、nested\.inner/.test(empty.detail ?? ""), "detail 报告写成 YAML null 的键路径");
-  check(/列表里的空项已丢弃：list/.test(empty.detail ?? ""), "detail 报告丢弃过空项的列表");
-  check(/没有来源的占位符：.*\{\{nope\}\}/.test(empty.detail ?? ""), "detail 报告没有来源的占位符");
+  check(/Empty values \(written as YAML null\): sample, tag, blank, missingvar, nested\.inner/.test(empty.detail ?? ""), "detail 报告写成 YAML null 的键路径");
+  check(/Empty list entries were dropped: list/.test(empty.detail ?? ""), "detail 报告丢弃过空项的列表");
+  check(/Placeholders with no source:.*\{\{nope\}\}/.test(empty.detail ?? ""), "detail 报告没有来源的占位符");
 
   // ── E. 正文：给了就追加，不给只有 frontmatter ─────────────────────────
   console.log("\n[渲染] 正文");
@@ -183,7 +183,7 @@ async function main() {
   });
   check(withBody.text.startsWith(built.text), "正文追加在 frontmatter 之后（frontmatter 部分逐字节不变）");
   check(withBody.text.endsWith("\n缩略图：[[20260101-run/07-tag.thumbnail.png]]\n未知：\n"), "正文里的占位符按同一套取值替换，取不到留空");
-  check(/模板里的 \{\{nope\}\} 取不到值，已留空/.test(withBody.detail ?? ""), "detail 报告正文里取不到值的占位符");
+  check(/Template placeholders \{\{nope\}\} have no value and were left empty/.test(withBody.detail ?? ""), "detail 报告正文里取不到值的占位符");
   const noBody = sidecar.buildSidecarText(image, typed, { vaultRoot: vault, ask: { sample: "s1", when: "2026-05-06" } });
   check(noBody.text === built.text && noBody.text.endsWith("---\n"), "不给 body ⇒ 只有 frontmatter（末尾一行 ---）");
 
@@ -212,7 +212,7 @@ async function main() {
   } catch (error) {
     err = error;
   }
-  check(err !== null && /不能自带 frontmatter/.test(String(err.message)), "正文模板自带 frontmatter ⇒ 抛错");
+  check(err !== null && /must not include frontmatter/.test(String(err.message)), "正文模板自带 frontmatter ⇒ 抛错");
   check(!fs.existsSync(path.join(runDir, "09-x.md")), "坏正文模板在写盘前停下（一份 sidecar 都没写）");
 
   // ── G. 没有 profiles ⇒ 报错（没有内置兜底）─────────────────────────────
@@ -224,23 +224,23 @@ async function main() {
     err = error;
   }
   check(err !== null, "不给 profiles ⇒ 抛错");
-  check(err !== null && /没有可用的元数据预设/.test(String(err.message)), `错误说清缺什么（${err === null ? "无" : err.message}）`);
+  check(err !== null && /No metadata preset available/.test(String(err.message)), `错误说清缺什么（${err === null ? "无" : err.message}）`);
 
   // ── H. validateProfile：gallery 标签是硬要求 ──────────────────────────
   console.log("\n[validateProfile] tags 必须含 annex-gallery-metadata");
   const noTag = profiles.validateProfile(profileOf({ frontmatter: { idx: "{{idx}}" } }));
   check(
-    noTag.some((issue) => issue.level === "error" && /必须包含 tags/.test(issue.message)),
+    noTag.some((issue) => issue.level === "error" && /must contain tags/.test(issue.message)),
     "frontmatter 没有 tags ⇒ error",
   );
   const stringTags = profiles.validateProfile(profileOf({ frontmatter: { tags: "annex-gallery-metadata", idx: "{{idx}}" } }));
   check(
-    stringTags.some((issue) => issue.level === "error" && /必须是列表且含字面量/.test(issue.message)),
+    stringTags.some((issue) => issue.level === "error" && /must be a list containing the literal/.test(issue.message)),
     "tags 不是列表 ⇒ error",
   );
   const wrongTag = profiles.validateProfile(profileOf({ frontmatter: { tags: ["other"], idx: "{{idx}}" } }));
   check(
-    wrongTag.some((issue) => issue.level === "error" && /必须是列表且含字面量/.test(issue.message)),
+    wrongTag.some((issue) => issue.level === "error" && /must be a list containing the literal/.test(issue.message)),
     "tags 列表里没有 GALLERY_TAG ⇒ error",
   );
   eq(profiles.validateProfile(profileOf({ frontmatter: { tags: ["annex-gallery-metadata"], idx: "{{idx}}", tag: "{{tag}}" } })), [], "最小合法预设 ⇒ 没有任何 issue");
@@ -261,11 +261,11 @@ async function main() {
   const legacyInspection = files.inspectProfileFile(vault, "Profiles/old.json");
   check(legacyInspection.legacyKeys.length === 3, `旧格式顶层键被认出来（${legacyInspection.legacyKeys.join(" / ")}）`);
   check(
-    legacyInspection.issues.some((issue) => issue.level === "error" && /旧格式的元数据预设/.test(issue.message)),
+    legacyInspection.issues.some((issue) => issue.level === "error" && /Legacy metadata preset format/.test(issue.message)),
     "旧格式报错带 legacy 提示",
   );
   check(
-    legacyInspection.issues.some((issue) => /不会自动迁移/.test(issue.message)),
+    legacyInspection.issues.some((issue) => /not migrated automatically/.test(issue.message)),
     "legacy 提示说明「不会自动迁移」",
   );
   err = null;
@@ -274,13 +274,13 @@ async function main() {
   } catch (error) {
     err = error;
   }
-  check(err !== null && /旧格式的元数据预设/.test(String(err.message)), "loadProfileFile 对旧格式抛错");
+  check(err !== null && /Legacy metadata preset format/.test(String(err.message)), "loadProfileFile 对旧格式抛错");
 
   const wrapper = { profiles: [profileOf()] };
   fs.writeFileSync(path.join(vault, "Profiles", "multi.json"), `${JSON.stringify(wrapper, null, 2)}\n`, "utf8");
   const multi = files.inspectProfileFile(vault, "Profiles/multi.json");
   check(
-    multi.issues.some((issue) => issue.level === "error" && /单条预设对象/.test(issue.message)),
+    multi.issues.some((issue) => issue.level === "error" && /single preset object at the top level/.test(issue.message)),
     "`{ profiles: [...] }` 多预设文件被拒绝",
   );
 

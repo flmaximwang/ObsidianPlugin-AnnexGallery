@@ -12,7 +12,6 @@ import {
   TAbstractFile,
   TFile,
   TFolder,
-  getLanguage,
   normalizePath,
   setIcon,
 } from "obsidian";
@@ -65,21 +64,11 @@ import {
 type PromptSubmit = (profile: LoadedProfile, values: Record<string, string>) => void;
 
 /**
- * 「创建画廊」的标题跟 Obsidian 界面语言走（用户 2026-10-31 口径：只有这一项本地化）。
- * `getLanguage()` 是 1.8+ 的公开 API；更老的 app 上不存在 ⇒ 退回 moment 的 locale，再不行用英文。
+ * The gallery menu title. Fixed English until the plugin ships bilingual UI.
+ * Kept as a function so callers and tests share one source of truth.
  */
 export function galleryMenuTitle(): string {
-  let lang = "";
-  try {
-    if (typeof getLanguage === "function") lang = getLanguage();
-  } catch {
-    lang = "";
-  }
-  if (lang === "") {
-    const moment = (window as Window & { moment?: { locale?: () => string } }).moment;
-    lang = typeof moment?.locale === "function" ? moment.locale() : "";
-  }
-  return lang.toLowerCase().startsWith("zh") ? "创建画廊" : "Create Gallery";
+  return "Create Gallery";
 }
 
 /** 一个只有说明文字 + 一排按钮的弹窗（画廊流程里的「补标签？」「已存在？」都用它）。 */
@@ -131,10 +120,10 @@ class GalleryTemplateModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText(`${galleryMenuTitle()} — 选画廊模板`);
-    this.contentEl.createEl("p", { text: `为 ${this.subject} 生成 .base；选一份模板（按文件夹记住）。` });
-    new Setting(this.contentEl).setName("画廊模板").addDropdown((dropdown) => {
-      for (const option of this.options) dropdown.addOption(option.id, `${option.name}（${option.id}）`);
+    this.titleEl.setText(`${galleryMenuTitle()} — Choose a gallery template`);
+    this.contentEl.createEl("p", { text: `Generate the .base for ${this.subject}; pick a template (remembered per folder).` });
+    new Setting(this.contentEl).setName("Gallery template").addDropdown((dropdown) => {
+      for (const option of this.options) dropdown.addOption(option.id, `${option.name} (${option.id})`);
       dropdown.setValue(this.selected);
       dropdown.onChange((value) => {
         this.selected = value;
@@ -150,7 +139,7 @@ class GalleryTemplateModal extends Modal {
             this.onChoose(this.selected);
           }),
       )
-      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
   }
 
   onClose(): void {
@@ -212,7 +201,7 @@ class SamplePromptModal extends Modal {
   ) {
     super(app);
     if (profiles.length === 0) {
-      throw new Error("还没有可用的元数据预设：请到设置页「元数据预设」登记外部 .json，或从预设创建。");
+      throw new Error("No metadata preset is available yet: register an external .json under Metadata presets in Settings, or create one from a preset.");
     }
     this.profiles = profiles;
     this.selectedProfile = this.pickDefault();
@@ -248,17 +237,17 @@ class SamplePromptModal extends Modal {
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    titleEl.setText("生成元数据 — 选预设 + 填字段");
+    titleEl.setText("Generate metadata — choose a preset and fill in fields");
     contentEl.createEl("p", {
-      text: `为 ${this.subject} 里每张图生成一份 sidecar .md；先选元数据预设，再填需要现场获得的字段（按文件夹记住，下次自动填上）。`,
+      text: `For ${this.subject}, generate one sidecar .md per image; choose a metadata preset first, then fill in the fields that must be provided now (remembered per folder and prefilled next time).`,
     });
 
     new Setting(contentEl)
-      .setName("元数据预设")
-      .setDesc("默认按 match 自动预选，选不出来时列出全部；显示 name 并带上 id。正文模板由预设自己的 template 字段指定。")
+      .setName("Metadata preset")
+      .setDesc("Preselected by match when possible; otherwise every preset is listed. Shows the name and id. The body template comes from the preset's own template field.")
       .addDropdown((dropdown) => {
         for (const entry of this.profiles) {
-          dropdown.addOption(entry.profile.id, `${entry.profile.name}（${entry.profile.id}）`);
+          dropdown.addOption(entry.profile.id, `${entry.profile.name} (${entry.profile.id})`);
         }
         dropdown.setValue(this.selectedProfile.profile.id);
         dropdown.onChange((value) => {
@@ -271,8 +260,8 @@ class SamplePromptModal extends Modal {
     this.renderAskFields();
 
     new Setting(contentEl)
-      .addButton((button) => button.setButtonText("生成元数据").setCta().onClick(() => this.submit()))
-      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
+      .addButton((button) => button.setButtonText("Generate metadata").setCta().onClick(() => this.submit()))
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
   }
 
   private renderAskFields(): void {
@@ -282,7 +271,7 @@ class SamplePromptModal extends Modal {
     for (const key of ask) {
       const prefilled = readAsk(this.host.settings, this.dir, key);
       this.values[key] = prefilled;
-      new Setting(this.askContainer).setName(`询问字段：${key}`).addText((text) => {
+      new Setting(this.askContainer).setName(`Ask field: ${key}`).addText((text) => {
         text.setValue(prefilled);
         text.onChange((value) => {
           this.values[key] = value;
@@ -306,7 +295,7 @@ class SamplePromptModal extends Modal {
     const ask = askKeysFor(selected);
     for (const key of ask) {
       if ((this.values[key] ?? "").trim() === "") {
-        new Notice(`${key} 不能为空`);
+        new Notice(`${key} cannot be empty`);
         return;
       }
     }
@@ -344,22 +333,22 @@ class OverwritePromptModal extends Modal {
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    const where = this.subject === "/" ? "仓库根" : this.subject;
-    titleEl.setText("生成元数据 — 已有 sidecar，怎么处理？");
+    const where = this.subject === "/" ? "repository root" : this.subject;
+    titleEl.setText("Generate metadata — sidecars already exist. What should happen?");
     contentEl.createEl("p", {
-      text: `${where} 下 ${this.plan.images} 张图里已有 ${this.plan.existing} 份 sidecar${
-        this.plan.dirty > 0 ? `，其中 ${this.plan.dirty} 份被改过（git 报脏）` : ""
-      }。`,
+      text: `Under ${where}, ${this.plan.existing} of ${this.plan.images} images already have sidecars${
+        this.plan.dirty > 0 ? `; ${this.plan.dirty} of them have uncommitted changes` : ""
+      }.`,
     });
     contentEl.createEl("p", {
-      text: "覆盖重算：按当前预设重写这 " + String(this.plan.existing) + " 份 —— 改动预设后重新计算元数据就用它（被改过的那几份也会被覆盖）。",
+      text: "Recompute all: rewrite these " + String(this.plan.existing) + " sidecars with the current preset — use this after changing a preset (sidecars with local changes are overwritten too).",
     });
-    contentEl.createEl("p", { text: "只补缺失：已存在的一律不动，只为还没有 sidecar 的图新建。" });
+    contentEl.createEl("p", { text: "Only add missing: leave every existing sidecar untouched and create sidecars only for images that have none." });
 
     new Setting(contentEl)
       .addButton((button) =>
         button
-          .setButtonText("覆盖重算")
+          .setButtonText("Recompute all")
           .setDestructive()
           .onClick(() => {
             this.close();
@@ -368,14 +357,14 @@ class OverwritePromptModal extends Modal {
       )
       .addButton((button) =>
         button
-          .setButtonText("只补缺失")
+          .setButtonText("Only add missing")
           .setCta()
           .onClick(() => {
             this.close();
             this.onChoose(false);
           }),
       )
-      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
   }
 
   onClose(): void {
@@ -401,29 +390,29 @@ class DropConfirmModal extends Modal {
 
   onOpen(): void {
     const { contentEl, titleEl } = this;
-    const where = this.subject === "/" ? "仓库根" : this.subject;
-    titleEl.setText("Drop largefiles — 丢弃本地内容");
+    const where = this.subject === "/" ? "repository root" : this.subject;
+    titleEl.setText("Drop largefiles — drop local content");
     contentEl.createEl("p", {
-      text: `${where} 下有 ${this.report.present} 个 annex 文件在本地有内容，共 ${formatBytes(this.report.bytesPresent)}。确认后会丢掉这些内容（腾硬盘）。`,
+      text: `Under ${where}, ${this.report.present} annex files have local content (${formatBytes(this.report.bytesPresent)}). Confirming drops that content to free disk space.`,
     });
     contentEl.createEl("p", {
-      text: "元数据 .md、缩略图 .thumbnail.png 与 .base 都不进 annex（.gitattributes 里是 annex.largefiles=nothing），所以不会被碰 —— 画廊照旧能看；原图要取回来时用 git annex get。",
+      text: "Metadata .md, .thumbnail.png and .base files never enter annex (annex.largefiles=nothing in .gitattributes), so they are untouched and the gallery keeps working; use git annex get to restore an original.",
     });
     contentEl.createEl("p", {
-      text: "git-annex 只会丢「别处有足够副本」的内容：别处没有副本的文件会被拒绝，原样保留（报告里记为「被挡下」）。",
+      text: "git-annex only drops content that has enough copies elsewhere: files without another copy are refused and kept as-is (reported as skipped).",
     });
 
     new Setting(contentEl)
       .addButton((button) =>
         button
-          .setButtonText("丢弃")
+          .setButtonText("Drop")
           .setDestructive()
           .onClick(() => {
             this.close();
             this.onConfirm();
           }),
       )
-      .addButton((button) => button.setButtonText("取消").onClick(() => this.close()));
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()));
   }
 
   onClose(): void {
@@ -460,7 +449,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     // 入口 1：注册命令「初始化 gallery」
     this.addCommand({
       id: "init-gallery",
-      name: "初始化 gallery",
+      name: "Initialize gallery",
       callback: () => {
         void this.runInit();
       },
@@ -475,8 +464,8 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         if (!(file instanceof TFolder)) return;
         addAnnexSubmenu(menu, (target) => {
           const entries: Array<{ title: string; icon: string; run: () => void }> = [
-            { title: "生成元数据", icon: "file-text", run: () => void this.runSidecars(file) },
-            { title: "生成缩略图", icon: "image", run: () => void this.runThumbnails(file) },
+            { title: "Generate metadata", icon: "file-text", run: () => void this.runSidecars(file) },
+            { title: "Generate thumbnails", icon: "image", run: () => void this.runThumbnails(file) },
             { title: galleryMenuTitle(), icon: "layout-grid", run: () => void this.runGallery(file) },
             { title: ANNEX_OP_TITLE.add, icon: "package-plus", run: () => void this.runAnnex("add", file) },
             { title: ANNEX_OP_TITLE.unannex, icon: "package-open", run: () => void this.runAnnex("unannex", file) },
@@ -523,12 +512,12 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     el.setAttr("data-level", "loading");
     this.statusBarEl = el;
 
-    this.statusTextEl = el.createSpan({ cls: "annex-status-counts", text: "统计中…" });
-    this.statusTextEl.setAttr("aria-label", "Annex Gallery：正在统计");
+    this.statusTextEl = el.createSpan({ cls: "annex-status-counts", text: "Counting…" });
+    this.statusTextEl.setAttr("aria-label", "Annex Gallery: counting");
 
     this.statusRefreshEl = el.createSpan({ cls: "annex-status-refresh" });
     setIcon(this.statusRefreshEl, "refresh-cw");
-    this.statusRefreshEl.setAttr("aria-label", "立即刷新");
+    this.statusRefreshEl.setAttr("aria-label", "Refresh now");
 
     this.registerDomEvent(el, "click", () => {
       void this.onStatusClick();
@@ -588,7 +577,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       }
       const status =
         dir === ""
-          ? unavailableStatus("", "拿不到 vault 的本地路径（Annex Gallery 只支持桌面版）")
+          ? unavailableStatus("", "Cannot resolve the local vault path (Annex Gallery is desktop-only)")
           : await readRepoStatus(dir);
       this.status = status;
       this.renderStatus(status);
@@ -702,7 +691,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   vaultRoot(): string {
     const adapter = this.app.vault.adapter;
     if (adapter instanceof FileSystemAdapter) return adapter.getBasePath();
-    throw new Error("Annex Gallery 只支持桌面版：拿不到 vault 的本地路径");
+    throw new Error("Annex Gallery is desktop-only: cannot resolve the local vault path");
   }
 
   /** 设置页「复制为自定义」：在 vault 里新建文件（被占用就加 ` 2`、` 3`…），返回实际路径。 */
@@ -744,7 +733,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     if (shell !== undefined) {
       const failure = await shell.openPath(filePath);
       if (failure === "") return;
-      throw new Error(`系统默认应用没能打开它：${failure}`);
+      throw new Error(`The system default application could not open it: ${failure}`);
     }
 
     const opener = (this.app as App & { openWithDefaultApp?: (target: string) => void }).openWithDefaultApp;
@@ -756,10 +745,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         return;
       }
       throw new Error(
-        `拿不到系统默认应用：electron.shell.openPath 不可用，而 ${filePath} 不在 vault 内（app.openWithDefaultApp 只认 vault 相对路径）`,
+        `No system default application available: electron.shell.openPath is unavailable and ${filePath} is outside the vault (app.openWithDefaultApp only accepts vault-relative paths)`,
       );
     }
-    throw new Error("拿不到系统默认应用：既没有 electron.shell.openPath，也没有 app.openWithDefaultApp");
+    throw new Error("No system default application available: neither electron.shell.openPath nor app.openWithDefaultApp exists");
   }
 
   private folderPath(folder: TFolder): string {
@@ -793,28 +782,28 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       const result = await initGallery(root, {
         progress: (message) => this.logProgress(message),
       });
-      this.notifyReport("初始化 gallery 完成", [
-        `仓库根：${result.root}`,
-        `git init：${result.createdRepo ? "已新建" : "已存在，跳过"}`,
-        `git annex init：${result.initedAnnex ? "已执行" : "已是 annex 仓库，跳过"}`,
-        `annex.addunlocked：${
+      this.notifyReport("Initialize gallery complete", [
+        `Repository root: ${result.root}`,
+        `git init: ${result.createdRepo ? "created" : "already a repository, skipped"}`,
+        `git annex init: ${result.initedAnnex ? "ran" : "already an annex repository, skipped"}`,
+        `annex.addunlocked: ${
           result.shape.addUnlocked.action === "unchanged"
-            ? "分支已是 true，未改动"
-            : "分支已设为 true（此后 add 的文件以 unlocked 入库）"
+            ? "branch is already true, unchanged"
+            : "branch set to true (files added from now on are stored unlocked)"
         }`,
         ...(result.shape.localRepairs.length === 0
           ? []
           : [
-              `本机设置：修 ${result.shape.localRepairs.length} 项（${result.shape.localRepairs
-                .map((entry) => `${entry.key}=${entry.previous ?? "(无)"}→${entry.action === "unset" ? "删" : String(entry.standard)}`)
-                .join(" · ")}）`,
+              `Local settings: repaired ${result.shape.localRepairs.length} (${result.shape.localRepairs
+                .map((entry) => `${entry.key}=${entry.previous ?? "(none)"}→${entry.action === "unset" ? "unset" : String(entry.standard)}`)
+                .join(" · ")})`,
             ]),
-        `.gitattributes：补 ${result.gitattributes.added.length} 条规则`,
-        `.gitignore：补 ${result.gitignore.added.length} 条规则`,
+        `.gitattributes: added ${result.gitattributes.added.length} rules`,
+        `.gitignore: added ${result.gitignore.added.length} rules`,
         ...result.notes,
       ]);
     } catch (error) {
-      new Notice(`初始化 gallery 失败：${String(error)}`, 10000);
+      new Notice(`Initialize gallery failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -823,21 +812,21 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
 
   private async runThumbnails(folder: TFolder): Promise<void> {
     const dir = this.folderPath(folder);
-    const progress = new Notice(`生成缩略图：${folder.path}（${this.settings.thumbnailEdge}px）`, 0);
+    const progress = new Notice(`Generate thumbnails: ${folder.path} (${this.settings.thumbnailEdge}px)`, 0);
     try {
       const report: ThumbnailReport = await generateThumbnails(dir, {
         edge: this.settings.thumbnailEdge,
         progress: (message) => this.logProgress(message),
       });
       progress.hide();
-      this.notifyReport("生成缩略图完成", [
-        `目录：${report.dir}`,
-        `边长：${report.edge}px`,
-        `新建 ${report.created} · 跳过 ${report.skipped} · 失败 ${report.failed}`,
+      this.notifyReport("Generate thumbnails complete", [
+        `Directory: ${report.dir}`,
+        `Edge: ${report.edge}px`,
+        `Created ${report.created} · Skipped ${report.skipped} · Failed ${report.failed}`,
       ]);
     } catch (error) {
       progress.hide();
-      new Notice(`生成缩略图失败：${String(error)}`, 10000);
+      new Notice(`Generate thumbnails failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -850,9 +839,9 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    */
   private async runAnnex(op: AnnexOp, folder: TFolder): Promise<void> {
     const dir = this.folderPath(folder);
-    const where = folder.path === "/" ? "仓库根" : folder.path;
+    const where = folder.path === "/" ? "repository root" : folder.path;
     const title = ANNEX_OP_TITLE[op];
-    const notice = new Notice(`${title}：${where} …`, 0);
+    const notice = new Notice(`${title}: ${where} …`, 0);
     const progress = (message: string): void => {
       notice.setMessage(message);
       this.logProgress(message);
@@ -860,10 +849,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     try {
       const report: AnnexReport = await runAnnexOp(op, dir, { progress });
       notice.hide();
-      this.notifyReport(`${title} 完成`, this.annexReportLines(op, where, report));
+      this.notifyReport(`${title} complete`, this.annexReportLines(op, where, report));
     } catch (error) {
       notice.hide();
-      new Notice(`${title} 失败：${String(error)}`, 10000);
+      new Notice(`${title} failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -871,35 +860,35 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
   /** 每个操作自带一句「按完之后要知道什么」。 */
   private annexReportLines(op: AnnexOp, where: string, report: AnnexReport): string[] {
     const lines = [
-      `目录：${where}`,
-      `annex 报出动作 ${report.ok} 个${
-        report.skipped > 0 ? ` · 被挡下 ${report.skipped} 个` : ""
-      }（别处无足够副本）· 失败 ${report.failed} 个 —— 不需要动的文件不会出现在输出里`,
+      `Directory: ${where}`,
+      `annex reported ${report.ok} action(s)${
+        report.skipped > 0 ? ` · ${report.skipped} skipped` : ""
+      } (no enough copies elsewhere) · ${report.failed} failed — files that needed no action are not listed`,
     ];
     if (op === "add" && report.candidates !== undefined) {
-      lines.push(`候选图片 ${report.candidates} 张 —— 按 .gitattributes 的 annex.largefiles 决定谁进 annex、谁进 git`);
-      lines.push("提示：新增/暂存的改动还要 commit 一次才算落进历史。");
+      lines.push(`${report.candidates} candidate image(s) — .gitattributes annex.largefiles decides what enters annex and what stays in git`);
+      lines.push("Hint: newly added/staged changes still need a commit to enter history.");
     }
     if (op === "get" && report.candidates !== undefined) {
-      lines.push(`本地缺内容 ${report.candidates} 个（内容已在本地的不受影响）`);
+      lines.push(`${report.candidates} file(s) missing local content (files already present locally are unaffected)`);
     }
     if (op === "drop" && report.bytesFreed !== undefined && report.bytesFreed > 0) {
-      lines.push(`释放 ${formatBytes(report.bytesFreed)}`);
+      lines.push(`Freed ${formatBytes(report.bytesFreed)}`);
     }
     if (op === "unannex") {
       if (report.staged !== undefined) {
-        lines.push(`已按普通 git 文件暂存 ${report.staged} 个（git annex add --force-small）—— 还需要一次 commit`);
+        lines.push(`Staged ${report.staged} file(s) as ordinary git files (git annex add --force-small) — a commit is still needed`);
       }
-      lines.push("现在这些文件由 git 直接管理，不再走 annex。");
+      lines.push("These files are now managed directly by git instead of annex.");
     }
     if (op === "lock") {
-      lines.push("注意：lock 后工作树里是软链，Obsidian 会静默不索引这些文件（原图链接会失效）；要复原用 Unlock largefiles。");
+      lines.push("Note: after lock, working-tree files are symlinks and Obsidian silently skips indexing them (original-image links stop working); use Unlock largefiles to restore.");
     }
     if (op === "unlock") {
-      lines.push("现在工作树里是实文件（index 100644），Obsidian 能正常索引。");
+      lines.push("Working-tree files are now regular files (index 100644) and Obsidian indexes them normally.");
     }
     const failed = report.entries.filter((entry) => entry.action === "failed");
-    for (const entry of failed.slice(0, 3)) lines.push(`失败：${entry.file}（${entry.detail ?? ""}）`);
+    for (const entry of failed.slice(0, 3)) lines.push(`Failed: ${entry.file} (${entry.detail ?? ""})`);
     return lines;
   }
 
@@ -916,7 +905,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const loaded = loadProfileFiles(this.vaultRoot(), profileFileRefs(this.settings.profileFiles));
     if (loaded.length === 0) {
       throw new Error(
-        "还没有登记任何元数据预设：请到设置页「元数据预设」登记外部 .json，或从预设创建。",
+        "No metadata preset is registered yet: register an external .json under Metadata presets in Settings, or create one from a preset.",
       );
     }
     return loaded;
@@ -930,7 +919,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     try {
       loaded = this.loadProfilesForOperation();
     } catch (error) {
-      new Notice(`生成元数据失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      new Notice(`Generate metadata failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
       console.error(error);
       return;
     }
@@ -939,7 +928,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         void this.generateSidecarsWithPrompt(folder, dir, loaded, profile, values);
       }).open();
     } catch (error) {
-      new Notice(`生成元数据失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      new Notice(`Generate metadata failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -986,7 +975,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const profile = selected.profile;
     const ask = askKeysFor(profile);
     const summary = ask.map((key) => `${key}=${values[key] ?? ""}`).join(" · ");
-    const progress = new Notice(`生成元数据：${folder.path}（${profile.name}｜${summary}${overwrite ? "｜覆盖重算" : ""}）`, 0);
+    const progress = new Notice(`Generate metadata: ${folder.path} (${profile.name} | ${summary}${overwrite ? " | recompute all" : ""})`, 0);
     try {
       const report: SidecarReport = await generateSidecars(dir, {
         vaultRoot: this.vaultRoot(),
@@ -1003,21 +992,21 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       progress.hide();
       const count = (action: string): number => report.entries.filter((entry) => entry.action === action).length;
       const lines = [
-        `目录：${report.dir}`,
-        `新建 ${count("created")} 份 · 覆盖 ${count("overwritten")} 份 · 跳过（已存在）${count("skipped-existing")} · 跳过（被改过）${count("skipped-dirty")} · 失败 ${count("failed")}`,
+        `Directory: ${report.dir}`,
+        `Created ${count("created")} · Overwritten ${count("overwritten")} · Skipped (exists) ${count("skipped-existing")} · Skipped (modified) ${count("skipped-dirty")} · Failed ${count("failed")}`,
       ];
-      lines.push(`预设：${selected.path}`);
-      if (overwrite) lines.push("模式：覆盖重算（已存在的 sidecar 全部按当前预设重写）");
-      const templateNotes = report.entries.filter((entry) => (entry.detail ?? "").includes("模板里的"));
-      if (templateNotes.length > 0) lines.push(`${templateNotes.length} 份里有正文占位符取不到值（已留空，详见控制台）`);
+      lines.push(`Preset: ${selected.path}`);
+      if (overwrite) lines.push("Mode: recompute all (every existing sidecar is rewritten with the current preset)");
+      const templateNotes = report.entries.filter((entry) => (entry.detail ?? "").includes("Template placeholders"));
+      if (templateNotes.length > 0) lines.push(`${templateNotes.length} sidecar(s) had body placeholders with no value (left empty; see the console)`);
       const collisions = Object.entries(report.duplicateStems);
-      if (collisions.length > 0) lines.push(`重名 stem ${collisions.length} 个 —— 链接已按全 vault 路径写入`);
+      if (collisions.length > 0) lines.push(`${collisions.length} duplicate stem(s) — links were written using full-vault paths`);
       const failed = report.entries.filter((entry) => entry.action === "failed");
-      for (const entry of failed.slice(0, 3)) lines.push(`失败：${path.basename(entry.sidecar)}（${entry.detail ?? ""}）`);
-      this.notifyReport("生成元数据完成", lines);
+      for (const entry of failed.slice(0, 3)) lines.push(`Failed: ${path.basename(entry.sidecar)} (${entry.detail ?? ""})`);
+      this.notifyReport("Generate metadata complete", lines);
     } catch (error) {
       progress.hide();
-      new Notice(`生成元数据失败：${String(error)}`, 10000);
+      new Notice(`Generate metadata failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -1038,7 +1027,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     try {
       loaded = this.loadProfilesForOperation();
     } catch (error) {
-      new Notice(`${title}失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      new Notice(`${title} failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
       console.error(error);
       return;
     }
@@ -1046,7 +1035,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     const options = listTemplates("base", this.settings.baseTemplates);
     if (options.length === 0) {
       new Notice(
-        `${title}失败：还没有登记任何画廊模板（.base）。请到设置页「画廊模板」登记外部文件，或从预设创建。`,
+        `${title} failed: no gallery template (.base) is registered yet. Register an external file under Gallery templates in Settings, or create one from a preset.`,
         10000,
       );
       return;
@@ -1087,7 +1076,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       );
       built = buildGalleryBase(template, { folder: relFolder, cardSize: this.settings.thumbnailEdge, properties });
     } catch (error) {
-      new Notice(`${title}失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      new Notice(`${title} failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
       console.error(error);
       return;
     }
@@ -1099,10 +1088,10 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         write();
         return;
       }
-      new ChoiceModal(this.app, `${title} — ${target} 已存在`, [`${target} 已经存在。覆盖会用模板重写整份文件（手改过的视图会丢）。`], [
-        { text: "覆盖", style: "warning", run: write },
-        { text: "打开已有", style: "cta", run: () => void this.openVaultFile(target) },
-        { text: "取消" },
+      new ChoiceModal(this.app, `${title} — ${target} already exists`, [`${target} already exists. Overwriting rewrites the whole file from the template (manual view edits are lost).`], [
+        { text: "Overwrite", style: "warning", run: write },
+        { text: "Open existing", style: "cta", run: () => void this.openVaultFile(target) },
+        { text: "Cancel" },
       ]).open();
     };
 
@@ -1112,15 +1101,15 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
     }
     new ChoiceModal(
       this.app,
-      `${title} — 有 ${plan.untagged.length} 份旧 sidecar 没有标签`,
+      `${title} — ${plan.untagged.length} old sidecar(s) have no tag`,
       [
-        `${folder.path} 下有 ${plan.untagged.length} 份 sidecar（带 tif）还没有 annex-gallery-metadata 标签，画廊只认这个标签，它们不会出现。`,
-        "补标签：只在 tags 里加这一项，别的内容一个字都不动。",
+        `${plan.untagged.length} sidecar(s) with a tif key under ${folder.path} lack the annex-gallery-metadata tag. The gallery only recognizes that tag, so they would not appear.`,
+        "Add tag: only add this one item to tags; nothing else in the file is changed.",
       ],
       [
-        { text: "补标签", style: "cta", run: () => afterTags(true) },
-        { text: "跳过", run: () => afterTags(false) },
-        { text: "取消" },
+        { text: "Add tag", style: "cta", run: () => afterTags(true) },
+        { text: "Skip", run: () => afterTags(false) },
+        { text: "Cancel" },
       ],
     ).open();
   }
@@ -1152,17 +1141,17 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       await this.openVaultFile(target);
 
       const lines = [
-        `画廊：${target}（模板：${label}）`,
-        `进画廊的 sidecar ${plan.tagged + fixed} 份${fixed > 0 ? `（其中补标签 ${fixed} 份）` : ""}${
-          !fixTags && plan.untagged.length > 0 ? ` · 没标签、不显示 ${plan.untagged.length} 份` : ""
+        `Gallery: ${target} (template: ${label})`,
+        `${plan.tagged + fixed} sidecar(s) in the gallery${fixed > 0 ? ` (${fixed} tagged just now)` : ""}${
+          !fixTags && plan.untagged.length > 0 ? ` · ${plan.untagged.length} untagged and hidden` : ""
         }`,
       ];
-      if (plan.missingSidecars > 0) lines.push(`${plan.missingSidecars} 张图还没有 sidecar —— 先跑「生成元数据」`);
-      if (plan.missingThumbnails > 0) lines.push(`${plan.missingThumbnails} 份 sidecar 缺缩略图 —— 先跑「生成缩略图」`);
-      if (built.missing.length > 0) lines.push(`模板占位符取不到值、已留空：${built.missing.map((name) => `{{${name}}}`).join(" ")}`);
-      this.notifyReport(`${title}完成`, lines);
+      if (plan.missingSidecars > 0) lines.push(`${plan.missingSidecars} image(s) have no sidecar yet — run Generate metadata first`);
+      if (plan.missingThumbnails > 0) lines.push(`${plan.missingThumbnails} sidecar(s) are missing thumbnails — run Generate thumbnails first`);
+      if (built.missing.length > 0) lines.push(`Template placeholders with no value were left empty: ${built.missing.map((name) => `{{${name}}}`).join(" ")}`);
+      this.notifyReport(`${title} complete`, lines);
     } catch (error) {
-      new Notice(`${title}失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+      new Notice(`${title} failed: ${error instanceof Error ? error.message : String(error)}`, 10000);
       console.error(error);
     }
   }
@@ -1182,12 +1171,12 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
    */
   private async runDrop(folder: TFolder): Promise<void> {
     const dir = this.folderPath(folder);
-    const where = folder.path === "/" ? "仓库根" : folder.path;
+    const where = folder.path === "/" ? "repository root" : folder.path;
     try {
       const preview = await dropLargefiles(dir, { dryRun: true, progress: (m) => this.logProgress(m) });
       if (preview.present === 0) {
         new Notice(
-          `Drop largefiles：${where} 没有可丢的本地 annex 内容（已经丢过，或这里没有 annex 文件）`,
+          `Drop largefiles: ${where} has no local annex content to drop (already dropped, or no annex files here)`,
           8000,
         );
         return;
@@ -1196,29 +1185,29 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
         void this.executeDrop(dir, where, preview.present);
       }).open();
     } catch (error) {
-      new Notice(`Drop largefiles 失败：${String(error)}`, 10000);
+      new Notice(`Drop largefiles failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }
 
   private async executeDrop(dir: string, where: string, expected: number): Promise<void> {
-    const progress = new Notice(`Drop largefiles：正在丢弃 ${where} 的 ${expected} 个文件的本地内容…`, 0);
+    const progress = new Notice(`Drop largefiles: dropping local content for ${expected} file(s) under ${where}…`, 0);
     try {
       const report: DropReport = await dropLargefiles(dir, {
         progress: (message) => this.logProgress(message),
       });
       progress.hide();
       const lines = [
-        `目录：${where}`,
-        `丢弃 ${report.dropped} 个 · 释放 ${formatBytes(report.bytesFreed)}`,
-        `被挡下（别处无足够副本）${report.skipped} 个 · 失败 ${report.failed} 个`,
+        `Directory: ${where}`,
+        `Dropped ${report.dropped} · Freed ${formatBytes(report.bytesFreed)}`,
+        `Skipped (no enough copies elsewhere) ${report.skipped} · Failed ${report.failed}`,
       ];
       const failed = report.entries.filter((entry) => entry.action === "failed");
-      for (const entry of failed.slice(0, 3)) lines.push(`失败：${entry.file}（${entry.detail ?? ""}）`);
-      this.notifyReport("Drop largefiles 完成", lines);
+      for (const entry of failed.slice(0, 3)) lines.push(`Failed: ${entry.file} (${entry.detail ?? ""})`);
+      this.notifyReport("Drop largefiles complete", lines);
     } catch (error) {
       progress.hide();
-      new Notice(`Drop largefiles 失败：${String(error)}`, 10000);
+      new Notice(`Drop largefiles failed: ${String(error)}`, 10000);
       console.error(error);
     }
   }

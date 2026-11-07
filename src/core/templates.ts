@@ -59,7 +59,7 @@ export const DEFAULT_TEMPLATE_ID = "default";
 
 /** 预设素材（画廊 `.base`）——只用于「从预设创建」。 */
 export const PRESET_BASE_TEMPLATES: TemplatePreset[] = [
-  { id: "default", name: "默认（卡片：文件名 + 缩略图）", text: baseDefault },
+  { id: "default", name: "Default (card: filename + thumbnail)", text: baseDefault },
 ];
 
 /** @deprecated 旧名字，转发到 `PRESET_BASE_TEMPLATES`。 */
@@ -99,14 +99,14 @@ export function resolveTemplate(
   registered: readonly TemplateRef[],
   vaultRoot: string,
 ): ResolvedTemplate {
-  const kindName = "画廊模板";
+  const kindName = "Gallery template";
   const matches = registered.filter((entry) => entry.id === id);
   if (matches.length === 0) {
-    throw new Error(`找不到 ${kindName}「${id}」（请在设置页「模板」里登记或从预设创建外部文件）`);
+    throw new Error(`Cannot find ${kindName} "${id}" (register it under Templates in Settings, or create one from a preset)`);
   }
   if (matches.length > 1) {
     throw new Error(
-      `${kindName} id「${id}」重复登记：${matches.map((entry) => entry.path).join("、")}（请删掉多余的一条）`,
+      `${kindName} id "${id}" is registered more than once: ${matches.map((entry) => entry.path).join(", ")} (remove the duplicate entry)`,
     );
   }
 
@@ -121,7 +121,7 @@ export function readTemplateFile(abs: string, label: string, id = label): Resolv
     return { id, label, text: fs.readFileSync(abs, "utf8") };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`模板 ${label} 读不了：${message}`);
+    throw new Error(`Cannot read template ${label}: ${message}`);
   }
 }
 

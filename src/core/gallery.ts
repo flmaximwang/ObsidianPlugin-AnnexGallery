@@ -234,11 +234,11 @@ export function buildGalleryBase(template: ResolvedTemplate, input: GalleryBaseI
 
   const doc = parseDocument(filled.text);
   if (doc.errors.length > 0) {
-    throw new Error(`画廊模板 ${template.label} 填完占位符后不是合法 YAML：${doc.errors[0].message.split("\n")[0]}`);
+    throw new Error(`Gallery template ${template.label} is not valid YAML after placeholder substitution: ${doc.errors[0].message.split("\n")[0]}`);
   }
-  if (!isMap(doc.contents)) throw new Error(`画廊模板 ${template.label} 的顶层必须是映射（filters / views …）`);
+  if (!isMap(doc.contents)) throw new Error(`Gallery template ${template.label} must have a mapping at the top level (filters / views …)`);
   const root = doc.contents as YAMLMap;
-  if (!isSeq(root.get("views", true))) throw new Error(`画廊模板 ${template.label} 缺少 views 列表`);
+  if (!isSeq(root.get("views", true))) throw new Error(`Gallery template ${template.label} is missing a views list`);
 
   const scope: string[] = [];
   if (input.folder !== "") scope.push(`file.inFolder(${JSON.stringify(input.folder)})`);

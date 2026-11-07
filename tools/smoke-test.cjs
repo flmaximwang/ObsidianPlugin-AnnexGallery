@@ -203,9 +203,9 @@ writeText("Templates/broken.base", "views: [\n");
   const subTitles = annexItem.submenu.items.map((item) => item.title);
   console.log(`  Annex Gallery 子菜单 → ${subTitles.length} 项：${subTitles.join(" | ")}`);
   const expectedTitles = [
-    "生成元数据",
-    "生成缩略图",
-    "创建画廊",
+    "Generate metadata",
+    "Generate thumbnails",
+    "Create Gallery",
     "Add largefiles to Annex",
     "Unlock & unannex largefiles",
     "Lock largefiles",
@@ -232,10 +232,7 @@ writeText("Templates/broken.base", "views: [\n");
   console.log(`  language=en 时子菜单第 3 项：${enTitles[2]}（${enSubItems[2].icon}）`);
   assert(enSubItems.length === expectedTitles.length, "语言变化不影响项数");
   assert(enTitles[2] === "Create Gallery" && enSubItems[2].icon === "layout-grid", "language=en ⇒ 第 3 项 = Create Gallery / layout-grid");
-  assert(
-    enTitles.join("|") === expectedTitles.map((title, index) => (index === 2 ? "Create Gallery" : title)).join("|"),
-    "只有「创建画廊」这一项随语言变，其余措辞不动",
-  );
+  assert(enTitles.join("|") === expectedTitles.join("|"), "English-only：界面语言不影响任何标题");
   stub.registry.language = "zh";
 
   const fileMenu = new stub.Menu();
@@ -250,8 +247,8 @@ writeText("Templates/broken.base", "views: [\n");
   assert(defs[0].type === "group" && defs[0].items?.[0]?.name === "Remotes", "第一个区块是 Remotes（render 项）");
   assert(
     defs[1].type === "group" &&
-      defs[1].heading === "元数据预设与画廊模板" &&
-      defs[1].items?.map((d) => d.name).join(",") === "元数据预设,画廊模板",
+      defs[1].heading === "Metadata presets and gallery templates" &&
+      defs[1].items?.map((d) => d.name).join(",") === "Metadata presets,Gallery templates",
     "第二个区块 = 元数据预设 + 画廊模板（两个 render 项）",
   );
   const controlDefs = defs[2].type === "group" ? defs[2].items ?? [] : [];
@@ -673,7 +670,7 @@ writeText("Templates/broken.base", "views: [\n");
 
   const names = settingNames(tab.containerEl);
   console.log(`渲染出的设置项：${names.length === 0 ? "(无)" : names.join(" | ")}`);
-  assert(names.includes("缩略图边长") && names.includes("调试日志"), "「缩略图边长」与「调试日志」两个设置项都渲染出来了");
+  assert(names.includes("Thumbnail edge") && names.includes("Debug logging"), "「Thumbnail edge」与「Debug logging」两个设置项都渲染出来了");
 
   // ── 3. 新外部模型：没有内联编辑器、没有内置可用行 ─────────────────────────
   const templatesSection = one(tab.containerEl, "annex-templates-section");
@@ -707,12 +704,12 @@ writeText("Templates/broken.base", "views: [\n");
   console.log(`  元数据预设工具条：${toolbarTags.join(" | ")}`);
   assert(toolbarTags.join(",") === "INPUT,BUTTON,SELECT", "工具条 = 路径输入 + 登记按钮 + 从预设创建下拉");
   assert(one(profileToolbar, "annex-profile-path-input") !== undefined, "第一格是 vault 相对路径输入框");
-  assert(one(profileToolbar, "annex-profile-register").textContent === "登记", "第二个是「登记」按钮");
+  assert(one(profileToolbar, "annex-profile-register").textContent === "Register", "第二个是「Register」按钮");
   const profilePreset = one(profileToolbar, "annex-profile-preset");
   const profilePresetOptions = stub.walk(profilePreset).filter((el) => el.tagName === "OPTION").map((el) => el.textContent);
   console.log(`  profile 预设下拉：${profilePresetOptions.join(" | ")}`);
-  assert(profilePresetOptions[0] === "从预设创建…", "下拉第一项是占位「从预设创建…」");
-  assert(profilePresetOptions.length === 4 && profilePresetOptions.some((text) => text.includes("TECNAI")) && profilePresetOptions.some((text) => text.includes("最小示例")), "预设选项 = 3 份内置素材（只是创建素材，不是运行时默认）");
+  assert(profilePresetOptions[0] === "Create from preset…", "下拉第一项是占位「Create from preset…」");
+  assert(profilePresetOptions.length === 4 && profilePresetOptions.some((text) => text.includes("TECNAI")) && profilePresetOptions.some((text) => text.includes("Minimal example")), "预设选项 = 3 份内置素材（只是创建素材，不是运行时默认）");
   assert(rule(".annex-legacy-profiles-warning").length > 0, "styles.css 有旧内联 profiles 的失效提示样式");
 
   const templateCards = () => byClass(tab.containerEl, "annex-templates-card");
@@ -726,25 +723,25 @@ writeText("Templates/broken.base", "views: [\n");
     const card = templateCards()[0];
     const addRow = one(card, "annex-template-add-row");
     assert(addRow !== undefined, "base 卡片有登记行");
-    assert(one(card, "annex-template-path-input") !== undefined && one(card, "annex-template-add").textContent === "登记", "base 卡片 = 路径输入 + 登记");
+    assert(one(card, "annex-template-path-input") !== undefined && one(card, "annex-template-add").textContent === "Register", "base 卡片 = 路径输入 + Register");
     const preset = one(card, "annex-template-preset");
     const options = stub.walk(preset).filter((el) => el.tagName === "OPTION").map((el) => el.textContent);
-    assert(options[0] === "从预设创建…", "base 卡片的预设下拉第一项是占位项");
+    assert(options[0] === "Create from preset…", "base 卡片的预设下拉第一项是占位项");
     assert(options.length === 2, "base 卡片的预设素材数量正确（1 份）");
   }
 
   // ── 4. 空列表：生成 / 创建画廊都明确引导，不 fallback ─────────────────────
   let modalsBefore = stub.registry.modals.length;
-  annexItem.submenu.items.find((item) => item.title === "生成元数据").callback();
+  annexItem.submenu.items.find((item) => item.title === "Generate metadata").callback();
   await settle();
   console.log(`  空 profile 列表 → ${lastNotice().split("\n")[0]}`);
-  assert(/还没有登记任何元数据预设/.test(lastNotice()) && /登记|从预设创建/.test(lastNotice()), "生成元数据：空列表明确引导去登记/从预设创建");
+  assert(/No metadata preset is registered yet/.test(lastNotice()) && /register|create from preset/i.test(lastNotice()), "生成元数据：空列表明确引导去登记/从预设创建");
   assert(stub.registry.modals.length === modalsBefore, "空 profile 列表不打开弹窗");
   modalsBefore = stub.registry.modals.length;
-  annexItem.submenu.items.find((item) => item.title === "创建画廊").callback();
+  annexItem.submenu.items.find((item) => item.title === "Create Gallery").callback();
   await settle();
   console.log(`  空 profile 列表 + 空画廊模板 → ${lastNotice().split("\n")[0]}`);
-  assert(/还没有登记任何元数据预设/.test(lastNotice()), "创建画廊：空预设列表同样在写盘前停下");
+  assert(/No metadata preset is registered yet/.test(lastNotice()), "创建画廊：空预设列表同样在写盘前停下");
   assert(stub.registry.modals.length === modalsBefore, "空列表不打开模板选择弹窗");
 
   // ── 5. 元数据预设：路径校验 / 登记 / 多份独立 profile / 外部改动 ──────────
@@ -766,15 +763,15 @@ writeText("Templates/broken.base", "views: [\n");
   const noticesBeforeBadPaths = stub.registry.notices.length;
   await registerProfile("../outside.json");
   assert(stub.registry.notices.length === noticesBeforeBadPaths + 1, "越界路径只多一条 Notice");
-  assert(/不能包含 \.\./.test(lastNotice()), "拒绝 `..`（会跑出 vault）");
+  assert(/must not contain \.\./.test(lastNotice()), "拒绝 `..`（会跑出 vault）");
   await registerProfile("/tmp/outside.json");
-  assert(/不接受绝对路径/.test(lastNotice()), "拒绝绝对路径");
+  assert(/absolute paths are not allowed/.test(lastNotice()), "拒绝绝对路径");
   await registerProfile("C:\\temp\\outside.json");
-  assert(/不接受盘符路径/.test(lastNotice()), "拒绝 Windows 盘符路径");
+  assert(/drive-letter paths are not allowed/.test(lastNotice()), "拒绝 Windows 盘符路径");
   await registerProfile("Profiles/does-not-exist.json");
-  assert(/文件不存在/.test(lastNotice()), "登记时拒绝不存在的文件");
+  assert(/does not exist/.test(lastNotice()), "登记时拒绝不存在的文件");
   await registerProfile("Profiles/tecnaitem.txt");
-  assert(/必须是 \.json 文件/.test(lastNotice()), "登记时拒绝错误扩展名");
+  assert(/must be a \.json file/.test(lastNotice()), "登记时拒绝错误扩展名");
   assert(profileRows().length === 0 && plugin.settings.profileFiles.length === 0, "路径校验失败不新增行、不写 data.json");
 
   // 反斜杠写法统一成正斜杠后仍能登记（同一文件只能一次）。
@@ -795,7 +792,7 @@ writeText("Templates/broken.base", "views: [\n");
 
   const noticesBeforeDupPath = stub.registry.notices.length;
   await registerProfile("./Profiles//tecnaitem.json");
-  assert(stub.registry.notices.length === noticesBeforeDupPath + 1 && /已经登记过/.test(lastNotice()), "同一路径不能重复登记");
+  assert(stub.registry.notices.length === noticesBeforeDupPath + 1 && /already registered/.test(lastNotice()), "同一路径不能重复登记");
   assert(profileRows().length === 2, "重复路径不新增行");
 
   // 外部改 id / name：设置页下一次渲染与下一次生成都读新内容。
@@ -829,16 +826,16 @@ writeText("Templates/broken.base", "views: [\n");
   tab.update();
   const rowOf = (relPath) => profileRows().find((row) => row.getAttr("data-profile-path") === relPath);
   console.log(`  array 行错误：${one(rowOf("Profiles/array.json"), "annex-profile-error").textContent}`);
-  assert(/顶层必须是单条预设对象/.test(one(rowOf("Profiles/array.json"), "annex-profile-error").textContent), "数组 JSON 被拒绝：每条模板必须一个独立对象文件");
-  assert(/不接受 \{ profiles: \[\.\.\.\] \}/.test(one(rowOf("Profiles/wrapper.json"), "annex-profile-error").textContent), "`{ profiles: [...] }` 多 profile 包装被拒绝");
-  assert(/不是合法 JSON/.test(one(rowOf("Profiles/bad-json.json"), "annex-profile-error").textContent), "坏 JSON 在行上显示可见错误");
-  assert(/(正则|regex) 无法编译/.test(one(rowOf("Profiles/bad-regex.json"), "annex-profile-error").textContent), "坏正则显示可见错误");
-  assert(/文件不存在/.test(one(rowOf("Profiles/vanishing.json"), "annex-profile-error").textContent), "登记后文件丢失仍在行上显示路径与错误");
-  assert(/元数据预设 id「tecnaitem」重复登记/.test(one(rowOf("Profiles/duplicate.json"), "annex-profile-error").textContent), "跨文件 id 重复显示可见错误");
-  assert(/元数据预设 id「tecnaitem」重复登记/.test(one(rowOf("Profiles/tecnaitem.json"), "annex-profile-error").textContent), "重复 id 的两行都被标出");
+  assert(/single preset object at the top level/.test(one(rowOf("Profiles/array.json"), "annex-profile-error").textContent), "数组 JSON 被拒绝：每条模板必须一个独立对象文件");
+  assert(/multi-preset files are not accepted/.test(one(rowOf("Profiles/wrapper.json"), "annex-profile-error").textContent), "`{ profiles: [...] }` 多 profile 包装被拒绝");
+  assert(/is not valid JSON/.test(one(rowOf("Profiles/bad-json.json"), "annex-profile-error").textContent), "坏 JSON 在行上显示可见错误");
+  assert(/regex failed to compile/.test(one(rowOf("Profiles/bad-regex.json"), "annex-profile-error").textContent), "坏正则显示可见错误");
+  assert(/does not exist/.test(one(rowOf("Profiles/vanishing.json"), "annex-profile-error").textContent), "登记后文件丢失仍在行上显示路径与错误");
+  assert(/Metadata preset id "tecnaitem" is registered more than once/.test(one(rowOf("Profiles/duplicate.json"), "annex-profile-error").textContent), "跨文件 id 重复显示可见错误");
+  assert(/Metadata preset id "tecnaitem" is registered more than once/.test(one(rowOf("Profiles/tecnaitem.json"), "annex-profile-error").textContent), "重复 id 的两行都被标出");
   assert(
-    /旧格式的元数据预设/.test(one(rowOf("Profiles/legacy.json"), "annex-profile-error").textContent) &&
-      /不会自动迁移/.test(one(rowOf("Profiles/legacy.json"), "annex-profile-error").textContent),
+    /Legacy metadata preset format/.test(one(rowOf("Profiles/legacy.json"), "annex-profile-error").textContent) &&
+      /not migrated automatically/.test(one(rowOf("Profiles/legacy.json"), "annex-profile-error").textContent),
     "旧格式 JSON（keyOrder / metadataTemplate）显示「旧格式 / 不会自动迁移」错误",
   );
   assert(
@@ -856,10 +853,10 @@ writeText("Templates/broken.base", "views: [\n");
     await removeProfileAt(bad);
   }
   // 剩下 tec + plate + duplicate：重复 id 必须让生成失败。
-  annexItem.submenu.items.find((item) => item.title === "生成元数据").callback();
+  annexItem.submenu.items.find((item) => item.title === "Generate metadata").callback();
   await settle();
   console.log(`  重复 id → ${lastNotice().split("\n")[0]}`);
-  assert(/id「tecnaitem」重复/.test(lastNotice()), "重复 id 让生成元数据在弹窗/写盘前失败");
+  assert(/id "tecnaitem" is duplicated/.test(lastNotice()), "重复 id 让生成元数据在弹窗/写盘前失败");
   assert(stub.registry.modals.length === modalsBefore, "重复 id 不打开弹窗");
   await removeProfileAt("Profiles/duplicate.json");
   assert(profileRows().length === 2, "移除坏行后回到两条有效 profile");
@@ -902,7 +899,7 @@ writeText("Templates/broken.base", "views: [\n");
 
   const noticesBeforeMissingTemplate = stub.registry.notices.length;
   await registerTemplate("Templates/nope.base");
-  assert(/文件不存在/.test(lastNotice()) && stub.registry.notices.length === noticesBeforeMissingTemplate + 1, "登记不存在的模板只弹 Notice、不新增行");
+  assert(/does not exist/.test(lastNotice()) && stub.registry.notices.length === noticesBeforeMissingTemplate + 1, "登记不存在的模板只弹 Notice、不新增行");
   assert(templateRows().length === 1 && plugin.settings.baseTemplates.length === 1, "登记失败不写 data.json");
 
   // 「打开」：真实方法在无 electron 的桩环境里必须给出可见失败（不静默、不自动创建）。
@@ -911,7 +908,7 @@ writeText("Templates/broken.base", "views: [\n");
   await settle();
   console.log(`  无系统默认应用时「打开」→ ${lastNotice().split("\n")[0]}`);
   assert(stub.registry.notices.length === noticesBefore + 1, "打开失败只多一条 Notice");
-  assert(/打不开「Templates\/base\.base」/.test(lastNotice()) && /拿不到系统默认应用/.test(lastNotice()), "Notice 带路径与失败原因");
+  assert(/Cannot open "Templates\/base\.base"/.test(lastNotice()) && /No system default application available/.test(lastNotice()), "Notice 带路径与失败原因");
 
   // 「打开」成功：宿主收到的是 vault 内文件的绝对路径。
   const openedWith = [];
@@ -929,13 +926,13 @@ writeText("Templates/broken.base", "views: [\n");
   noticesBefore = stub.registry.notices.length;
   one(templateRows()[0], "annex-template-open").click();
   await settle();
-  assert(stub.registry.notices.length === noticesBefore + 1 && /打不开「Templates\/base\.base」：no-default-app/.test(lastNotice()), "宿主打开失败显示路径与原因");
+  assert(stub.registry.notices.length === noticesBefore + 1 && /Cannot open "Templates\/base\.base": no-default-app/.test(lastNotice()), "宿主打开失败显示路径与原因");
   plugin.openWithDefaultApp = realOpen;
 
   // 登记项重复：路径不能再登记一次。
   noticesBefore = stub.registry.notices.length;
   await registerTemplate("Templates/base.base");
-  assert(/已经登记过/.test(lastNotice()) && stub.registry.notices.length === noticesBefore + 1, "同一模板路径不能重复登记");
+  assert(/already registered/.test(lastNotice()) && stub.registry.notices.length === noticesBefore + 1, "同一模板路径不能重复登记");
 
   // 「删除」只取消登记，文件必须留着；随后重新登记给运行时使用。
   await removeTemplateAt("Templates/base.base");
@@ -969,7 +966,7 @@ writeText("Templates/broken.base", "views: [\n");
   const presetProfile2 = readJson("AnnexGalleryTemplates/minimal 2.json");
   console.log(`  第二次从 profile 预设创建 → id=${presetProfile2.id} name=${presetProfile2.name}`);
   assert(fs.existsSync(rel("AnnexGalleryTemplates/minimal 2.json")), "profile 预设冲突时也加序号，不覆盖");
-  assert(presetProfile2.id === "minimal-2" && /副本/.test(presetProfile2.name), "profile 预设 id 撞车时在待创建 JSON 内生成唯一 id（名称标副本）");
+  assert(presetProfile2.id === "minimal-2" && /\(copy\)/.test(presetProfile2.name), "profile 预设 id 撞车时在待创建 JSON 内生成唯一 id（名称标副本）");
   assert(presetProfile2.template === "AnnexGalleryTemplates/minimal 2.md", "第二份 JSON 的 template 指向带序号的正文");
   assert(readJson("AnnexGalleryTemplates/minimal.json").id === "minimal", "第一份预设 profile 的 id 未变");
   // 清掉这两份预设 profile，后面只留两条手工登记的外部 JSON。
@@ -995,7 +992,7 @@ writeText("Templates/broken.base", "views: [\n");
   tab.update();
 
   modalsBefore = stub.registry.modals.length;
-  submenuAction(runtimeDir, "生成元数据").callback();
+  submenuAction(runtimeDir, "Generate metadata").callback();
   await settle();
   assert(stub.registry.modals.length === modalsBefore + 1, "有效外部预设时打开生成弹窗");
   let modal = lastModal();
@@ -1009,7 +1006,7 @@ writeText("Templates/broken.base", "views: [\n");
   assert(askInput !== undefined, "按预设的 ask 生成 sample 输入框");
   askInput.value = "smoke-sample";
   askInput.dispatchEvent({ type: "input" });
-  const submitButton = stub.walk(modal.contentEl).find((el) => el.tagName === "BUTTON" && el.textContent === "生成元数据");
+  const submitButton = stub.walk(modal.contentEl).find((el) => el.tagName === "BUTTON" && el.textContent === "Generate metadata");
   assert(submitButton !== undefined, "弹窗有「生成元数据」按钮");
   submitButton.click();
   const sidecarAbs = path.join(readDir, "001.md");
@@ -1026,7 +1023,7 @@ writeText("Templates/broken.base", "views: [\n");
   const smokeEdited = { ...minimal, id: "smoke-live", name: "Smoke 实时改名" };
   writeJson("Profiles/smoke.json", smokeEdited);
   tab.update();
-  submenuAction(runtimeDir, "生成元数据").callback();
+  submenuAction(runtimeDir, "Generate metadata").callback();
   await settle();
   modal = lastModal();
   selects = stub.walk(modal.contentEl).filter((el) => el.tagName === "SELECT");
@@ -1043,10 +1040,10 @@ writeText("Templates/broken.base", "views: [\n");
   writeJson("Profiles/smoke.json", { ...minimal, template: "AnnexGalleryTemplates/broken.md" });
   tab.update();
   modalsBefore = stub.registry.modals.length;
-  submenuAction(badDir, "生成元数据").callback();
+  submenuAction(badDir, "Generate metadata").callback();
   await settle(12);
   console.log(`  坏正文模板 → ${lastNotice().split("\n")[0]}`);
-  assert(/不能自带 frontmatter/.test(lastNotice()), "坏正文模板给出可见错误");
+  assert(/must not include frontmatter/.test(lastNotice()), "坏正文模板给出可见错误");
   assert(/AnnexGalleryTemplates\/broken\.md/.test(lastNotice()), "错误里点名坏正文文件");
   assert(stub.registry.modals.length === modalsBefore, "坏正文模板不打开生成弹窗");
   assert(!fs.existsSync(rel(`${badDir}/002.md`)), "坏正文模板在写盘前停下（一份 sidecar 都不写）");
@@ -1054,7 +1051,7 @@ writeText("Templates/broken.base", "views: [\n");
 
   // 按文件夹记住的预设 id 无效 ⇒ 回落到 pickProfile / 第一条已登记预设。
   plugin.settings.folderProfiles[path.join(vaultPath, runtimeDir)] = "gone-preset";
-  submenuAction(runtimeDir, "生成元数据").callback();
+  submenuAction(runtimeDir, "Generate metadata").callback();
   await settle();
   modal = lastModal();
   selects = stub.walk(modal.contentEl).filter((el) => el.tagName === "SELECT");
@@ -1077,12 +1074,12 @@ writeText("Templates/broken.base", "views: [\n");
   const galleryMenuFor = (folderPath) => {
     const menu = new stub.Menu();
     stub.registry.menus[0](menu, new stub.TFolder(folderPath), "file-explorer");
-    return menu.items[0].submenu.items.find((item) => item.title === "创建画廊");
+    return menu.items[0].submenu.items.find((item) => item.title === "Create Gallery");
   };
   galleryMenuFor(emptyBaseDir).callback();
   await settle();
   console.log(`  空画廊模板列表 → ${lastNotice().split("\n")[0]}`);
-  assert(/还没有登记任何画廊模板/.test(lastNotice()), "空画廊模板列表明确引导去登记/从预设创建");
+  assert(/no gallery template \(\.base\) is registered yet/.test(lastNotice()), "空画廊模板列表明确引导去登记/从预设创建");
   assert(stub.registry.modals.length === modalsBefore && !fs.existsSync(rel(`${emptyBaseDir}/empty-base.base`)), "空列表不弹窗、不写 .base");
   plugin.settings.baseTemplates = [
     { id: "base", name: "base", path: "Templates/base.base" },
@@ -1122,18 +1119,18 @@ writeText("Templates/broken.base", "views: [\n");
   await settle();
   let galleryModal = lastModal();
   console.log(`  首次创建画廊 → ${JSON.stringify(galleryModal.titleEl.textContent)}`);
-  assert(/选画廊模板/.test(galleryModal.titleEl.textContent), "有 2 份已登记画廊模板时先弹模板选择");
+  assert(/Choose a gallery template/.test(galleryModal.titleEl.textContent), "有 2 份已登记画廊模板时先弹模板选择");
   let picker = stub.walk(galleryModal.contentEl).find((el) => el.tagName === "SELECT");
   let pickerIds = stub.walk(picker).filter((el) => el.tagName === "OPTION").map((el) => el.getAttr("value"));
   assert(pickerIds.join(",") === "base,default", "画廊模板下拉只列已登记外部模板（base / default）");
   assert(picker.value === "base", "按文件夹无有效记忆时选第一条已登记模板");
-  await clickLastModalButton("创建画廊");
+  await clickLastModalButton("Create Gallery");
 
   galleryModal = lastModal();
   console.log(`  选模板后 → ${JSON.stringify(galleryModal.titleEl.textContent)}`);
-  assert(/没有标签/.test(galleryModal.titleEl.textContent), "旧 sidecar 没标签时先弹「补标签 / 跳过 / 取消」");
-  assert(modalButtons(galleryModal).join(",") === "补标签,跳过,取消", "三个按钮依次 = 补标签 / 跳过 / 取消");
-  await clickLastModalButton("补标签");
+  assert(/have no tag/.test(galleryModal.titleEl.textContent), "旧 sidecar 没标签时先弹「补标签 / 跳过 / 取消」");
+  assert(modalButtons(galleryModal).join(",") === "Add tag,Skip,Cancel", "三个按钮依次 = 补标签 / 跳过 / 取消");
+  await clickLastModalButton("Add tag");
 
   const oldSidecarAfter = fs.readFileSync(rel(`${galleryFolder}/old.md`), "utf8");
   const expectedOldSidecar = oldSidecarBefore.replace(/^---\n/, "---\ntags:\n  - annex-gallery-metadata\n");
@@ -1145,20 +1142,20 @@ writeText("Templates/broken.base", "views: [\n");
   assert(galleryBaseText.includes("cardSize: 256"), ".base 里填进了设置里的 cardSize（256）");
   assert(galleryBaseText.includes("name: Smoke GallerySmoke"), "正文来自已登记的外部 .base 模板");
   assert(stub.registry.opened.slice(openedBeforeGallery).includes(galleryBaseRel), "写完后用 getLeaf().openFile() 打开了画廊");
-  assert(stub.registry.notices.some((n) => /创建画廊完成/.test(n) && new RegExp(galleryBaseRel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(n)), "完成后的 Notice 里点名画廊路径");
+  assert(stub.registry.notices.some((n) => /Create Gallery complete/.test(n) && new RegExp(galleryBaseRel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(n)), "完成后的 Notice 里点名画廊路径");
 
   const baseBeforeOpen = fs.readFileSync(galleryBaseAbs, "utf8");
   galleryMenuFor(galleryFolder).callback();
   await settle();
   galleryModal = lastModal();
-  assert(/选画廊模板/.test(galleryModal.titleEl.textContent), "再次创建画廊仍先经过模板选择（有 2 份已登记模板）");
-  await clickLastModalButton("创建画廊");
+  assert(/Choose a gallery template/.test(galleryModal.titleEl.textContent), "再次创建画廊仍先经过模板选择（有 2 份已登记模板）");
+  await clickLastModalButton("Create Gallery");
   galleryModal = lastModal();
   console.log(`  再次创建画廊 → ${JSON.stringify(galleryModal.titleEl.textContent)}`);
-  assert(/已存在/.test(galleryModal.titleEl.textContent), "目标 .base 已存在时先弹确认");
-  assert(modalButtons(galleryModal).join(",") === "覆盖,打开已有,取消", "三个按钮依次 = 覆盖 / 打开已有 / 取消");
+  assert(/already exists/.test(galleryModal.titleEl.textContent), "目标 .base 已存在时先弹确认");
+  assert(modalButtons(galleryModal).join(",") === "Overwrite,Open existing,Cancel", "三个按钮依次 = 覆盖 / 打开已有 / 取消");
   const openedBeforeExisting = stub.registry.opened.length;
-  await clickLastModalButton("打开已有");
+  await clickLastModalButton("Open existing");
   assert(fs.readFileSync(galleryBaseAbs, "utf8") === baseBeforeOpen, "「打开已有」不改写 .base");
   assert(stub.registry.opened.slice(openedBeforeExisting).includes(galleryBaseRel), "「打开已有」打开了那份 .base");
 
@@ -1168,17 +1165,17 @@ writeText("Templates/broken.base", "views: [\n");
   galleryMenuFor(brokenFolder).callback();
   await settle();
   galleryModal = lastModal();
-  assert(/选画廊模板/.test(galleryModal.titleEl.textContent), "3 份模板时同样先选模板");
+  assert(/Choose a gallery template/.test(galleryModal.titleEl.textContent), "3 份模板时同样先选模板");
   picker = stub.walk(galleryModal.contentEl).find((el) => el.tagName === "SELECT");
   picker.value = "broken";
   picker.dispatchEvent({ type: "change" });
   await settle();
   noticesBefore = stub.registry.notices.length;
-  await clickLastModalButton("创建画廊");
+  await clickLastModalButton("Create Gallery");
   const brokenNotices = stub.registry.notices.slice(noticesBefore).join("\n");
   console.log(`  坏画廊模板 → ${brokenNotices.split("\n")[0]}`);
   assert(new RegExp("Templates/broken\\.base").test(brokenNotices), "Notice 里带着坏模板的 vault 路径");
-  assert(/不是合法 YAML/.test(brokenNotices), "Notice 说清是 YAML 不合法");
+  assert(/not valid YAML/.test(brokenNotices), "Notice 说清是 YAML 不合法");
   assert(!fs.existsSync(rel(brokenBaseRel)), "坏模板不写 .base");
   await removeTemplateAt("Templates/broken.base");
 
@@ -1195,7 +1192,7 @@ writeText("Templates/broken.base", "views: [\n");
   galleryMenuFor(rereadFolder).callback();
   await settle();
   console.log(`  坏 profile + 创建画廊 → ${lastNotice().split("\n")[0]}`);
-  assert(/(正则|regex) 无法编译/.test(lastNotice()), "创建画廊读取外部 profile 时看到坏正则");
+  assert(/regex failed to compile/.test(lastNotice()), "创建画廊读取外部 profile 时看到坏正则");
   assert(stub.registry.modals.length === modalsBefore, "坏 profile 不打开选模板弹窗");
   assert(!fs.existsSync(rel(rereadBaseRel)), "坏 profile 在写 .base 前停下");
   writeJson("Profiles/smoke.json", minimal);
@@ -1246,18 +1243,18 @@ writeText("Templates/broken.base", "views: [\n");
   console.log(`  旧内联 profiles 提示：${legacyWarning === undefined ? "(缺)" : legacyWarning.getAttr("data-count")}`);
   assert(legacyWarning !== undefined && legacyWarning.getAttr("data-count") === "1", "检测到旧内联 profiles 时显示提示");
   const legacyWarningBody = one(legacyWarning, "annex-legacy-profiles-warning-body");
-  assert(legacyWarningBody !== undefined && /不会读取、不会自动迁移/.test(legacyWarningBody.textContent), "提示写明不读取、不自动迁移");
-  assert(legacyWarningBody !== undefined && /分别保存成 vault 里的一个 \.json 文件/.test(legacyWarningBody.textContent), "提示引导手工登记外部 JSON");
+  assert(legacyWarningBody !== undefined && /does not read or migrate/.test(legacyWarningBody.textContent), "提示写明不读取、不自动迁移");
+  assert(legacyWarningBody !== undefined && /as its own \.json file in the vault/.test(legacyWarningBody.textContent), "提示引导手工登记外部 JSON");
   assert(legacyPlugin.settings.profileFiles.length === 0, "旧内联 profiles 没有变成 profileFiles（不迁移）");
   assert(legacyPlugin.settings.remotes === undefined, "旧 data.json 的 remotes 键在加载时被静默丢弃（插件照常工作）");
   assert(byClass(legacyTab.containerEl, "annex-profile-row").length === 0, "旧内联 profiles 不渲染成外部模板行");
   modalsBefore = stub.registry.modals.length;
   const legacyMenu = new stub.Menu();
   stub.registry.menus[stub.registry.menus.length - 1](legacyMenu, new stub.TFolder("TEM/x"), "file-explorer");
-  legacyMenu.items[0].submenu.items.find((item) => item.title === "生成元数据").callback();
+  legacyMenu.items[0].submenu.items.find((item) => item.title === "Generate metadata").callback();
   await settle();
   console.log(`  旧内联 profiles 生成 → ${lastNotice().split("\n")[0]}`);
-  assert(/还没有登记任何元数据预设/.test(lastNotice()), "旧内联 profiles 不参与运行时（不 fallback）");
+  assert(/No metadata preset is registered yet/.test(lastNotice()), "旧内联 profiles 不参与运行时（不 fallback）");
   assert(stub.registry.modals.length === modalsBefore, "旧内联 profiles 不打开生成弹窗");
   assert(stub.registry.savedData.profiles.length === 1 && (stub.registry.savedData.profileFiles ?? []).length === 0, "旧 data.json 的 profiles 原样保留、没有被迁移成 profileFiles（profileFiles 仍为空）");
   await legacyPlugin.saveSettings();
@@ -1287,7 +1284,7 @@ writeText("Templates/broken.base", "views: [\n");
   const dropNotice = lastNotice();
   console.log(`  Drop largefiles（非仓库目录）→ ${dropNotice.split("\n")[0]}`);
   assert(stub.registry.notices.length === noticesBeforeDrop + 1, "只多了一条 Notice");
-  assert(/不是 git 仓库/.test(dropNotice), "Notice 说清「不是 git 仓库」并让人先跑「初始化 gallery」");
+  assert(/is not a git repository/.test(dropNotice), "Notice 说清「不是 git 仓库」并让人先跑「初始化 gallery」");
   assert(stub.registry.modals.length === modalsBeforeDrop, "预览失败时不弹确认窗");
 
   // ── 13. 状态栏结构（逐项数字在 npm run verify:status）────────────────────
@@ -1310,10 +1307,10 @@ writeText("Templates/broken.base", "views: [\n");
   const orphanItem = stub.registry.statusBarItems[stub.registry.statusBarItems.length - 1];
   const orphanText = (stub.walk(orphanItem).filter((el) => el.hasClass("annex-status-counts"))[0] ?? { textContent: "" }).textContent;
   console.log(`  未初始化的 vault → ${orphanText}`);
-  assert(orphanText === "未初始化 · 点击初始化 gallery", "未初始化时写明「未初始化 · 点击初始化 gallery」");
+  assert(orphanText === "Not initialized · click to initialize gallery", "未初始化时写明英文状态文案");
   assert(orphanItem.getAttr("data-level") === "uninitialized", "未初始化时 data-level = uninitialized");
-  assert(/不是 git 仓库|不是 git-annex 仓库/.test(String(orphanItem.getAttr("aria-label"))), "悬停提示写明原因");
-  assert(/每 30 秒自动刷新/.test(String(orphanItem.getAttr("aria-label"))), "悬停提示写明刷新口径");
+  assert(/Not a git repository|Not a git-annex repository/.test(String(orphanItem.getAttr("aria-label"))), "悬停提示写明原因");
+  assert(/refreshes every 30 s/.test(String(orphanItem.getAttr("aria-label"))), "悬停提示写明刷新口径");
   assert(/\.annex-status-bar\[data-level="zero"\] \.annex-status-counts\s*\{[^}]*--text-faint/.test(css), "styles.css：三项全 0 时用 --text-faint");
   assert(/\.annex-status-bar\[data-level="uninitialized"\] \.annex-status-counts/.test(css), "styles.css：未初始化 / 不可统计时用 warning 色");
   assert(/\.annex-status-bar \{[\s\S]*?cursor: pointer/.test(css), "styles.css：整行可点（cursor: pointer）");

@@ -1,4 +1,4 @@
 
-缩略图：{{thumbnail}}
+Thumbnail: {{thumbnail}}
 
-原图（用系统默认程序打开）：{{tif}}
+Original (open with the system default application): {{tif}}

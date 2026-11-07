@@ -1,6 +1,6 @@
 {
   "id": "minimal",
-  "name": "最小示例（<序号>）",
+  "name": "Minimal example (<number>)",
   "source": "stem",
   "regex": "^(?<index>\\d+)$",
   "types": { "index": "number", "date": "date" },

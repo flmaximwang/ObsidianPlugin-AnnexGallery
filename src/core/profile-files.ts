@@ -64,7 +64,7 @@ export interface ProfileInspection {
   issues: ProfileIssue[];
 }
 
-const LABEL = "元数据预设";
+const LABEL = "Metadata preset";
 
 function errText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -83,7 +83,7 @@ function readBody(vaultRoot: string, relPath: string): { body?: ProfileBody; iss
     if (startsWithFrontmatter(file.text)) {
       issues.push({
         level: "error",
-        message: `正文模板 ${file.relPath} 不能自带 frontmatter（frontmatter 由预设的 frontmatter 字典生成）`,
+        message: `Body template ${file.relPath} must not include frontmatter (frontmatter is generated from the preset frontmatter object)`,
       });
       return { issues };
     }
@@ -128,13 +128,13 @@ export function parseProfileDocument(text: string, label: string): ProfileDocume
     // JSON 文件常带 UTF-8 BOM（Windows 编辑器）；先剥掉再 parse。
     data = JSON.parse(text.replace(/^\uFEFF/, ""));
   } catch (error) {
-    return { legacyKeys: [], issues: [{ level: "error", message: `${LABEL} ${label} 不是合法 JSON：${errText(error)}` }] };
+    return { legacyKeys: [], issues: [{ level: "error", message: `${LABEL} ${label} is not valid JSON: ${errText(error)}` }] };
   }
 
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
     return {
       legacyKeys: [],
-      issues: [{ level: "error", message: `${LABEL} ${label} 的顶层必须是单条预设对象（不能是数组或其它类型）` }],
+      issues: [{ level: "error", message: `${LABEL} ${label} must have a single preset object at the top level (arrays and other types are not accepted)` }],
     };
   }
   const maybeWrapper = data as { profiles?: unknown };
@@ -144,7 +144,7 @@ export function parseProfileDocument(text: string, label: string): ProfileDocume
       issues: [
         {
           level: "error",
-          message: `${LABEL} ${label} 的顶层必须是单条预设对象（不接受 { profiles: [...] } 多预设文件）`,
+          message: `${LABEL} ${label} must have a single preset object at the top level ({ profiles: [...] } multi-preset files are not accepted)`,
         },
       ],
     };
@@ -154,7 +154,7 @@ export function parseProfileDocument(text: string, label: string): ProfileDocume
   if (legacyKeys.length > 0) {
     return {
       legacyKeys,
-      issues: [{ level: "error", message: `${LABEL} ${label}：${legacyProfileMessage(legacyKeys)}` }],
+      issues: [{ level: "error", message: `${LABEL} ${label}: ${legacyProfileMessage(legacyKeys)}` }],
     };
   }
 
@@ -198,7 +198,7 @@ export function inspectProfileFile(vaultRoot: string, rawPath: string): ProfileI
   try {
     issues.push(...validateProfile(profile, body === undefined ? {} : { bodyText: body.text }));
   } catch (error) {
-    issues.push({ level: "error", message: `校验失败：${errText(error)}` });
+    issues.push({ level: "error", message: `Validation failed: ${errText(error)}` });
   }
 
   return { relPath: file.relPath, absPath: file.absPath, profile, ...(body === undefined ? {} : { body }), legacyKeys: [], issues };
@@ -213,7 +213,7 @@ export function loadProfileFile(vaultRoot: string, rawPath: string): LoadedProfi
   const inspected = inspectProfileFile(vaultRoot, rawPath);
   const errors = inspected.issues.filter((issue) => issue.level === "error");
   if (errors.length > 0 || inspected.profile === undefined) {
-    const detail = errors.length > 0 ? errors.map((issue) => issue.message).join("；") : `${LABEL} ${rawPath} 无法读取`;
+    const detail = errors.length > 0 ? errors.map((issue) => issue.message).join("; ") : `${LABEL} ${rawPath} cannot be read`;
     throw new Error(detail);
   }
   return {
@@ -239,8 +239,8 @@ export function loadProfileFiles(vaultRoot: string, refs: readonly ProfileFileRe
     const id = entry.profile.id;
     const previous = firstPathById.get(id);
     if (previous !== undefined) {
-      if (previous === entry.path) throw new Error(`${LABEL}文件重复登记：${entry.path}`);
-      throw new Error(`${LABEL} id「${id}」重复：${previous} 与 ${entry.path}`);
+      if (previous === entry.path) throw new Error(`${LABEL} file registered twice: ${entry.path}`);
+      throw new Error(`${LABEL} id "${id}" is duplicated: ${previous} and ${entry.path}`);
     }
     firstPathById.set(id, entry.path);
     loaded.push(entry);

@@ -18,9 +18,9 @@ import * as path from "path";
 export type ExternalFileKind = "profile" | "metadata" | "base";
 
 const KIND_LABEL: Record<ExternalFileKind, string> = {
-  profile: "元数据预设",
-  metadata: "正文模板",
-  base: "画廊模板",
+  profile: "Metadata preset",
+  metadata: "Body template",
+  base: "Gallery template",
 };
 
 const KIND_EXTENSION: Record<ExternalFileKind, string> = {
@@ -57,24 +57,24 @@ export function externalFileKindLabel(kind: ExternalFileKind): string {
  */
 export function normalizeVaultRelPath(raw: string): string {
   const input = typeof raw === "string" ? raw.trim() : "";
-  if (input === "") throw new Error("模板路径不能为空");
-  if (input.includes("\0")) throw new Error(`模板路径包含非法字符：${input}`);
+  if (input === "") throw new Error("Template path cannot be empty");
+  if (input.includes("\0")) throw new Error(`Template path contains invalid characters: ${input}`);
 
   // Windows 用户会粘贴 `a\b` 或 `C:\a`；统一成正斜杠后再做全部检查。
   const unified = input.replace(/\\/g, "/");
   if (unified.startsWith("/")) {
-    throw new Error(`模板路径必须是 vault 内的相对路径（不接受绝对路径）：${input}`);
+    throw new Error(`Template path must be relative to the vault (absolute paths are not allowed): ${input}`);
   }
   if (/^[A-Za-z]:/.test(unified)) {
-    throw new Error(`模板路径必须是 vault 内的相对路径（不接受盘符路径）：${input}`);
+    throw new Error(`Template path must be relative to the vault (drive-letter paths are not allowed): ${input}`);
   }
 
   const parts = unified.split("/");
   if (parts.some((part) => part === "..")) {
-    throw new Error(`模板路径不能包含 ..（会跑出 vault）：${input}`);
+    throw new Error(`Template path must not contain .. (it would escape the vault): ${input}`);
   }
   const cleaned = parts.filter((part) => part !== "" && part !== ".").join("/");
-  if (cleaned === "") throw new Error(`模板路径无效：${input}`);
+  if (cleaned === "") throw new Error(`Invalid template path: ${input}`);
   return cleaned;
 }
 
@@ -87,7 +87,7 @@ export function validateVaultRelPath(raw: string, kind: ExternalFileKind): strin
   const ext = KIND_EXTENSION[kind];
   const base = relPath.slice(relPath.lastIndexOf("/") + 1).toLowerCase();
   if (base === ext || !base.endsWith(ext)) {
-    throw new Error(`${KIND_LABEL[kind]}必须是 ${ext} 文件：${relPath}`);
+    throw new Error(`${KIND_LABEL[kind]} must be a ${ext} file: ${relPath}`);
   }
   return relPath;
 }
@@ -102,16 +102,16 @@ export function resolveVaultFile(vaultRoot: string, raw: string, kind: ExternalF
   // 再核一次没有跑出 vault（防御未来 normalize 逻辑改动 / 平台差异）。
   const back = path.relative(vaultRoot, absPath);
   if (back === "" || back === ".." || back.startsWith(`..${path.sep}`) || path.isAbsolute(back)) {
-    throw new Error(`${KIND_LABEL[kind]}路径必须是 vault 内的相对路径：${raw}`);
+    throw new Error(`${KIND_LABEL[kind]} path must be relative to the vault: ${raw}`);
   }
 
   let stat: fs.Stats;
   try {
     stat = fs.statSync(absPath);
   } catch {
-    throw new Error(`${KIND_LABEL[kind]}文件不存在：${relPath}`);
+    throw new Error(`${KIND_LABEL[kind]} file does not exist: ${relPath}`);
   }
-  if (!stat.isFile()) throw new Error(`${KIND_LABEL[kind]}路径不是文件：${relPath}`);
+  if (!stat.isFile()) throw new Error(`${KIND_LABEL[kind]} path is not a file: ${relPath}`);
   return { relPath, absPath };
 }
 
@@ -125,6 +125,6 @@ export function readVaultTextFile(vaultRoot: string, raw: string, kind: External
     return { relPath, absPath, text: fs.readFileSync(absPath, "utf8") };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${KIND_LABEL[kind]}文件读不了：${relPath}（${message}）`);
+    throw new Error(`Cannot read ${KIND_LABEL[kind].toLowerCase()} file: ${relPath} (${message})`);
   }
 }

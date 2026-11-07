@@ -1,2 +1,2 @@
 
-缩略图：{{thumbnail}}
+Thumbnail: {{thumbnail}}

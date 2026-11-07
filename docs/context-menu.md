@@ -1,5 +1,9 @@
 # 文件管理器的右键菜单
 
+> **UI language:** all plugin-authored user-facing text is English-only until bilingual UI (i18n) support exists.
+> This covers settings, notices, modals, status text, progress/results, errors, hints and shipped preset display text.
+> Stable IDs, configuration keys and user-authored values are never translated.
+
 > 文件管理器菜单里，本插件的**所有**选项都收在一个顶层 `Annex Gallery` 项之下。
 > 本文说明这条形状背后的设计原则与判据 —— 不记录某次运行的结果；要验「现在是否符合」，跑文末的判据。
 
@@ -13,18 +17,17 @@
 - **作用域只到文件夹**：右键**文件**不出现本插件任何选项。单文件的操作走命令面板或设置页，菜单入口只承诺「对一个目录做批量事」。
 - **顺序即契约**：顺序固定为「生成类 → 入库类 → 传输类 → 危险操作」，危险操作永远最后一项
   （子菜单共 9 项）。顺序变了就是行为变更，要能被一条断言抓住（见 §6）。
-- **标题只有一项跟随界面语言**：「创建画廊」在 Obsidian 界面语言以 `zh` 开头时显示中文，其余语言显示
-  `Create Gallery`；另外 8 项固定英文。它们对应的是 `git annex` 的操作名，中文标题反而和命令行对不上；
-  而「创建画廊」是纯插件概念，跟随界面语言才读得顺。
+- **All nine titles are fixed English.** No title follows the Obsidian interface language. The eight annex
+  operations keep their `git annex`-style names, and `Create Gallery` is fixed English too.
 
 示例（右键一个文件夹看到的菜单树）：
 
 ```
-右键 <文件夹>
+Right-click <folder>
 └─ Annex Gallery                     images
-   ├─ 生成元数据                      file-text
-   ├─ 生成缩略图                      image
-   ├─ 创建画廊 / Create Gallery       layout-grid
+   ├─ Generate metadata               file-text
+   ├─ Generate thumbnails             image
+   ├─ Create Gallery                  layout-grid
    ├─ Add largefiles to Annex         package-plus
    ├─ Unlock & unannex largefiles     package-open
    ├─ Lock largefiles                 lock
@@ -35,14 +38,14 @@
 
 ## 2. 每一项的设计意图
 
-标题用英文、图标用 Obsidian 内置的 Lucide 名，是为了在别人的菜单里也认得出、且不依赖自定义图标资源。
-唯一例外是「创建画廊」的标题跟随界面语言（见 §1）。
+Titles are English and icons use Obsidian's built-in Lucide names so the menu is recognizable in any
+interface language and needs no custom icon assets. Every title is fixed English (see §1).
 
 | 选项 | 做什么 | 交互原则 |
 |---|---|---|
-| 生成元数据 | 按元数据预设写 `<stem>.md` 侧车（`src/core/sidecar.ts`） | 先选一条元数据预设、再填该预设的 `ask` 字段（没有模板下拉：正文由预设的 `template` 决定）；已有侧车时**二次确认**（覆盖重算 / 只补缺失 / 取消） |
-| 生成缩略图 | 写 `<stem>.thumbnail.png`（`src/core/thumbnails.ts`） | 直接跑，结束时报告新建 / 跳过 / 失败三类 |
-| 创建画廊 / Create Gallery | 写 `<folder>/<folder 名>.base`（vault 根 → `<vault name>.base`，`src/core/gallery.ts`） | 先只读盘点；旧 sidecar 未打标签时**三选一**（补标签 / 跳过 / 取消）；`.base` 已存在时**三选一**（覆盖 / 打开已有 / 取消）；多份模板时先选模板 |
+| Generate metadata | 按 metadata preset 写 `<stem>.md` 侧车（`src/core/sidecar.ts`） | 先选一条 metadata preset、再填该预设的 `ask` 字段（没有模板下拉：正文由预设的 `template` 决定）；已有侧车时**二次确认**（Recompute all / Only add missing / Cancel） |
+| Generate thumbnails | 写 `<stem>.thumbnail.png`（`src/core/thumbnails.ts`） | 直接跑，结束时报告新建 / 跳过 / 失败三类 |
+| Create Gallery | 写 `<folder>/<folder 名>.base`（vault 根 → `<vault name>.base`，`src/core/gallery.ts`） | 先只读盘点；旧 sidecar 未打标签时**三选一**（Add tag / Skip / Cancel）；`.base` 已存在时**三选一**（Overwrite / Open existing / Cancel）；多份模板时先选模板 |
 | Add largefiles to Annex | 对目录内**图片**分批 `git annex add` | 直接跑；候选集 = 图片（排除缩略图） |
 | Unlock & unannex largefiles | `annex unlock` → `annex unannex` → `git annex add --force-small` | 直接跑；结束提示「还需一次 commit」 |
 | Lock largefiles | `annex lock`（整棵子树） | 直接跑；结束提示软链的代价（见 §3.7） |
@@ -52,9 +55,9 @@
 
 ## 3. 语义原则
 
-1. **幂等优先，重跑不靠记忆**。生成元数据允许反复跑：改完元数据预设再跑一次，走的就是同一条路。
+1. **幂等优先，重跑不靠记忆**。Generate metadata 允许反复跑：改完 metadata preset 再跑一次，走的就是同一条路。
    重跑前先做一次**只读计划**（数出「图片数 / 已有侧车数 / 其中被改过的数」），只有真的存在侧车时才问；
-   「覆盖重算」= `overwrite: true`（干净的和被改过的一起重写），「只补缺失」= 默认（已存在的一律 `skipped-existing`）。
+   「Recompute all」= `overwrite: true`（干净的和被改过的一起重写），「Only add missing」= 默认（已存在的一律 `skipped-existing`）。
    原则：**先看再问，问才动手**，不要点开就写盘。
 2. **判定看逐文件结果，不看退出码**。所有 annex 操作共用一条通道（`src/core/annex.ts` 的 `runAnnexOp(op, dir)`），
    一律 `git annex <op> --json --json-error-messages`（`get` 再加 `--json-progress`），逐个文件读 `success`。
@@ -72,7 +75,7 @@
    于是普通 `git add` 会把文件**重新 annex 回去** —— unannex 就成了假动作（提交里落的是指针而不是内容）。
    `git annex add --force-small` 才是「按普通 git 文件暂存」的正解，这一步不能省、不能换。
 6. **破坏性操作分两步，安全默认交给 git-annex**。Drop 先预览再确认，且默认只丢「别处有足够副本」的内容：
-   唯一副本会被挡下（`success:false` + `unsafe` 一类的 note），内容原样留在盘上，报告记为「被挡下 N 个」。
+   唯一副本会 skipped（`success:false` + `unsafe` 一类的 note），内容原样留在盘上，报告记为「skipped N 个」。
    侧车 `.md` / 缩略图 `.base` 走的是 git（`annex.largefiles=nothing`），`drop` 根本碰不到 —— 画廊不会因为 drop 变空。
    要连唯一副本也丢只有 CLI 的 `--force`，插件不提供这个入口。
 7. **有代价的操作，把代价写进结果**。Lock 之后工作树里是软链，Obsidian 会**静默不索引软链**，`[[…tif]]` 随之失效；
@@ -80,9 +83,9 @@
    因为确认弹窗会被无脑点掉，写进结果至少留下了证据。这条是取舍，可以反过来（点之前先确认），但不要两头都不做。
 8. **子菜单只是分组，不是能力**。平台没有可用的子菜单 API 时，选项退回顶层菜单：**功能不丢，只是不好看**。
    任何组织方式都不应该成为「某些操作在旧环境里消失」的理由。
-9. **派生文件的 owner 不重叠**。创建画廊只写 `<文件夹>/<文件夹名>.base`；它唯一会碰 sidecar 的动作是
-   「补标签」，且是文本级最小改动 —— 只把 `annex-gallery-metadata` 插进 `tags` 第一项，别的字节不动，
-   不按元数据预设重算、不改正文。理由与完整口径见 [`gallery.md`](gallery.md)。
+9. **派生文件的 owner 不重叠**。Create Gallery 只写 `<文件夹>/<文件夹名>.base`；它唯一会碰 sidecar 的动作是
+   「Add tag」，且是文本级最小改动 —— 只把 `annex-gallery-metadata` 插进 `tags` 第一项，别的字节不动，
+   不按 metadata preset 重算、不改正文。理由与完整口径见 [`gallery.md`](gallery.md)。
 
 ## 4. 与平台 API 的边界
 
@@ -102,7 +105,7 @@
    以 `../..` 开头的越界路径，交给 git/annex 就是 `fatal: … is outside repository`（git 接受绝对路径 pathspec，annex 不接受）。
    原则：**插件内部只保留一种路径表示** —— 仓库根 + 仓库相对路径，边界处一次性解析掉软链与符号。
 5. **目录枚举必须认软链**：annex locked 文件在工作树里是软链，`Dirent.isFile()` 对它们返回 false ⇒
-   仓库一进 locked 模式，「生成缩略图 / 生成元数据 / Add」会**静默空转**（数出 0 个候选，还报成功）。
+   仓库一进 locked 模式，「Generate thumbnails / Generate metadata / Add」会**静默空转**（数出 0 个候选，还报成功）。
    任何遍历都要按「软链也算目标」处理，并用一条断言钉住。
 6. **路径表示要贯穿到脏文件判定**：`sidecar.ts` 的 `isDirty()` 若用 `path.relative` 与坑 4 同因失效，
    脏文件保护会变成「看起来在、其实没在」—— 这类保护必须有一条能被故意弄脏触发的断言。
@@ -111,10 +114,10 @@
 
 | 命令 | 钉住什么 |
 |---|---|
-| `npm run smoke` | 桩加载构建产物：逐项断言 9 个选项的**顺序与图标**（第 3 项是 `layout-grid` 的创建画廊）、顶层项只 `preventDefault`、右键文件不出现选项、标题随界面语言在 `创建画廊` / `Create Gallery` 之间切换 |
+| `npm run smoke` | 桩加载构建产物：逐项断言 9 个选项的**顺序与图标**（第 3 项是 `layout-grid` 的 Create Gallery）、顶层项只 `preventDefault`、右键文件不出现选项、标题固定为 `Create Gallery`（不再随界面语言变） |
 | `npm test` | `tests/test-annex-functions.cjs`：多对本地/远程 annex 仓库上的 6 个命令，判「无异常」+「不丢数据」 |
 | `npm run verify:annex` | 6 个操作在真 annex 仓库上的行为与报告（含插件路径：菜单 → 弹窗 → 真丢） |
-| `npm run verify:sidecar` | 生成元数据重跑的四条路径：`--plan` / 只补缺失 / `--overwrite` / 脏文件保护，加插件侧覆盖提示弹窗 |
-| `npm run verify:gallery` | 创建画廊：预检计数、补标签的文本级最小改动、作用域合并、输出路径与 `.base` 落盘 |
+| `npm run verify:sidecar` | Generate metadata 重跑的四条路径：`--plan` / Only add missing / `--overwrite` / 脏文件保护，加插件侧覆盖提示弹窗 |
+| `npm run verify:gallery` | Create Gallery：预检计数、Add tag 的文本级最小改动、作用域合并、输出路径与 `.base` 落盘 |
 
 顶层入口的其它入口（命令面板、ribbon）各有自己的口径，见 [`docs/commands.md`](commands.md) 等文档。

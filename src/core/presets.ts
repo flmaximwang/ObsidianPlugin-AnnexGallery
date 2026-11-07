@@ -32,19 +32,19 @@ function material(profile: unknown, template: string): ParseProfile {
 export const PRESET_PROFILES: ProfilePreset[] = [
   {
     id: "tecnaitem",
-    name: "TECNAI 电镜（默认正文）",
+    name: "TECNAI microscope (default body)",
     profile: material(tecnaitemProfile, "AnnexGalleryTemplates/tecnaitem.md"),
     body: tecnaitemBody,
   },
   {
     id: "tecnaitem-embed",
-    name: "TECNAI 电镜（嵌入缩略图）",
+    name: "TECNAI microscope (embedded thumbnail)",
     profile: { ...material(tecnaitemProfile, "AnnexGalleryTemplates/tecnaitem-embed.md"), id: "tecnaitem-embed" },
     body: tecnaitemEmbedBody,
   },
   {
     id: "minimal",
-    name: "最小示例（<序号>）",
+    name: "Minimal example (<number>)",
     profile: material(minimalProfile, "AnnexGalleryTemplates/minimal.md"),
     body: minimalBody,
   },

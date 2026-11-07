@@ -276,7 +276,7 @@ async function main() {
     check(titles.length === 9, "插件注册了 9 个菜单项");
     check(
       titles.join("|") ===
-        ["生成元数据", "生成缩略图", "创建画廊", "Add largefiles to Annex", "Unlock & unannex largefiles", "Lock largefiles", "Unlock largefiles", "Get largefiles", "Drop largefiles"].join("|"),
+        ["Generate metadata", "Generate thumbnails", "Create Gallery", "Add largefiles to Annex", "Unlock & unannex largefiles", "Lock largefiles", "Unlock largefiles", "Get largefiles", "Drop largefiles"].join("|"),
       "顺序与用户口径逐项一致",
     );
 
@@ -285,12 +285,12 @@ async function main() {
     unlockItem.callback();
     // 等完成报告出现（最多 15 秒）—— 固定睡 400ms 在机器忙时会读到「进行中」那条 Notice。
     for (let waited = 0; waited < 15000; waited += 100) {
-      if (stub.registry.notices.some((n) => typeof n === "string" && /Unlock largefiles 完成/.test(n))) break;
+      if (stub.registry.notices.some((n) => typeof n === "string" && /Unlock largefiles complete/.test(n))) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const unlockNotice = stub.registry.notices.filter((n) => typeof n === "string" && n.includes("Unlock largefiles")).pop() ?? "";
     console.log(`    「Unlock largefiles」→ ${unlockNotice.split("\n").join(" / ")}`);
-    check(/Unlock largefiles 完成/.test(unlockNotice), "菜单项跑完给出完成报告");
+    check(/Unlock largefiles complete/.test(unlockNotice), "菜单项跑完给出完成报告");
     check(indexMode(src, "TEM/ses1/a.tif") === "100644", "盘上真的解锁了（index 100644）");
 
     const dropItem = items.find((item) => item.title === "Drop largefiles");
@@ -300,16 +300,16 @@ async function main() {
     check(stub.registry.modals.length === modalsBefore + 1, "「Drop largefiles」先开确认弹窗");
     const modal = stub.registry.modals[stub.registry.modals.length - 1];
     const texts = stub.walk(modal.contentEl).map((el) => el.textContent).join(" | ");
-    check(/2 个 annex 文件在本地有内容/.test(texts), "弹窗写明本地有内容的文件数（2 个）");
+    check(/2 annex files have local content/.test(texts), "弹窗写明本地有内容的文件数（2 个）");
     const confirmBtn = stub
       .walk(modal.contentEl)
-      .filter((el) => el.tagName === "BUTTON" && el.textContent.includes("丢弃"))
+      .filter((el) => el.tagName === "BUTTON" && el.textContent.includes("Drop"))
       .pop();
     confirmBtn.click();
     await new Promise((resolve) => setTimeout(resolve, 600));
     const finalNotice = stub.registry.notices[stub.registry.notices.length - 1] ?? "";
     console.log(`    「Drop largefiles」→ ${finalNotice.split("\n").join(" / ")}`);
-    check(/Drop largefiles 完成/.test(finalNotice), "点确认后给出完成报告");
+    check(/Drop largefiles complete/.test(finalNotice), "点确认后给出完成报告");
     check(annexFind(src, ["--in=here"]).length === 0, "盘上确实丢了（git annex find --in=here 为空）");
   }
 
@@ -322,7 +322,7 @@ async function main() {
       const bad = runCliExpectError(args);
       console.log(`    ${args.join(" ")} → exit=${bad.status} ${bad.stderr.trim().split("\n")[0]}`);
       check(bad.status === 1, `${args[0]}：非 git 仓库退出码 1`);
-      check(/不是 git 仓库/.test(bad.stderr), `${args[0]}：报错说清「不是 git 仓库」`);
+      check(/is not a git repository/.test(bad.stderr), `${args[0]}：报错说清「不是 git 仓库」`);
     }
   }
 

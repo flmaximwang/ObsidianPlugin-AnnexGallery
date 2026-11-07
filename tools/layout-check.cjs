@@ -180,7 +180,7 @@ const MEASURE = String.raw`(function () {
   const pane = document.getElementById("pane");
   const settingRows = [...document.querySelectorAll(".setting-item:not(.setting-item-heading)")];
   const rowName = (row) => text(row.querySelector(":scope > .setting-item-info > .setting-item-name"));
-  const settingRow = settingRows.find((row) => rowName(row) === "缩略图边长") ?? settingRows[0];
+  const settingRow = settingRows.find((row) => rowName(row) === "Thumbnail edge") ?? settingRows[0];
   const toolbar = document.querySelector(".annex-profiles-toolbar");
   const toolbarBox = box(toolbar);
   const profileRows = [...document.querySelectorAll(".annex-profile-row")];
@@ -359,9 +359,9 @@ ${fragment}
   check(rep.topLevel.length === 3 && rep.groups.length === 3, `顶层 = 3 个 .setting-group：${rep.topLevel.length}`, rep.topLevel.map((t) => t.cls).join(" | "));
   check(rep.groups.every((g) => g.display !== "none" && g.box.height > 0), "三个 group 都可见");
   check(rep.groups[0].heading === null || rep.groups[0].heading === "", "第一个 group 没有 heading（remote 卡片自带标题）", String(rep.groups[0].heading));
-  check(rep.groups[1].heading === "元数据预设与画廊模板", "第二个 group 的 heading = 元数据预设与画廊模板", String(rep.groups[1].heading));
-  check(rep.groups[2].heading === "常规", "第三个 group 的 heading = 常规", String(rep.groups[2].heading));
-  check(rep.groups[2].items.join(",") === "缩略图边长,调试日志", "常规 group 里是两个普通设置项（缩略图边长 / 调试日志）", rep.groups[2].items.join(" | "));
+  check(rep.groups[1].heading === "Metadata presets and gallery templates", "第二个 group 的 heading = 元数据预设与画廊模板", String(rep.groups[1].heading));
+  check(rep.groups[2].heading === "General", "第三个 group 的 heading = 常规", String(rep.groups[2].heading));
+  check(rep.groups[2].items.join(",") === "Thumbnail edge,Debug logging", "常规 group 里是两个普通设置项（缩略图边长 / 调试日志）", rep.groups[2].items.join(" | "));
   check(rep.groups[0].renderRows === 1 && rep.groups[1].renderRows === 2, "三个编辑器都挂在 render 行里（remote 1 + 模板 2）", JSON.stringify(rep.groups.map((g) => g.renderRows)));
   check(rep.settingRow.box !== null && Math.abs(rep.settingRow.box.left - rep.groups[2].box.left) < 2, "「缩略图边长」行贴住所属 group 的左边缘", `行=${rep.settingRow.box.left} group=${rep.groups[2].box.left}`);
 
@@ -393,9 +393,9 @@ ${fragment}
 
   // ── 元数据预设：外部 JSON 工具条 + 每文件一行 ──────────────────────────────
   check(rep.toolbar.length === 3, "工具条只有 3 个控件（路径输入 / 登记 / 从预设创建）", `${rep.toolbar.length} 个`);
-  check(rep.toolbar[0].tag === "INPUT" && /预设路径/.test(rep.toolbar[0].placeholder ?? ""), "第 1 格是 vault 相对路径输入框");
-  check(rep.toolbar[1].tag === "BUTTON" && rep.toolbar[1].text === "登记", "第 2 格是「登记」按钮");
-  check(rep.toolbar[2].tag === "SELECT" && rep.toolbar[2].text === "从预设创建…", "第 3 格是「从预设创建…」下拉");
+  check(rep.toolbar[0].tag === "INPUT" && /metadata preset/i.test(rep.toolbar[0].placeholder ?? ""), "第 1 格是 vault 相对路径输入框");
+  check(rep.toolbar[1].tag === "BUTTON" && rep.toolbar[1].text === "Register", "第 2 格是「登记」按钮");
+  check(rep.toolbar[2].tag === "SELECT" && rep.toolbar[2].text === "Create from preset…", "第 3 格是「从预设创建…」下拉");
   check(rep.toolbar[0].box.left < rep.toolbar[1].box.left && rep.toolbar[1].box.left < rep.toolbar[2].box.left, "三个控件真的从左往右排");
   check(rep.toolbarBox.wrap === "wrap", "工具条允许换行（flex-wrap: wrap，窄窗口不撑破）");
   check(["normal", "flex-start", "start"].includes(rep.toolbarBox.justify), "工具条左对齐（默认/显式 flex-start 均可）", rep.toolbarBox.justify);
@@ -413,7 +413,7 @@ ${fragment}
   check(pr0.state === "ok" && pr1.state === "ok", "两条已登记 profile 都成功读到（data-state=ok）");
   check(/^id: /.test(pr0.id) && pr0.id.includes("tecnaitem"), "行上显示外部 JSON 的 id", pr0.id);
   check(pr0.path === "Profiles/tecnaitem.json" && pr1.path === "Profiles/Other/platewell.json", "行上显示 vault 相对路径", `${pr0.path} / ${pr1.path}`);
-  check(pr0.nameBox.left < pr0.pathBox.left && pr0.open.left > pr0.pathBox.right - 0.5, "行内先 name/id/path，再排「打开」「删除」", `${pr0.nameBox.left} / ${pr0.pathBox.left}..${pr0.pathBox.right} / ${pr0.open.left}`);
+  check(pr0.nameBox.left < pr0.pathBox.left && (pr0.open.left > pr0.pathBox.right - 0.5 || pr0.open.top > pr0.pathBox.top + 1), "行内先 name/id/path，再排 Open/Remove（换行时按钮在下一行）", `${pr0.nameBox.left} / ${pr0.pathBox.left}..${pr0.pathBox.right} / ${pr0.open.left}`);
   check(pr0.del.top > pr0.open.top || pr0.del.left > pr0.open.left, "「删除」在「打开」之后（行内换行时落到下一行也算）", `open=${pr0.open.left}@${pr0.open.top} del=${pr0.del.left}@${pr0.del.top}`);
   check(pr0.wrap === "wrap", "profile 行允许换行（窄窗口不溢出）");
   check(pr0.borderTopWidth === "1px", "每行有可见边框（一行一份外部文件）");
@@ -424,7 +424,7 @@ ${fragment}
   // ── 画廊模板卡片：一行一个外部 .base ───────────────────────────────────────
   check(rep.templates.length === 1, "模板区只有 1 张卡片（画廊模板）");
   check(rep.templates[0].kind === "base", "卡片 data-kind = base（metadata 正文由每条预设自己的 template 指定）");
-  check(rep.templates[0].title === "画廊模板", "卡片标题正确");
+  check(rep.templates[0].title === "Gallery templates", "卡片标题正确");
   check(rep.templates[0].hint !== null && rep.templates[0].hint.length > 10, "卡片有使用说明");
   check(rep.builtinRows === 0 && rep.viewButtons === 0 && rep.copyButtons === 0, "没有内置模板行 / 查看 / 复制为自定义", JSON.stringify({ builtin: rep.builtinRows, view: rep.viewButtons, copy: rep.copyButtons }));
   check(!rep.templates[0].empty && rep.templates[0].rows.length === 1, "卡片显示 1 行已登记外部文件");

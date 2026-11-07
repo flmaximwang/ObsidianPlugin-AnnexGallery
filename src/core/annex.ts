@@ -101,10 +101,10 @@ export function resolveAnnexRepo(dir: string): { repoRoot: string; relpath: stri
   const { repoRoot, relpath } = repoScope(dir);
   const inside = git(["rev-parse", "--is-inside-work-tree"], dir);
   if (inside.code !== 0 || inside.stdout.trim() !== "true") {
-    throw new Error(`${dir} 不是 git 仓库（先跑「初始化 gallery」）`);
+    throw new Error(`${dir} is not a git repository (run Initialize gallery first)`);
   }
   if (!isAnnexRepo(repoRoot)) {
-    throw new Error(`${repoRoot} 不是 git-annex 仓库（先跑「初始化 gallery」，或确认 annex 已 init）`);
+    throw new Error(`${repoRoot} is not a git-annex repository (run Initialize gallery first, or check that annex is initialized)`);
   }
   return { repoRoot, relpath };
 }
@@ -121,7 +121,7 @@ function collectResultLines(rows: AnnexJsonLine[], entries: AnnexEntry[]): void 
     if (row.success) {
       entries.push({ file: row.file, action: "ok", detail: firstLine(row.note ?? "") || undefined });
     } else {
-      entries.push({ file: row.file, action: "failed", detail: describe(row, "annex 报失败（无说明）") });
+      entries.push({ file: row.file, action: "failed", detail: describe(row, "annex reported a failure (no details)") });
     }
   }
 }
@@ -182,7 +182,7 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
   if (op === "add") {
     const images = collectImages(dir).map((file) => repoRelativePath(relpath, dir, file));
     const chunks = chunked(images, PATH_CHUNK);
-    progress(`${ANNEX_OP_TITLE.add}：${images.length} 张图待处理（${chunks.length} 批）`);
+    progress(`${ANNEX_OP_TITLE.add}: ${images.length} image(s) to process (${chunks.length} batch(es))`);
     const rows: AnnexJsonLine[] = [];
     for (const batch of chunks) {
       const result = await gitStream(
@@ -203,13 +203,13 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
 
   if (op === "get") {
     const candidates = countContentMissing(repoRoot, relpath);
-    progress(`${ANNEX_OP_TITLE.get}：本地缺内容 ${candidates} 个`);
+    progress(`${ANNEX_OP_TITLE.get}: ${candidates} file(s) missing local content`);
     const rows: AnnexJsonLine[] = [];
     const result = await gitStream(annexArgs("get", ["--json-progress"], scope), repoRoot, (line) => {
       for (const row of parseAnnexLines(line)) {
         if (row.action?.file !== undefined) {
           const percent = row["percent-progress"];
-          progress(`${ANNEX_OP_TITLE.get}：取 ${path.basename(row.action.file)}${percent === undefined ? "" : ` ${percent}`}`);
+          progress(`${ANNEX_OP_TITLE.get}: fetching ${path.basename(row.action.file)}${percent === undefined ? "" : ` ${percent}`}`);
         }
       }
     });
@@ -251,11 +251,11 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
     const addedRows = parseAnnexLines(added.stdout);
     staged += addedRows.filter((row) => row.success === true).length;
     if (addedRows.length === 0 && added.code !== 0) {
-      progress(`${ANNEX_OP_TITLE.unannex}：git annex add --force-small 失败（${firstLine(added.stderr)}）`);
+      progress(`${ANNEX_OP_TITLE.unannex}: git annex add --force-small failed (${firstLine(added.stderr)})`);
     }
   }
   if (released.length > 0) {
-    progress(`${ANNEX_OP_TITLE.unannex}：${released.length} 个已退出 annex，其中 ${staged} 个已按普通 git 文件暂存（还需一次 commit）`);
+    progress(`${ANNEX_OP_TITLE.unannex}: ${released.length} file(s) left annex; ${staged} staged as ordinary git files (a commit is still needed)`);
   }
   const report = reportFrom(op, dir, repoRoot, relpath, entries);
   return { ...report, staged };
@@ -349,12 +349,12 @@ export async function dropLargefiles(dir: string, opts: DropOptions = {}): Promi
 
   const { repoRoot, relpath } = resolveAnnexRepo(dir);
   const scope = relpath === "" ? [] : ["--", relpath];
-  const scopeLabel = relpath === "" ? "整个仓库" : relpath;
+  const scopeLabel = relpath === "" ? "entire repository" : relpath;
 
   // ── 1. 本地有内容的 annex 文件（字节数一并拿到）─────────────────────────
   const listing = git(["annex", "find", "--in=here", "--format=${file}\\t${bytesize}\\n", ...scope], repoRoot);
   if (listing.code !== 0) {
-    throw new Error(`git annex find 失败：${firstLine(listing.stderr) || firstLine(listing.stdout) || `退出码 ${listing.code}`}`);
+    throw new Error(`git annex find failed: ${firstLine(listing.stderr) || firstLine(listing.stdout) || `exit code ${listing.code}`}`);
   }
   const presentFiles = parseFindListing(listing.stdout);
   const bytesPresent = presentFiles.reduce((sum, row) => sum + row.bytes, 0);
@@ -362,7 +362,7 @@ export async function dropLargefiles(dir: string, opts: DropOptions = {}): Promi
 
   if (progress !== undefined) {
     progress(
-      `Drop largefiles：${scopeLabel} 本地有内容 ${presentFiles.length} 个（${formatBytes(bytesPresent)}）${dryRun ? "（预览，不动任何文件）" : ""}`,
+      `Drop largefiles: ${scopeLabel} has ${presentFiles.length} file(s) with local content (${formatBytes(bytesPresent)})${dryRun ? " (preview; no files changed)" : ""}`,
     );
   }
 
@@ -380,7 +380,7 @@ export async function dropLargefiles(dir: string, opts: DropOptions = {}): Promi
       file: row.file,
       bytes: row.bytes,
       action: "planned",
-      detail: "dry-run：将尝试 drop（别处没有足够副本的会被 annex 挡下）",
+      detail: "dry-run: would try to drop (annex refuses files without enough copies elsewhere)",
     }));
     return { ...base, entries, dropped: 0, planned: entries.length, skipped: 0, failed: 0, bytesFreed: 0 };
   }
@@ -395,7 +395,7 @@ export async function dropLargefiles(dir: string, opts: DropOptions = {}): Promi
   args.push(...scope);
   const result = await gitStream(args, repoRoot, (line) => {
     for (const row of parseAnnexLines(line)) {
-      if (row.file !== undefined && row.success === true) progress?.(`Drop largefiles：${path.basename(row.file)}`);
+      if (row.file !== undefined && row.success === true) progress?.(`Drop largefiles: ${path.basename(row.file)}`);
     }
   });
 
@@ -414,28 +414,28 @@ export async function dropLargefiles(dir: string, opts: DropOptions = {}): Promi
         file,
         bytes,
         action: "skipped",
-        detail: `别处没有足够副本，git-annex 拒绝丢弃（${firstLine(line.note ?? "")}）`,
+        detail: `Not enough copies elsewhere; git-annex refused to drop (${firstLine(line.note ?? "")})`,
       });
     } else {
       entries.push({
         file,
         bytes,
         action: "failed",
-        detail: firstLine(line.note ?? "") || firstLine(result.stderr) || "drop 失败（无说明）",
+        detail: firstLine(line.note ?? "") || firstLine(result.stderr) || "drop failed (no details)",
       });
     }
   }
   // 列出却在输出里缺席 = 这段时间内容已经不在本地了。
   for (const row of presentFiles) {
     if (!seen.has(row.file)) {
-      entries.push({ file: row.file, bytes: row.bytes, action: "skipped", detail: "本地已无内容（本次没有可丢的东西）" });
+      entries.push({ file: row.file, bytes: row.bytes, action: "skipped", detail: "No local content left (nothing to drop this time)" });
     }
   }
 
   const dropped = entries.filter((entry) => entry.action === "dropped");
   const bytesFreed = dropped.reduce((sum, entry) => sum + entry.bytes, 0);
   if (progress !== undefined) {
-    progress(`Drop largefiles：丢了 ${dropped.length}/${entries.length} 个（释放 ${formatBytes(bytesFreed)}）`);
+    progress(`Drop largefiles: dropped ${dropped.length}/${entries.length} (freed ${formatBytes(bytesFreed)})`);
   }
 
   return {
