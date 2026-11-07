@@ -205,6 +205,8 @@ export function parseRemoteConfig(stdout: string): Pick<RemotesSnapshot, "gitRem
     for (const entry of entries) remoteConfig[entry.key] = entry.value;
 
     const rawType = remoteConfig["type"] ?? "";
+    // Display the external type (e.g. `rclone`) for external remotes; a malformed external
+    // remote without `externaltype` still reads as "external" instead of an empty label.
     const type =
       rawType === "external"
         ? (remoteConfig["externaltype"] ?? "external")
@@ -385,14 +387,15 @@ export function planRemoteChanges(rows: RemoteRow[], snapshot: RemotesSnapshot):
     if (original === undefined || original.kind !== "git") continue;
     const previous = original.pushUrls.length > 0 ? original.pushUrls[0] : null;
     if (previous === row.pushUrl) continue;
-    if (row.pushUrl === null) {
+    if (row.pushUrl === null && previous !== null) {
+      // Clearing: exactly one push URL exists for kind "git", so delete that value.
       steps.push({
         kind: "delete-push-url",
         name: row.name,
-        args: ["remote", "set-url", "--delete", "--push", row.name, previous ?? ""],
+        args: ["remote", "set-url", "--delete", "--push", row.name, previous],
         describe: `remove push URL for ${row.name}`,
       });
-    } else {
+    } else if (row.pushUrl !== null) {
       steps.push({
         kind: "set-push-url",
         name: row.name,
