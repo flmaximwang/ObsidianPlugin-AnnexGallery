@@ -68,7 +68,7 @@ git + git-annex 仓库（已经是仓库的不会重建，只补缺的步骤）�
 | 文件管理器右键 · **Annex Gallery** | 9 个动作：生成元数据 / 生成缩略图 / 创建画廊 / Add / Unlock & unannex / Lock / Unlock / Get / Drop | [`docs/context-menu.md`](docs/context-menu.md) |
 | 文件管理器右键 · **Annex Gallery → 创建画廊** | 生成 `<文件夹>/<文件夹名>.base`（vault 根 → `<vault name>.base`），成员 = 带 `annex-gallery-metadata` 标签的 sidecar，作用域递归、模板可换 | [`docs/gallery.md`](docs/gallery.md) |
 | 状态栏（右下角） | **未提交 · 未跟踪 · 未入库 largefiles** 三个数，30 秒刷新、点一下立即刷新 | [`docs/status-bar.md`](docs/status-bar.md) |
-| 设置页 | 登记外部文件：元数据预设（每条一个 `.json`）、画廊模板（`.base`）；管理 git 远端（读写 `.git/config`）；再是缩略图边长 | [`docs/setting-panel.md`](docs/setting-panel.md) |
+| 设置页 | 登记外部文件：元数据预设（每条一个 `.json`）、画廊模板（`.base`）；管理 git 远端（读写 `.git/config`；special remote 只读）；再是缩略图边长 | [`docs/setting-panel.md`](docs/setting-panel.md) |
 
 ### 配置从哪来
 
@@ -77,9 +77,11 @@ git + git-annex 仓库（已经是仓库的不会重建，只补缺的步骤）�
 - **元数据预设**：一条一个 `.json`（顶层是一条 `ParseProfile` 对象：正则 + frontmatter 字典 + 可选的正文模板），
   在设置页登记 vault 相对路径；
 - **画廊模板**：vault 里的 `.base`，同样在设置页登记；
-- **git 远端**：`.git/config` 是唯一真相。设置页打开时从 git 读 remote，编辑只留内存，点 Save 才写回
-  （新增 / 改地址 / 改 push URL / 改名 / 删除）；多 URL remote 与 git-annex special remote 在插件里只读，
-  用终端的 `git remote` / `git annex initremote` 管理。插件不 fetch、不 push。
+- **git 远端**：`.git/config` 是 git remote 的唯一真相。设置页打开时从 git 读 remote，编辑只留内存，点
+  Save 才写回（新增 / 改地址 / 改 push URL / 改名 / 删除）；多 URL remote 与 git-annex special remote
+  在插件里只读。special remote 的 type 在 git-annex 分支的 `remote.log`（插件本地只读
+  `git show git-annex:remote.log`），参数如 `annex-directory` 在 `.git/config`；两者都是只读展示，用终端的
+  `git remote` / `git annex initremote` 管理。插件不 fetch、不 push。
 - 设置页的「从预设创建…」会把内置素材写成独立文件（`AnnexGalleryTemplates/<id>.<ext>`，文件夹名无空格）——
   元数据预设一次写出**预设 JSON + 正文 `.md`** 两份，正文路径写进预设的 `template` 字段；
   同名再加序号，不覆盖、不自动打开；「打开」交给系统默认应用编辑；「删除」只取消登记、文件留着。
