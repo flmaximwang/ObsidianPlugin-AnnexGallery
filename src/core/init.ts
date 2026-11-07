@@ -10,7 +10,6 @@ import {
   templateLines,
 } from "./rules";
 import { MergeResult, Progress } from "./types";
-import { applyRemotes, type RemoteEntry, type RemoteResult } from "./remotes";
 
 export interface InitOptions {
   progress?: Progress;
@@ -18,8 +17,6 @@ export interface InitOptions {
   gitattributesPath?: string;
   /** Defaults to `<root>/.gitignore`. */
   gitignorePath?: string;
-  /** 设置页「remote 设置」：逐个 git remote add / set-url（只写配置，不 fetch/push）。 */
-  remotes?: RemoteEntry[];
   dryRun?: boolean;
 }
 
@@ -78,8 +75,6 @@ export interface InitResult {
   gitignore: MergeResult;
   /** 形态口径（annex 设置）—— 重复运行是零写入。 */
   shape: AnnexShape;
-  /** 每条 remote 的结果（added / updated / unchanged / skipped / failed）。 */
-  remotes: RemoteResult[];
   notes: string[];
 }
 
@@ -467,9 +462,6 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
     ".gitignore",
   );
 
-  // 7. remotes（设置页「remote 设置」）—— 只写 remote 配置，不 fetch、不 push。
-  const remotes = applyRemotes(absRoot, opts.remotes ?? [], { dryRun, progress });
-
   if (dryRun) {
     notes.push("dry-run：只计算不写盘，createdRepo / initedAnnex / shape / added 表示「将会怎样」");
   } else {
@@ -481,5 +473,5 @@ export async function initGallery(root: string, opts: InitOptions = {}): Promise
     }
   }
 
-  return { root: absRoot, createdRepo, initedAnnex, gitattributes, gitignore, shape, remotes, notes };
+  return { root: absRoot, createdRepo, initedAnnex, gitattributes, gitignore, shape, notes };
 }
