@@ -19,7 +19,7 @@ const fs = require("fs");
 const Module = require("module");
 const os = require("os");
 const path = require("path");
-const { execFileSync } = require("child_process");
+const { execFileSync, spawnSync } = require("child_process");
 
 const stubPath = path.join(__dirname, "obsidian-stub.cjs");
 const stub = require(stubPath);
@@ -308,6 +308,63 @@ writeText("Templates/broken.base", "views: [\n");
         "编辑器：no-repo 时不显示编辑行 / Save",
       );
       assert(byClass(editorContainer, "annex-special-remotes").length === 0, "编辑器：no-repo 时不显示 special remotes 区");
+
+      // A repo without remotes keeps the normal empty-list message (not the error state).
+      const emptyRepoDir = makeTempGitRepo("annex-remotes-empty-");
+      const emptyContainer = new stub.FakeEl("div");
+      new RemotesEditor(emptyContainer, hostFor(emptyRepoDir)).render();
+      assert(
+        one(emptyContainer, "annex-remotes-empty")?.textContent === "No git remotes yet. Use Add remote to configure one.",
+        "编辑器：仓库没有 remote → 正常的 No git remotes yet 提示",
+      );
+      assert(one(emptyContainer, "annex-remotes-error") === undefined, "编辑器：没有 remote 不是错误状态");
+
+      // A broken `.git/config` is a read error: git's stderr + Reload, never an empty editor.
+      const brokenRepoDir = makeTempGitRepo("annex-remotes-broken-");
+      gitRun(brokenRepoDir, ["remote", "add", "origin", "https://example.com/origin.git"]);
+      const brokenConfigFile = path.join(brokenRepoDir, ".git", "config");
+      const intactConfig = fs.readFileSync(brokenConfigFile, "utf8");
+      fs.appendFileSync(brokenConfigFile, "\n[broken\n");
+      // Locale-independent expected text: the same git failure readRemotes() records.
+      const gitBroken = spawnSync("git", ["-C", brokenRepoDir, "rev-parse", "--git-dir"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      assert(gitBroken.status !== 0 && gitBroken.stderr.trim() !== "", "前置：坏 .git/config 让 git 直接失败");
+
+      const brokenContainer = new stub.FakeEl("div");
+      new RemotesEditor(brokenContainer, hostFor(brokenRepoDir)).render();
+      const configErrorEl = one(brokenContainer, "annex-remotes-error");
+      assert(configErrorEl !== undefined, "编辑器：坏 .git/config 渲染 annex-remotes-error");
+      assert(
+        configErrorEl !== undefined &&
+          configErrorEl.textContent === `Could not read git remotes: ${gitBroken.stderr.trim()}`,
+        "编辑器：错误卡片逐字带出 git 的 stderr",
+      );
+      assert(byClass(brokenContainer, "annex-remote-row").length === 0, "编辑器：坏 config 不渲染编辑行");
+      assert(
+        one(brokenContainer, "annex-remotes-save") === undefined && one(brokenContainer, "annex-remote-add") === undefined,
+        "编辑器：坏 config 没有 Save / Add remote",
+      );
+      assert(one(brokenContainer, "annex-remotes-empty") === undefined, "编辑器：坏 config 不显示 No git remotes yet");
+      assert(one(brokenContainer, "annex-remotes-no-repo") === undefined, "编辑器：坏 config 不显示 no-repo 提示");
+      assert(one(brokenContainer, "annex-special-remotes") === undefined, "编辑器：坏 config 不显示 special remotes 区");
+      const brokenReload = one(brokenContainer, "annex-remotes-reload");
+      assert(brokenReload !== undefined, "编辑器：坏 config 仍保留 Reload");
+
+      // Repairing the config and reloading is the recovery path.
+      fs.writeFileSync(brokenConfigFile, intactConfig);
+      brokenReload.click();
+      assert(one(brokenContainer, "annex-remotes-error") === undefined, "编辑器：修好 config 后 Reload 清掉错误");
+      const recoveredRows = byClass(brokenContainer, "annex-remote-row");
+      assert(
+        recoveredRows.length === 1 && recoveredRows[0].getAttr("data-remote") === "origin",
+        "编辑器：修好 config 后 Reload 恢复原有的编辑行",
+      );
+      assert(
+        one(brokenContainer, "annex-remotes-save")?.disabled === true,
+        "编辑器：恢复后 Save 回到初始禁用态",
+      );
 
       // A real repository with every remote shape the editor has to deal with.
       const repoDir = makeTempGitRepo("annex-remotes-repo-");
