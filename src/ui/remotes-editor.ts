@@ -180,15 +180,16 @@ export class RemotesEditor {
 
   /** Read git and render the section. Draft edits are discarded on every render. */
   render(): void {
+    this.container.empty();
     this.resetDomState();
-
-    const card = this.container.createDiv({ cls: "annex-remotes-card" });
-    card.createEl("h3", { cls: "annex-remotes-title", text: SECTION_TITLE });
+    this.snapshot = null;
 
     let snapshot: RemotesSnapshot;
     try {
       snapshot = readRemotes(this.host.vaultRoot());
     } catch (error) {
+      const card = this.container.createDiv({ cls: "annex-remotes-card" });
+      card.createEl("h3", { cls: "annex-remotes-title", text: SECTION_TITLE });
       card.createDiv({
         cls: "annex-remotes-error",
         text: `Could not read git remotes: ${errorText(error)}`,
@@ -198,12 +199,13 @@ export class RemotesEditor {
     this.snapshot = snapshot;
 
     if (!snapshot.hasRepo) {
+      const card = this.container.createDiv({ cls: "annex-remotes-card" });
+      card.createEl("h3", { cls: "annex-remotes-title", text: SECTION_TITLE });
       card.createDiv({ cls: "annex-remotes-no-repo", text: NO_REPO_TEXT });
       return;
     }
 
     this.rows = rowsFromSnapshot(snapshot).map((row) => ({ ...row, deleted: false }));
-    this.container.empty();
     this.buildCard();
   }
 
@@ -344,7 +346,9 @@ export class RemotesEditor {
         originalName: row.originalName,
         name: row.name,
         fetchUrl: row.fetchUrl,
-        pushUrl: row.pushUrl,
+        // A blank (revealed) push field means "no push URL": clearing an existing one must
+        // become `--delete --push`, and an untouched reveal is not a validation error.
+        pushUrl: row.pushUrl === "" ? null : row.pushUrl,
       });
     });
     return active;
