@@ -24,7 +24,7 @@
 - 不 `git add` / 不 `git commit` / 不 `git annex add` —— 工作树不被代劳，init 之前就在目录里的文件跑完
   仍是未跟踪（`verify:init` 场景 1 钉住这点）；
 - 不碰 remote 配置 —— 远端只活在 `.git/config` 里，由设置页在显式 Save 时修改；init 既不
-  `git remote add`、也不 `set-url`；
+  `git remote add`、也不 `set-url`，也不改 git-annex 分支的 `remote.log`（special remote 的类型来源）；
 - 不 `fetch` / 不 `push` —— 插件不提供任何传输操作，网络动作是使用者自己的决定；
 - **不回头解锁**已 locked 的老文件（批量解锁是另一条命令，见 [`docs/context-menu.md`](context-menu.md) 的
   `Unlock largefiles`）；

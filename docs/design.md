@@ -38,9 +38,12 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
 1. **初始化 gallery 的作用域 = 当前打开的 vault 根**（不是某个子文件夹），并且必须可重复执行：
    已经合规的仓库上重跑，零写入、零报错。
 2. **缩略图边长默认 256**，与 `.base` 的 `cardSize` 约定一致 —— 两者不等会把封面放大、发虚。
-3. **远端以 `.git/config` 为唯一真相**：设置页打开时从 git 读 remote，编辑只留在内存里，点
+3. **远端配置以 `.git/config` 为唯一真相**（special remote 的 type 另在 git-annex 分支）：
+   设置页打开时从 git 读 remote，编辑只留在内存里，点
    Save 才按 remove → rename → set-url → add 的顺序写回；插件不代做 `fetch` / `push`，多 URL
-   remote 与 git-annex special remote 在插件里只读。传输走 SSH，同步时机由操作者决定。
+   remote 与 git-annex special remote 在插件里只读。special remote 的 type 不在 `.git/config`，
+   而在 git-annex 分支的 `remote.log`（本地只读 `git show git-annex:remote.log`），参数存成
+   `remote.<name>.annex-<param>`（如 `annex-directory`）。传输走 SSH，同步时机由操作者决定。
 
 ## 文档里的占位符
 
