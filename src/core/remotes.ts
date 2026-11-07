@@ -1,148 +1,163 @@
 /**
- * 设置页「remote 设置」的执行体：把配好的 remote 写进仓库（git remote add / set-url）。
+ * Git remotes, read from and written to `.git/config` — the single source of truth.
  *
- * 口径：一条 remote = 名称 + 地址，列表可以有多条。
- *   - 空行（刚点了「添加 remote」还没填）直接忽略；
- *   - 名称或地址为空、名称里有空白字符 ⇒ skipped，并在结果里写明原因；
- *   - 同名多次出现 ⇒ 只有第一次生效；
- *   - 幂等：先 `git remote get-url <名字>` —— 已有且地址相同 ⇒ unchanged（一个字节都不碰），
- *     已有但地址不同 ⇒ `git remote set-url`，没有 ⇒ `git remote add`；
- *   - **不 fetch、不 push**：这一步只写 remote 配置。
+ * Contract (implemented by the core slice, consumed by the UI + cleanup slices):
+ *   - `readRemotes(dir)` reads `git config --get-regexp '^remote\.'` and classifies
+ *     every remote; `hasRepo` is false when `git rev-parse --git-dir` fails.
+ *   - `rowsFromSnapshot()` turns the editable (single-URL) git remotes into editor rows.
+ *   - `planRemoteChanges(rows, snapshot)` validates the rows and produces an ordered
+ *     command plan: remove -> rename -> set-url (fetch, push) -> add. `issues` is
+ *     non-empty when anything is invalid; a plan with issues must never be executed.
+ *   - `applyRemotePlan(dir, plan)` runs the steps in order and stops at the first failure
+ *     (no rollback — the caller reports partial progress and reloads).
+ *   - `sameRemoteConfig(a, b)` is the staleness check: the raw `remote.*` config must be
+ *     byte-identical between the snapshot the editor was rendered from and a fresh read.
+ *
+ * Nothing in this module fetches, pushes, or touches git-annex content: only remote
+ * configuration is read or written (see the `no-transfer-ops` policy).
  */
 import { git } from "./git";
-import { Progress } from "./types";
 
-export interface RemoteEntry {
-  /** remote 名字，如 origin。 */
+/** A remote that carries a URL (shown as an editable row when it has exactly one URL). */
+export interface GitRemote {
   name: string;
-  /** remote 地址：ssh://… / https://… / 本地路径都可以。 */
-  url: string;
+  /** `remote.<name>.url` values, in config order. */
+  fetchUrls: string[];
+  /** `remote.<name>.pushurl` values, in config order (empty = push reuses the fetch URL). */
+  pushUrls: string[];
+  /** `multi-url` = more than one fetch URL, more than one push URL, or no URL at all. */
+  kind: "git" | "multi-url";
+  /** `remote.<name>.annex-uuid` is present: git-annex tracks this remote. */
+  hasAnnexUuid: boolean;
 }
 
-export type RemoteAction = "added" | "updated" | "unchanged" | "skipped" | "failed";
-
-export interface RemoteResult {
+/** A git-annex special remote: `annex-*` keys and no `url`. */
+export interface SpecialRemote {
   name: string;
-  url: string;
-  action: RemoteAction;
-  /** 说明（跳过原因、失败原因、dry-run 提示）。 */
+  /** `type=`, or `externaltype=` when `type=external`; `""` when neither is set. */
+  type: string;
+  /** `remote.<name>.annex-uuid` is present. */
+  hasAnnexUuid: boolean;
+  /** The main setting to display (e.g. `directory` → `/Volumes/Archive`), if any. */
+  mainSetting: { key: string; value: string } | null;
+  /** Every `remote.<name>.*` key (prefix stripped) → value, in config order. */
+  config: Record<string, string>;
+}
+
+/** Everything the settings page needs to know about the repository's remotes. */
+export interface RemotesSnapshot {
+  /** False when `dir` is not inside a git repository (or git is unavailable). */
+  hasRepo: boolean;
+  /** Every remote that has a `url`, editable and read-only alike. */
+  gitRemotes: GitRemote[];
+  /** Every remote that has `annex-*` keys and no `url`. */
+  specialRemotes: SpecialRemote[];
+  /** Raw `remote.<name>.<key>` → value as read from git, for the staleness check. */
+  config: Record<string, string>;
+}
+
+/** One editable row in the remotes editor. */
+export interface RemoteRow {
+  /** Name as read from git; `""` for a row the user just added. */
+  originalName: string;
+  /** Current (possibly edited) name. */
+  name: string;
+  /** Current fetch URL. */
+  fetchUrl: string;
+  /** Current push URL; `null` = no push URL configured (push reuses the fetch URL). */
+  pushUrl: string | null;
+}
+
+export type RemoteCommandKind =
+  | "remove"
+  | "rename"
+  | "set-fetch-url"
+  | "set-push-url"
+  | "delete-push-url"
+  | "add";
+
+/** One `git remote …` invocation, in plan order. */
+export interface RemoteStep {
+  kind: RemoteCommandKind;
+  /** The remote name the command targets (new name for rename / add). */
+  name: string;
+  /** The previous name, for renames. */
+  previousName?: string;
+  /** Arguments after `git -C <dir>` — never a bare shell string. */
+  args: string[];
+  /** English one-liner for notices, e.g. `rename origin to upstream`. */
+  describe: string;
+}
+
+/** A validation problem. `row` is an index into the rows array, or null for snapshot-level issues. */
+export interface RemoteIssue {
+  row: number | null;
+  field?: "name" | "fetchUrl" | "pushUrl";
+  message: string;
+}
+
+export interface RemotePlan {
+  steps: RemoteStep[];
+  issues: RemoteIssue[];
+}
+
+export interface RemoteStepResult {
+  step: RemoteStep;
+  ok: boolean;
+  /** git stderr (or stdout) for a failed step. */
   detail?: string;
-  /** 仓库里原来的地址（updated / unchanged 时有）。 */
-  previous?: string;
 }
 
-export interface ApplyRemoteOptions {
-  dryRun?: boolean;
-  progress?: Progress;
+export interface RemoteApplyResult {
+  /** Steps attempted, in order. */
+  results: RemoteStepResult[];
+  /** The step that failed, or null. */
+  failed: RemoteStep | null;
+  /** True only when every planned step succeeded. */
+  ok: boolean;
 }
 
-/** 读仓库里已配置的 remote（`git remote -v` 两列去重；取 fetch 的地址）。 */
-export function scanRemotes(root: string): RemoteEntry[] {
-  const result = git(["remote", "-v"], root);
-  if (result.code !== 0) return [];
-  const seen = new Map<string, string>();
-  for (const line of result.stdout.split("\n")) {
-    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)\s*$/.exec(line.trim());
-    if (match === null) continue;
-    if (!seen.has(match[1])) seen.set(match[1], match[2]);
-  }
-  return [...seen.entries()].map(([name, url]) => ({ name, url }));
+/** TODO(core): read `git config --get-regexp '^remote\.'` and classify the remotes. */
+export function readRemotes(dir: string): RemotesSnapshot {
+  void dir;
+  throw new Error("TODO(core): readRemotes");
 }
 
-/**
- * 把「仓库里已经有、设置里还没有」的 remote 补进设置列表（插件加载时自动扫描用）。
- *
- * 只补空缺，**不覆盖**同名那条 —— 用户刚在设置页改过地址（还没跑「初始化 gallery」）时，
- * 不该被仓库里的旧地址盖回去。空行（草稿行）不算已配置，不参与去重对比。
- */
-export function mergeScannedRemotes(
-  existing: RemoteEntry[],
-  scanned: RemoteEntry[],
-): { remotes: RemoteEntry[]; added: string[] } {
-  const known = new Set(existing.map((entry) => entry.name.trim()).filter((name) => name !== ""));
-  const added: string[] = [];
-  const remotes = existing.map((entry) => ({ ...entry }));
-  for (const entry of scanned) {
-    if (known.has(entry.name)) continue;
-    known.add(entry.name);
-    added.push(entry.name);
-    remotes.push({ name: entry.name, url: entry.url });
-  }
-  return { remotes, added };
+/** TODO(core): parse the stdout of `git config --get-regexp '^remote\.'`. */
+export function parseRemoteConfig(stdout: string): Pick<RemotesSnapshot, "gitRemotes" | "specialRemotes" | "config"> {
+  void stdout;
+  throw new Error("TODO(core): parseRemoteConfig");
 }
 
-/** git remote 名字里不能有空白；空名/空地址都不生效。 */
-function invalidReason(name: string, url: string): string | undefined {
-  if (name === "") return "名称为空";
-  if (/\s/.test(name)) return "名称里有空白字符";
-  if (url === "") return "地址为空";
-  return undefined;
+/** TODO(core): true when both snapshots read exactly the same `remote.*` config. */
+export function sameRemoteConfig(a: RemotesSnapshot, b: RemotesSnapshot): boolean {
+  void a;
+  void b;
+  throw new Error("TODO(core): sameRemoteConfig");
 }
 
-export function applyRemotes(root: string, remotes: RemoteEntry[], opts: ApplyRemoteOptions = {}): RemoteResult[] {
-  const dryRun = opts.dryRun === true;
-  const progress: Progress = opts.progress ?? ((): void => undefined);
-  const results: RemoteResult[] = [];
-  const seen = new Set<string>();
+/** TODO(core): editable rows = git remotes whose kind is `git`. */
+export function rowsFromSnapshot(snapshot: RemotesSnapshot): RemoteRow[] {
+  void snapshot;
+  throw new Error("TODO(core): rowsFromSnapshot");
+}
 
-  for (const raw of remotes ?? []) {
-    const name = String(raw?.name ?? "").trim();
-    const url = String(raw?.url ?? "").trim();
-    if (name === "" && url === "") continue; // 空行：忽略，不当错误
+/** TODO(core): validate rows and build the ordered remove -> rename -> set-url -> add plan. */
+export function planRemoteChanges(rows: RemoteRow[], snapshot: RemotesSnapshot): RemotePlan {
+  void rows;
+  void snapshot;
+  throw new Error("TODO(core): planRemoteChanges");
+}
 
-    const bad = invalidReason(name, url);
-    if (bad !== undefined) {
-      results.push({ name, url, action: "skipped", detail: bad });
-      progress(`remote ${name === "" ? "(空)" : name}：跳过（${bad}）`);
-      continue;
-    }
-    if (seen.has(name)) {
-      results.push({ name, url, action: "skipped", detail: "同名出现多次，只按第一次生效" });
-      progress(`remote ${name}：跳过（同名重复）`);
-      continue;
-    }
-    seen.add(name);
+/** TODO(core): execute the plan, stopping at the first failed command. */
+export function applyRemotePlan(dir: string, plan: RemotePlan): RemoteApplyResult {
+  void dir;
+  void plan;
+  throw new Error("TODO(core): applyRemotePlan");
+}
 
-    const existing = git(["remote", "get-url", name], root);
-    if (existing.code === 0) {
-      const previous = existing.stdout.trim();
-      if (previous === url) {
-        results.push({ name, url, action: "unchanged", previous });
-        progress(`remote ${name}：地址未变，跳过`);
-        continue;
-      }
-      if (dryRun) {
-        results.push({ name, url, action: "updated", previous, detail: "dry-run：未执行 git remote set-url" });
-        progress(`remote ${name}：将改地址 → ${url}（dry-run：未执行）`);
-        continue;
-      }
-      const changed = git(["remote", "set-url", name, url], root);
-      if (changed.code !== 0) {
-        const detail = (changed.stderr || changed.stdout).trim();
-        results.push({ name, url, action: "failed", previous, detail });
-        progress(`remote ${name}：改地址失败（${detail}）`);
-        continue;
-      }
-      results.push({ name, url, action: "updated", previous });
-      progress(`remote ${name}：改地址 ${previous} → ${url}`);
-      continue;
-    }
-
-    if (dryRun) {
-      results.push({ name, url, action: "added", detail: "dry-run：未执行 git remote add" });
-      progress(`remote ${name}：将新增 ${url}（dry-run：未执行）`);
-      continue;
-    }
-    const added = git(["remote", "add", name, url], root);
-    if (added.code !== 0) {
-      const detail = (added.stderr || added.stdout).trim();
-      results.push({ name, url, action: "failed", detail });
-      progress(`remote ${name}：新增失败（${detail}）`);
-      continue;
-    }
-    results.push({ name, url, action: "added" });
-    progress(`remote ${name}：新增 ${url}`);
-  }
-
-  return results;
+/** TODO(core): documentation link for a special remote type (index page as fallback). */
+export function specialRemoteDocUrl(remote: SpecialRemote): string {
+  void remote;
+  throw new Error("TODO(core): specialRemoteDocUrl");
 }
