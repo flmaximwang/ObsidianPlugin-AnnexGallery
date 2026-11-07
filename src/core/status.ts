@@ -51,7 +51,7 @@ export function execAsync(cmd: string, args: string[], cwd?: string): Promise<Co
           code,
           stdout: typeof stdout === "string" ? stdout : "",
           stderr: `${typeof stderr === "string" ? stderr : ""}${
-            error !== null && error.code === "ENOENT" ? `找不到命令：${cmd}` : ""
+            error !== null && error.code === "ENOENT" ? `Command not found: ${cmd}` : ""
           }`,
           missing: error !== null && error.code === "ENOENT",
         });
@@ -155,11 +155,11 @@ export function isAnnexBinaryMissing(text: string): boolean {
 }
 
 /** 「找不到 git-annex」时状态栏那一行的短句（一行放得下）。 */
-const ANNEX_MISSING_DETAIL = "找不到 git-annex 命令（brew install git-annex）";
+const ANNEX_MISSING_DETAIL = "git-annex was not found (brew install git-annex)";
 
 /** 同一情形的完整解释，进悬停提示（状态栏放不下）。 */
 const ANNEX_MISSING_HINT =
-  "git 在 PATH 与 /opt/homebrew/bin 等常见目录里都没找到 git-annex（从 Finder/Dock 启动的 Obsidian 只有 launchd 那份极小 PATH）；装好后点这一行重新统计即可，不用重启 Obsidian";
+  "git could not find git-annex in PATH or common locations such as /opt/homebrew/bin (Obsidian launched from Finder/Dock only sees launchd's minimal PATH); after installing it, click this line to recount — no need to restart Obsidian";
 
 /** 造一条「还没初始化」的状态。 */
 export function uninitializedStatus(dir: string, detail: string, repoRoot: string | null = null): RepoStatus {
@@ -182,41 +182,41 @@ async function annexGitDir(repoRoot: string): Promise<string | null> {
 export async function readRepoStatus(dir: string): Promise<RepoStatus> {
   const top = await execAsync("git", ["-C", dir, "rev-parse", "--show-toplevel"]);
   if (top.missing) {
-    return unavailableStatus(dir, "找不到 git 命令（请先安装 git）");
+    return unavailableStatus(dir, "git was not found (install git first)");
   }
   if (top.code !== 0) {
-    return uninitializedStatus(dir, "不是 git 仓库（未初始化）");
+    return uninitializedStatus(dir, "Not a git repository (not initialized)");
   }
   const repoRoot = top.stdout.trim() === "" ? dir : top.stdout.trim();
 
   const gitDir = await annexGitDir(repoRoot);
   if (gitDir === null) {
-    return uninitializedStatus(repoRoot, "不是 git-annex 仓库（未初始化 annex）", repoRoot);
+    return uninitializedStatus(repoRoot, "Not a git-annex repository (annex not initialized)", repoRoot);
   }
 
   const status = await execAsync("git", ["-C", repoRoot, "status", "--porcelain", "-uall"]);
   if (status.missing) {
-    return unavailableStatus(repoRoot, "找不到 git 命令（请先安装 git）", repoRoot);
+    return unavailableStatus(repoRoot, "git was not found (install git first)", repoRoot);
   }
   if (status.code !== 0) {
     if (isAnnexBinaryMissing(`${status.stderr}\n${status.stdout}`)) {
       const base = unavailableStatus(repoRoot, ANNEX_MISSING_DETAIL, repoRoot, ANNEX_MISSING_HINT);
       return base;
     }
-    return unavailableStatus(repoRoot, `git status 失败：${firstLine(status.stderr) || `退出码 ${status.code}`}`, repoRoot);
+    return unavailableStatus(repoRoot, `git status failed: ${firstLine(status.stderr) || `exit code ${status.code}`}`, repoRoot);
   }
   const { tracked, untracked } = classifyPorcelain(status.stdout);
 
   const dry = await execAsync("git", ["-C", repoRoot, "annex", "add", "--dry-run", "--json"]);
   if (dry.missing) {
-    const base = unavailableStatus(repoRoot, "找不到 git-annex 命令（brew install git-annex）", repoRoot);
+    const base = unavailableStatus(repoRoot, "git-annex was not found (brew install git-annex)", repoRoot);
     return { ...base, commitsPending: tracked, untracked };
   }
   if (dry.code !== 0) {
     const annexMissing = isAnnexBinaryMissing(`${dry.stderr}\n${dry.stdout}`);
     const detail = annexMissing
       ? ANNEX_MISSING_DETAIL
-      : `git annex add --dry-run 失败：${firstLine(dry.stderr) || `退出码 ${dry.code}`}`;
+      : `git annex add --dry-run failed: ${firstLine(dry.stderr) || `exit code ${dry.code}`}`;
     const base = unavailableStatus(repoRoot, detail, repoRoot, annexMissing ? ANNEX_MISSING_HINT : "");
     return { ...base, commitsPending: tracked, untracked };
   }
@@ -233,33 +233,33 @@ export async function readRepoStatus(dir: string): Promise<RepoStatus> {
   };
 }
 
-/** 状态栏那一行的文字（`未提交 … · 未跟踪 … · 未入库 largefiles …`）。 */
+/** Text for the status-bar line (`Uncommitted … · Untracked … · Annex-missing largefiles …`). */
 export function statusText(status: RepoStatus): string {
-  if (status.level === "uninitialized") return "未初始化 · 点击初始化 gallery";
-  if (status.level === "unavailable") return `无法统计：${status.detail}`;
+  if (status.level === "uninitialized") return "Not initialized · click to initialize gallery";
+  if (status.level === "unavailable") return `Cannot count: ${status.detail}`;
   const pending = status.largefiles === null ? "?" : String(status.largefiles);
-  return `未提交 ${status.commitsPending} · 未跟踪 ${status.untracked} · 未入库 largefiles ${pending}`;
+  return `Uncommitted ${status.commitsPending} · Untracked ${status.untracked} · Annex-missing largefiles ${pending}`;
 }
 
 /** 悬停提示：把口径、范围、刷新方式一次写清（状态栏本身放不下）。 */
 export function statusTooltip(status: RepoStatus): string {
   const lines: string[] = [];
-  if (status.repoRoot !== null) lines.push(`仓库：${status.repoRoot}`);
+  if (status.repoRoot !== null) lines.push(`Repository: ${status.repoRoot}`);
   if (status.level === "unavailable" || status.level === "uninitialized") {
     lines.push(status.detail);
     if (status.hint !== undefined && status.hint !== "") lines.push(status.hint);
     lines.push(
       status.level === "uninitialized"
-        ? `点击这一行 → 初始化 gallery · 每 ${STATUS_REFRESH_MS / 1000} 秒自动刷新`
-        : `点击这一行 → 重新统计 · 每 ${STATUS_REFRESH_MS / 1000} 秒自动刷新`,
+        ? `Click this line → initialize gallery · refreshes every ${STATUS_REFRESH_MS / 1000} s`
+        : `Click this line → recount · refreshes every ${STATUS_REFRESH_MS / 1000} s`,
     );
     return lines.join("\n");
   }
-  lines.push("未提交：已跟踪文件的改动（staged + unstaged），= git status --porcelain -uall 的行数");
-  lines.push("未跟踪：同一份输出里 ?? 开头的文件数（一个文件一行）");
+  lines.push("Uncommitted: changes in tracked files (staged + unstaged) = lines from git status --porcelain -uall");
+  lines.push("Untracked: files starting with ?? in the same output (one file per line)");
   lines.push(
-    "未入库 largefiles：git annex add --dry-run 里会进 annex 的文件数（.md / .thumbnail.png / .base 按 .gitattributes 进 git，不算）",
+    "Annex-missing largefiles: files that would enter annex according to git annex add --dry-run (.md / .thumbnail.png / .base go to git via .gitattributes and do not count)",
   );
-  lines.push(`每 ${STATUS_REFRESH_MS / 1000} 秒自动刷新 · 点击这一行立即刷新`);
+  lines.push(`Refreshes every ${STATUS_REFRESH_MS / 1000} s · click this line to refresh now`);
   return lines.join("\n");
 }

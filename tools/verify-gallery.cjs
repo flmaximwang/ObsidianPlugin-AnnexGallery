@@ -172,7 +172,7 @@ async function main() {
     write(path.join(src4, "1000X-a-01.png"), PNG_1X1);
     const notesRun = runCliJson(["sidecar", src4, "--vault", vault, "--preset", notesPreset, "--sample", "verify", "--apply", "--json"]);
     check(
-      /模板里的 \{\{notes\}\} 取不到值，已留空/.test(notesRun.entries[0].detail ?? ""),
+      /Template placeholders \{\{notes\}\} have no value and were left empty/.test(notesRun.entries[0].detail ?? ""),
       "report detail 写明 {{notes}} 取不到值、已留空",
     );
     check(/\n笔记：\n$/.test(read(path.join(src4, "1000X-a-01.md"))), "文件里 {{notes}} 被替换成空串");
@@ -197,7 +197,7 @@ async function main() {
     write(path.join(src2, "1000X-a-01.png"), PNG_1X1);
     const noTagsRun = runCli(["sidecar", src2, "--vault", vault, "--preset", noTagsPreset, "--apply", "--json"]);
     check(noTagsRun.status !== 0, "frontmatter 缺 tags ⇒ 非零退出");
-    check(/必须包含 tags/.test(noTagsRun.stderr), "报错点名 tags 是硬要求");
+    check(/must contain tags/.test(noTagsRun.stderr), "报错点名 tags 是硬要求");
     check(!fs.existsSync(path.join(src2, "1000X-a-01.md")), "缺 tags 的预设一份 sidecar 都不写");
 
     // ── B. 不给 --preset ⇒ 非零退出并给示例路径 ──────────────────────────

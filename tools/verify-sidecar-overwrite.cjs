@@ -160,7 +160,7 @@ async function main() {
     const dirtyOverwrite = runCliJson(args(["--apply", "--overwrite"]));
     check(!read(path.join(vault, "a.md")).includes("手改一行"), "--overwrite 连脏文件一起覆盖（用户要的「重算」）");
     check(
-      dirtyOverwrite.entries.some((entry) => entry.action === "overwritten" && /脏/.test(entry.detail ?? "")),
+      dirtyOverwrite.entries.some((entry) => entry.action === "overwritten" && /git reports changes/.test(entry.detail ?? "")),
       "报告里写明「覆盖已存在的 .md（git 报脏）」",
     );
 
@@ -202,7 +202,7 @@ async function main() {
     const folderMenu = new stub.Menu();
     stub.registry.menus[0](folderMenu, new stub.TFolder("/"), "file-explorer");
     const items = folderMenu.items[0].submenu.items;
-    const metadataItem = items.find((item) => item.title === "生成元数据");
+    const metadataItem = items.find((item) => item.title === "Generate metadata");
     check(metadataItem !== undefined, "找得到「生成元数据」菜单项");
 
     metadataItem.callback();
@@ -213,31 +213,31 @@ async function main() {
 
     askInputs[0].value = "rerun";
     askInputs[0].dispatchEvent({ type: "input" });
-    buttonsOf(stub, askModal.contentEl).find((b) => b.textContent.includes("生成元数据")).click();
+    buttonsOf(stub, askModal.contentEl).find((b) => b.textContent.includes("Generate metadata")).click();
     await tick();
     await tick();
     const promptModal = stub.registry.modals[stub.registry.modals.length - 1];
     check(promptModal !== askModal, "提交后弹出第二个弹窗（问是否覆盖）");
     const promptText = stub.walk(promptModal.contentEl).map((el) => el.textContent).join(" | ");
     console.log(`    覆盖提示弹窗：${/已有 \d+ 份 sidecar[^|]*/.exec(promptText)?.[0] ?? "(没抓到)"}`);
-    check(/已有 2 份 sidecar/.test(promptText), "提示里写明已有 2 份 sidecar");
+    check(/2 of 2 images already have sidecars/.test(promptText), "提示里写明已有 2 份 sidecar");
     const labels = buttonsOf(stub, promptModal.contentEl).map((b) => b.textContent);
     check(
-      labels.join("|") === "覆盖重算|只补缺失|取消",
+      labels.join("|") === "Recompute all|Only add missing|Cancel",
       `三个按钮按口径排列：${labels.join(" | ")}`,
     );
     check(read(path.join(vault, "a.md")).startsWith("---"), "弹窗阶段还没写盘（等用户选）");
 
     // 选「只补缺失」→ 已存在的不动
     fs.writeFileSync(path.join(vault, "a.md"), MARKER);
-    buttonsOf(stub, promptModal.contentEl).find((b) => b.textContent === "只补缺失").click();
+    buttonsOf(stub, promptModal.contentEl).find((b) => b.textContent === "Only add missing").click();
     await tick();
     await tick();
     await tick();
     check(read(path.join(vault, "a.md")) === MARKER, "点「只补缺失」后 a.md 原样未动");
     const noticeKeep = stub.registry.notices[stub.registry.notices.length - 1] ?? "";
     console.log(`    只补缺失 → ${noticeKeep.split("\n").join(" / ")}`);
-    check(/生成元数据完成/.test(noticeKeep), "给出完成报告");
+    check(/Generate metadata complete/.test(noticeKeep), "给出完成报告");
 
     // 再走一遍，选「覆盖重算」→ 重写
     fs.writeFileSync(path.join(vault, "a.md"), MARKER);
@@ -247,11 +247,11 @@ async function main() {
     const askInputs2 = stub.walk(askModal2.contentEl).filter((el) => el.tagName === "INPUT" && el.getAttr("data-ask-key") === "sample");
     askInputs2[0].value = "rerun";
     askInputs2[0].dispatchEvent({ type: "input" });
-    buttonsOf(stub, askModal2.contentEl).find((b) => b.textContent.includes("生成元数据")).click();
+    buttonsOf(stub, askModal2.contentEl).find((b) => b.textContent.includes("Generate metadata")).click();
     await tick();
     await tick();
     const promptModal2 = stub.registry.modals[stub.registry.modals.length - 1];
-    const confirmBtn = buttonsOf(stub, promptModal2.contentEl).find((b) => b.textContent === "覆盖重算");
+    const confirmBtn = buttonsOf(stub, promptModal2.contentEl).find((b) => b.textContent === "Recompute all");
     check(confirmBtn !== undefined, "找到「覆盖重算」按钮");
     confirmBtn.click();
     await tick();
@@ -260,8 +260,8 @@ async function main() {
     const noticeOverwrite = stub.registry.notices[stub.registry.notices.length - 1] ?? "";
     console.log(`    覆盖重算 → ${noticeOverwrite.split("\n").join(" / ")}`);
     check(!read(path.join(vault, "a.md")).includes("OLD-MARKER"), "点「覆盖重算」后 a.md 真的被重写了");
-    check(/覆盖 2 份/.test(noticeOverwrite), "报告里写「覆盖 2 份」（a.md + b.md 都已存在）");
-    check(/模式：覆盖重算/.test(noticeOverwrite), "报告里标明本次是覆盖重算");
+    check(/Overwritten 2/.test(noticeOverwrite), "报告里写「覆盖 2 份」（a.md + b.md 都已存在）");
+    check(/Mode: recompute all/.test(noticeOverwrite), "报告里标明本次是覆盖重算");
 
     console.log(`\nPASS=${pass} FAIL=${fail}`);
     if (fail > 0) process.exitCode = 1;

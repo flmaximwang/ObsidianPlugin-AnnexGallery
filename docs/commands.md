@@ -1,4 +1,8 @@
-# 「初始化 gallery」命令（命令面板 · 入口 1）
+# Initialize gallery command（命令面板 · 入口 1）
+
+> **UI language:** all plugin-authored user-facing text is English-only until bilingual UI (i18n) support exists.
+> This covers settings, notices, modals, status text, progress/results, errors, hints and shipped preset display text.
+> Stable IDs, configuration keys and user-authored values are never translated.
 
 > 这条命令的**唯一口径**：它管哪一段、幂等契约是什么、annex 的「标准状态」怎么定义、失败怎么判、
 > 代码落在哪、以及用什么判据钉住。
@@ -6,7 +10,7 @@
 > `<file>`），命令示例里的真实路径换成 `/Users/<user>/Documents/Lab/<library>/Data_<library>`。
 > 可复跑的判据：`npm run verify:init`（`tools/verify-init.cjs`，真 annex 仓库 + 构建产物）。
 >
-> 插件在命令面板里目前只注册 **1 条**命令（`init-gallery` / 「初始化 gallery」）；那 9 个文件管理器
+> 插件在命令面板里目前只注册 **1 条**命令（`init-gallery` / 「Initialize gallery」）；那 9 个文件管理器
 > 右键选项是另一套入口，口径在 [`docs/context-menu.md`](context-menu.md)。
 
 ## 职责边界
@@ -22,7 +26,7 @@
 **它明确不管**
 
 - 不 `git add` / 不 `git commit` / 不 `git annex add` —— 工作树不被代劳，init 之前就在目录里的文件跑完
-  仍是未跟踪（`verify:init` 场景 1 钉住这点）；
+  仍是 Untracked（`verify:init` 场景 1 钉住这点）；
 - 不碰 remote 配置 —— 远端只活在 `.git/config` 里，由设置页在显式 Save 时修改；init 既不
   `git remote add`、也不 `set-url`，也不改 git-annex 分支的 `remote.log`（special remote 的类型来源）；
 - 不 `fetch` / 不 `push` —— 插件不提供任何传输操作，网络动作是使用者自己的决定；
@@ -37,7 +41,7 @@
 | 1 | 校验目标目录存在、且是目录 | — |
 | 2 | `git init -b main` | 已是 git 仓库 → 跳过（**不重建、不覆盖**）；是**别人的仓库的子目录** → 直接报错，不往里写 |
 | 3 | `git annex init "<目录名>"` ← **annex 命令 1** | 已是 annex 仓库 → 跳过 |
-| 4 | **把 annex 的「设置」核对并修复到标准状态**（← **annex 命令 2**，见下节） | 三条都合口径 → 零写入，报告写「未改动」 |
+| 4 | **把 annex 的「设置」核对并修复到标准状态**（← **annex 命令 2**，见下节） | 三条都合口径 → 零写入，报告写 `unchanged` |
 | 5 | 合并 `.gitattributes`（目标不存在 / 为空 → 原样写入内置模板；否则只追加缺的行） | 规则齐了 → 补 0 行 |
 | 6 | 合并 `.gitignore`（只 `.obsidian`） | 同上 |
 
@@ -58,16 +62,16 @@
 | 工作树 | 全程不碰（除步骤 5/6 那两个文件本身） |
 
 由此得到可核对的现象：在标准态仓库上连跑三次 —— 零报错、零写入（git-annex 分支提交哈希不变、本机
-`.git/config` 一个字节不改），报告写「未改动」。
+`.git/config` 一个字节不改），报告写 `unchanged`。
 
 命令面板跑完给的报告（Notice，第一次跑的形态；`<n>` 是这一趟真的修掉的项数）：
 
 ```
-初始化 gallery 完成
-仓库根：<vault>
-git init：已新建
-git annex init：已执行
-annex.addunlocked：分支已设为 true（此后 add 的文件以 unlocked 入库）
+Initialize gallery complete
+Repository root: <vault>
+git init: created
+git annex init: ran
+annex.addunlocked: branch set to true (files added from now on are stored unlocked)
 [本机设置：修 <n> 项（annex.addunlocked=false→删）]     ← 只有真的修过偏离才有这一行
 .gitattributes：补 <n> 条规则
 .gitignore：补 1 条规则
@@ -222,7 +226,7 @@ npm run verify:init  # 真 annex 仓库 + 构建产物：全 PASS 才算口径�
 
 | 口径 | 断言 |
 |---|---|
-| 两条 annex 命令 | 空目录跑完 Notice 里有 `annex.addunlocked：分支已设为 true`；`git -C <dir> annex config --get annex.addunlocked` → `true` |
+| 两条 annex 命令 | 空目录跑完 Notice 里有 `annex.addunlocked: branch set to true`；`git -C <dir> annex config --get annex.addunlocked` → `true` |
 | 改的是仓库级配置 | `git show git-annex:config.log` 里出现那一行（不是 `.gitattributes`，那条规则文件归第 5 步） |
 | 新文件 unlocked | 场景 2：index mode `100644`、`lstat().isSymbolicLink() === false`；对照场景 4（`addunlocked` 没设）同一断言是 `120000` |
 | 重复运行 | 场景 3（连跑两次）+ 场景 7（全局污染下再跑）都不动盘 |
@@ -244,7 +248,7 @@ npm run verify:init  # 真 annex 仓库 + 构建产物：全 PASS 才算口径�
 2. **既要读分支、也要读 git 配置**：`git config --get` 看不见分支，`git annex config --get` 看不见 git 配置。
    两边单独看都会得出「已经是 true」的错误结论 —— 分支 `true` + 本机 `false` 的实际行为是 locked
    （见上「本机覆盖压过分支」那一组）。
-3. **公共那份必须先读再写**：`git annex config --set` 每次都会往 git-annex 分支写一个提交。「初始化 gallery」
+3. **公共那份必须先读再写**：`git annex config --set` 每次都会往 git-annex 分支写一个提交。「Initialize gallery」
    号称幂等，就得在值已经是 `true` 时不写 —— 否则每点一次命令，annex 分支就多一个噪声提交（会跟着
    分支推到所有 clone）。
 4. **`git config --unset` 对不存在的键退 5**：先判存在再删，否则「重复运行不报错」这条就守不住。

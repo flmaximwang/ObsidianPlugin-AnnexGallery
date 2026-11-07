@@ -37,14 +37,15 @@
 | `tools/verify-annex-ops.cjs` | 真仓库层 | `npm run verify:annex` | `context-menu.md` |
 | `tools/verify-sidecar-overwrite.cjs` | 真仓库层 | `npm run verify:sidecar` | `metadata.md` |
 | `tools/verify-gallery.cjs` | 真仓库层 | `npm run verify:gallery` | `gallery.md` |
+| `tools/verify-english.cjs` | 源码层（AST） | `npm run verify:english` | `design.md`（UI language） |
 | `tools/status-gui-check.py` | 真机层 | `npm run gui:status` | `status-bar.md` |
 | `tools/real-gui-check.py` | 真机层 | `npm run gui` | `setting-panel.md` |
 | `scripts/cli.ts` → `tools/annex-gallery.mjs` | CLI | `npm run cli` | `cli.md` |
 | `tools/example-profiles/` | 语料 | — | `cli.md` |
 | `tools/example-profiles/verify-plugin-load.cjs` | 桩层（语料 + 插件加载） | — （手工跑） | `metadata.md` |
 
-> 桩层判的是**外部文件模型**：元数据预设、画廊模板都以 vault 里的文件为准，
-> 登记 / 从预设创建 / 打开 / 取消登记、坏文件在写盘前停下、旧内联配置不迁移 —— 都在 `npm run smoke`
+> 桩层判的是**外部文件模型**：metadata preset、gallery template 都以 vault 里的文件为准，
+> 登记 / Create from preset / 打开 / 取消登记、坏文件在写盘前停下、旧内联配置不迁移 —— 都在 `npm run smoke`
 > 与 `tools/example-profiles/verify-plugin-load.cjs` 里。
 
 ## 输出约定

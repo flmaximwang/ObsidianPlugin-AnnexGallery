@@ -29,7 +29,7 @@ npm run cli -- defaults          # 打印插件内置的 .gitattributes 模板
 
 （等价写法：`node tools/annex-gallery.mjs <子命令> …`。）
 
-## 元数据预设：只有 `--preset <file>` 一种入口
+## metadata preset：只有 `--preset <file>` 一种入口
 
 **CLI 没有任何内置预设。** 一条预设 = 一个 `.json` 文件，**顶层就是一条 `ParseProfile` 对象**
 （文件放在哪儿都行 —— CLI 按当前工作目录找它）：
@@ -56,7 +56,7 @@ node tools/annex-gallery.mjs sidecar ./run --vault /path/to/vault \
 
 | 子命令 | 做什么 | 关键点 |
 |---|---|---|
-| `sidecar <dir>` | 为目录内所有图片生成 `<stem>.md` | 默认 dry-run，`--apply` 才写。`--overwrite` 覆盖重算已存在的 sidecar；`--plan` 只读盘点；`--verify` 逐字节比对、绝不写盘（diff / missing 都会让退出码非零）。`--ask key=value` 给 ask 变量（可给多次），`--sample <name>` 是 `sample` 的便捷写法。`--repo <root>` 指 git 仓库根（脏文件保护用）。 |
+| `sidecar <dir>` | 为目录内所有图片生成 `<stem>.md` | 默认 dry-run，`--apply` 才写。`--overwrite` Recompute all 已存在的 sidecar；`--plan` 只读盘点；`--verify` 逐字节比对、绝不写盘（diff / missing 都会让退出码非零）。`--ask key=value` 给 ask 变量（可给多次），`--sample <name>` 是 `sample` 的便捷写法。`--repo <root>` 指 git 仓库根（脏文件保护用）。 |
 | `gallery <dir>` | 盘点目录并生成 `<文件夹>/<文件夹名>.base` | 默认 dry-run。`--fix-tags` 给旧 sidecar 补 `annex-gallery-metadata` 标签（必须与 `--apply` 同用）。`--template <file>` 给 `.base` 模板路径；不给时用 CLI 自带的画廊预设 `default`（插件运行时没有这个兜底）。 |
 | `profiles --list` | 列出每条预设的 id / name / source / frontmatter 键 / 正文路径 | 一行一条；读不出来的预设也会列出来并写明原因。 |
 | `profiles --check` | 对全部预设跑校验 | 有 error 级问题就退 1；warn 只打印。正文模板的检查需要 `--vault`。 |
@@ -79,7 +79,7 @@ node tools/annex-gallery.mjs sidecar ./run --vault /path/to/vault \
 | 文件 | 作用 |
 |---|---|
 | `make-corpus.sh` | 造几张不同形状/尺寸的合成 PNG，并把目录 `git init` 成仓库；产物只落在 `/tmp` |
-| `plate-profile.json` | 多孔板成像的元数据预设（`plate01_wellA3_4000x_007` 这种形态），与 TECNAI 的约定完全不同 |
+| `plate-profile.json` | 多孔板成像的 metadata preset（`plate01_wellA3_4000x_007` 这种形态），与 TECNAI 的约定完全不同 |
 | 两条带 `match` 的预设 | 演示按路径 / 文件名自动预选；新格式下一条一个 `.json`，所以是两份文件 |
 | `verify-frontmatter.cjs` | 逐份断言产出的 frontmatter：键序 = 预设字典的书写顺序、number 是裸值、text 是双引号、缺值写 YAML null |
 | `verify-plugin-load.cjs` | 用桩环境加载构建产物，把示例预设拆成**一份一个的外部 `.json`** 登记进设置，验证插件读得回、外部改动即时生效、重复 id / 坏 JSON / 文件丢失都会让操作失败、旧内联 profiles 不迁移不参与运行时 |

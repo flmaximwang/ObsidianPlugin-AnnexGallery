@@ -9,7 +9,7 @@
 它是一份**替身**，不是模拟器。原则：
 
 - 只实现被判据用到的那部分 API（`Plugin` / `ItemView` / `Setting` / `Menu` / `Notice` /
-  `addStatusBarItem` / `registerInterval` …），每个实现都尽量薄。
+  `addStatusBarItem` / ` 登记 Interval` …），每个实现都尽量薄。
 - 实现的语义要跟真机一致到「断言能成立」的程度：例如 `setInterval` 记录毫秒数、
   `walk()` 能遍历出 DOM 树、`Menu` 记录项的顺序与图标。
 - **它量不出的东西就别断言**：原生控件的真实宽度、真实 `app.css` 的层叠、外部应用的进程行为，
@@ -19,11 +19,11 @@
 ## `smoke-test.cjs`：加载与入口形状
 
 - 加载 `npm run build` 的产物、跑 `onload()`，断言插件能启用、清理得干净。
-- 断言入口的**形状**：9 个右键菜单项的顺序与图标（第 3 项「创建画廊」的标题随界面语言变）、
-  顶层项只 `preventDefault`、右键文件不出现选项、设置页渲染出的字段（含 remote 区、元数据预设区、
-  画廊模板区）。
-- 断言**外部文件模型**的行为：两类外部文件的登记 / 从预设创建 / 打开 / 取消登记；路径越界、扩展名不对、
-  文件不存在、重复登记都只弹 Notice；元数据预设 JSON 的数组、`{ profiles: [...] }`、坏 JSON、坏正则、
+- 断言入口的**形状**：9 个右键菜单项的顺序与图标（第 3 项是 `layout-grid` 的 `Create Gallery`，标题固定英文）、
+  顶层项只 `preventDefault`、右键文件不出现选项、设置页渲染出的字段（含 remote 区、metadata preset 区、
+  gallery template 区）。
+- 断言**外部文件模型**的行为：两类外部文件的登记 / Create from preset / 打开 / 取消登记；路径越界、扩展名不对、
+  文件不存在、重复登记都只弹 Notice；metadata preset JSON 的数组、`{ profiles: [...] }`、坏 JSON、坏正则、
   文件丢失、跨文件 id 重复、旧格式预设都在行上可见（错误标红、警告另起一行）；运行时重新读外部文件、
   坏文件在写盘前停下；旧内联 profiles 与旧 metadata 模板登记表只提示不迁移。
 - 断言 `styles.css` 里**规则级别的约定**（选择器是否存在、是否用了变量），而不是量几何。

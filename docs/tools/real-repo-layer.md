@@ -15,7 +15,7 @@ annex 对不需要动的文件不说话、`git add` 被 annex 过滤器截回去
 
 ## 各工具判什么
 
-### `verify-init.cjs`（`npm run verify:init`）—— 初始化 gallery
+### `verify-init.cjs`（`npm run verify:init`）—— Initialize gallery
 
 - **幂等**：合规仓库上再跑一次 ⇒ 零写入（内容哈希前后一致、无新提交、配置未动）。
 - **按步补齐**：非 git 目录 → 只 `git init`；非 annex → 补 `git annex init`；已合规 → 不动。
@@ -26,19 +26,19 @@ annex 对不需要动的文件不说话、`git add` 被 annex 过滤器截回去
 ### `verify-annex-ops.cjs`（`npm run verify:annex`）—— 6 个 annex 菜单操作
 
 - 造出「图片进 annex、`.md`/缩略图进 git、另一个仓库有副本、一个文件只有本地一份」的局面。
-- 断言：预览不动字节、真丢释放字节、唯一副本被挡下、目录之外不受影响、`.md` 与缩略图逐字节未动、
+- 断言：预览不动字节、真丢释放字节、唯一副本 skipped、目录之外不受影响、`.md` 与缩略图逐字节未动、
   非仓库目录报错退非零。
 - 也走一遍**插件路径**（菜单 → 弹窗 → 确认），避免「核心对了、接线错了」。
 
-### `verify-sidecar-overwrite.cjs`（`npm run verify:sidecar`）—— 生成元数据重跑
+### `verify-sidecar-overwrite.cjs`（`npm run verify:sidecar`）—— Generate metadata 重跑
 
-- 四条路径：`--plan` 不写盘、默认只补缺失、`--overwrite` 覆盖重算、脏文件保护（改过的 sidecar
+- 四条路径：`--plan` 不写盘、默认 Only add missing、`--overwrite` Recompute all、脏文件保护（改过的 sidecar
   不被静默覆盖）。
 - 断言的是「哪些文件被写、写了什么」，不是「跑了不报错」。
 
 ### `status-check.cjs`（`npm run verify:status`）—— 状态栏三个数字
 
-- 在临时 annex 仓库里构造未提交 / 未跟踪 / 未入库 largefiles 三种局面，断言三个计数的口径。
+- 在临时 annex 仓库里构造 Uncommitted / Untracked / Annex-missing largefiles 三种局面，断言三个计数的口径。
 - 只判数字与解析，不判颜色与几何（那是真机层）。
 
 ### `remotes-check.cjs`（`npm run remotes`）—— remote 设置的读写

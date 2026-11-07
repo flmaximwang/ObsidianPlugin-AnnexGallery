@@ -157,9 +157,9 @@ async function main() {
     writeRandom(path.join(fresh, "photo.bin"), 1024);
     const notice = await initOnce(fresh);
     console.log(`   Notice：${notice.split("\n").slice(0, 6).join(" / ")}`);
-    check(/初始化 gallery 完成/.test(notice), "命令跑完给出「初始化 gallery 完成」报告");
-    check(!/失败/.test(notice), "报告里没有「失败」");
-    check(/annex\.addunlocked：分支已设为 true/.test(notice), "报告里写明「annex.addunlocked：分支已设为 true」");
+    check(/Initialize gallery complete/.test(notice), "命令跑完给出「初始化 gallery 完成」报告");
+    check(!/failed/i.test(notice), "报告里没有「失败」");
+    check(/annex\.addunlocked: branch set to true/.test(notice), "报告里写明「annex.addunlocked：分支已设为 true」");
     check(fs.existsSync(path.join(fresh, ".git")), "盘上出现了 .git");
     check(fs.existsSync(path.join(fresh, ".git/annex")), "盘上出现了 .git/annex（真的是 annex 仓库）");
     check(
@@ -206,9 +206,9 @@ async function main() {
     const configBefore = localConfig(fresh);
     const notice2 = await initOnce(fresh);
     const notice3 = await initOnce(fresh);
-    check(!/失败/.test(notice2) && !/失败/.test(notice3), "两次重复运行都没有「失败」");
-    check(/annex\.addunlocked：分支已是 true，未改动/.test(notice2), "第二次报告写「分支已是 true，未改动」");
-    check(!/本机设置：修/.test(notice2), "第二次报告没有「本机设置：修 …」那一行（没有偏离）");
+    check(!/failed/i.test(notice2) && !/failed/i.test(notice3), "两次重复运行都没有「失败」");
+    check(/annex\.addunlocked: branch is already true, unchanged/.test(notice2), "第二次报告写「分支已是 true，未改动」");
+    check(!/Local settings: repaired/.test(notice2), "第二次报告没有「本机设置：修 …」那一行（没有偏离）");
     check(headBefore !== "" && annexBranchHead(fresh) === headBefore, `git-annex 分支没有新提交（${headBefore.slice(0, 7)} 未变）`);
     check(localConfig(fresh) === configBefore, "本机 .git/config 一个字节没改");
     check(branchSetting("annex.addunlocked", fresh) === "true", "配置仍是 true");
@@ -224,7 +224,7 @@ async function main() {
     const notice4 = await initOnce(legacy);
     check(branchSetting("annex.addunlocked", legacy) === "true", "跑命令后分支配置变成 true");
     check(indexMode("old.bin", legacy) === "120000", "已经 locked 的 old.bin 仍是 120000（addunlocked 只管以后 add 的）");
-    check(/分支已设为 true/.test(notice4), "报告写的是「分支已设为 true」（这一次真的写了配置）");
+    check(/branch set to true/.test(notice4), "报告写的是「分支已设为 true」（这一次真的写了配置）");
     check(
       git(["remote", "get-url", "origin"], legacy).stdout.trim() === "ssh://example.com/gallery",
       "init 不碰已有的 remote（origin 地址逐字节未变）",
@@ -244,8 +244,8 @@ async function main() {
     check(gitLayer("annex.addunlocked", covered) === "", "git 配置层没有值（没有拿本机值糊过去）");
     check(effective("annex.addunlocked", covered) === "true", "生效值回到 true（由分支那份顶着）");
     check(branchSetting("annex.addunlocked", covered) === "true", "分支上仍是 true");
-    check(/本机设置：修 1 项/.test(notice5), "报告有「本机设置：修 1 项」");
-    check(/annex\.addunlocked=false→删/.test(notice5), "报告写明「annex.addunlocked=false→删」");
+    check(/Local settings: repaired 1/.test(notice5), "报告有「本机设置：修 1 项」");
+    check(/annex\.addunlocked=false→unset/.test(notice5), "报告写明「annex.addunlocked=false→删」");
     writeRandom(path.join(covered, "after.bin"), 512);
     git(["annex", "add", "--", "after.bin"], covered);
     check(indexMode("after.bin", covered) === "100644", "修完之后新 add 的文件是 unlocked（100644）");
@@ -257,7 +257,7 @@ async function main() {
     const notice6 = await initOnce(thin);
     check(local("annex.thin", thin) === "", "跑命令后本机 annex.thin 被清掉");
     check(effective("annex.thin", thin) === "", "生效值也没有 thin");
-    check(/annex\.thin=true→删/.test(notice6), "报告写明「annex.thin=true→删」");
+    check(/annex\.thin=true→unset/.test(notice6), "报告写明「annex.thin=true→删」");
 
     // ── 7. 全局配置压偏 → 兜底压一条本机值，且再跑一次不动盘 ──────────────
     console.log("7. 全局配置（GIT_CONFIG_GLOBAL）压偏 → 兜底 + 真幂等");
@@ -274,13 +274,13 @@ async function main() {
     const notice7 = await initOnce(tainted);
     check(effective("annex.addunlocked", tainted) === "true", "生效值被压回 true（本机压过全局的 false）");
     check(effective("annex.thin", tainted) === "false", "生效值被压回 false（本机压过全局的 true）");
-    check(/本机设置：修 2 项/.test(notice7), "报告写明「本机设置：修 2 项」");
+    check(/Local settings: repaired 2/.test(notice7), "报告写明「本机设置：修 2 项」");
     git(["annex", "add", "--", "x.bin"], tainted);
     check(indexMode("x.bin", tainted) === "100644", "新 add 的文件是 unlocked（100644）");
     const configAfterFallback = localConfig(tainted);
     const headAfterFallback = annexBranchHead(tainted);
     const notice8 = await initOnce(tainted);
-    check(!/本机设置：修/.test(notice8), "在同样的全局污染下再跑一次：没有新的修复项（不会来回拉扯）");
+    check(!/Local settings: repaired/.test(notice8), "在同样的全局污染下再跑一次：没有新的修复项（不会来回拉扯）");
     check(localConfig(tainted) === configAfterFallback, "本机 .git/config 没变");
     check(annexBranchHead(tainted) === headAfterFallback, "git-annex 分支没变");
     delete process.env.GIT_CONFIG_GLOBAL;

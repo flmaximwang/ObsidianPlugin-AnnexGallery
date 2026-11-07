@@ -8,7 +8,7 @@
 **画廊（gallery）**：把一个 git + git-annex 目录平铺可视化，让人一眼找到自己要的那几份数据 ——
 一份数据一张卡，封面 + 关键元数据并排，按字段筛选而不是逐层进目录里翻。
 
-**卡片有没有封面，取决于有没有缩略图。** 图片格式由插件生成缩略图与 sidecar；其他类型的数据 ——
+**卡片有没有封面，取决于有没有缩略图。** 图片格式由插件 Generate thumbnails 与 sidecar；其他类型的数据 ——
 Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出缩略图并把 sidecar 的 `thumbnail` 指向它，
 画廊就会用同样的方式展示它。这条分工是设计上的取舍：**插件不解析数据格式**，只认
 「文件 + 缩略图 + 元数据」这个三件套契约，所以任何新格式都不需要插件发版就能进库。
@@ -16,10 +16,19 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
 **数据层不新造**：仓库仍然是 git + git-annex 仓库，插件只在上面加「元数据」与「视图」，
 不引入数据库、不改存储布局；习惯用命令行的人照旧能用 `git annex` 做同样的事。
 
+## UI language
+
+All plugin-authored user-facing text is **English-only** until bilingual UI (i18n) support exists. This
+covers the settings page, notices, modals, status text, progress/result messages, errors, hints and
+shipped preset display text. New features ship English-only too.
+
+Stable IDs, configuration keys, `data.json` keys and user-authored values are never translated: they
+stay byte-identical so existing vaults keep working.
+
 ## 六条设计原则
 
-1. **一个派生文件只有一个 owner。** 缩略图只由「生成缩略图」写，sidecar 只由「生成元数据」写，
-   画廊 `.base` 只由「创建画廊」写（见 [`gallery.md`](gallery.md)）；
+1. **一个派生文件只有一个 owner。** 缩略图只由「Generate thumbnails」写，sidecar 只由「Generate metadata」写，
+   画廊 `.base` 只由「Create Gallery」写（见 [`gallery.md`](gallery.md)）；
    三者都必须可重跑、必须幂等 —— 重跑的结果要么与上次一致，要么明确告诉操作者改了什么。
 2. **派生文件必须不进 annex。** `.md` / `.thumbnail.png` / `.base` 靠 `.gitattributes` 的
    `annex.largefiles=nothing` 钉在 git 里 —— 否则一次 `git annex add` 会把它们变成软链，
@@ -28,16 +37,16 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
    「能不能丢」交给 git-annex 判定（默认只丢「别处有副本」的内容），插件不提供 `--force` 的入口。
 4. **插件不猜文件系统。** 子路径交给 `git rev-parse --show-prefix` 算，不用 `path.relative` ——
    同一个目录的两种写法（如 macOS 上 `/var` 与 `/private/var`）会让 annex 认为路径在仓库外。
-5. **配置驱动。** 文件名约定是数据：一条元数据预设 = 一条正则 + 一个 frontmatter 字典（键序、类型、
+5. **配置驱动。** 文件名约定是数据：一条 metadata preset = 一条正则 + 一个 frontmatter 字典（键序、类型、
    固定值都写在字典里）+ 可选的正文模板；加一种新命名法只改 vault 里的一个 `.json`，不改代码。
 6. **判据先于实现。** 每个入口都有可复跑的命令行判据（离屏、真 annex 仓库、真机三层，见
    `tools/`），改完先跑判据再谈「看起来对」。
 
 ## 三条贯穿全插件的约定
 
-1. **初始化 gallery 的作用域 = 当前打开的 vault 根**（不是某个子文件夹），并且必须可重复执行：
+1. **Initialize gallery 的作用域 = 当前打开的 vault 根**（不是某个子文件夹），并且必须可重复执行：
    已经合规的仓库上重跑，零写入、零报错。
-2. **缩略图边长默认 256**，与 `.base` 的 `cardSize` 约定一致 —— 两者不等会把封面放大、发虚。
+2. **Thumbnail edge 默认 256**，与 `.base` 的 `cardSize` 约定一致 —— 两者不等会把封面放大、发虚。
 3. **远端配置以 `.git/config` 为唯一真相**（special remote 的 type 另在 git-annex 分支）：
    设置页打开时从 git 读 remote，编辑只留在内存里，点
    Save 才按 remove → rename → set-url → add 的顺序写回；插件不代做 `fetch` / `push`，多 URL
@@ -55,7 +64,7 @@ Obsidian 既打不开、也解析不了的那些 —— 由使用者自己产出
 | `<vault>` | Obsidian vault 根目录 |
 | `<vault name>` | vault 根目录的名字（不含路径） |
 | `<folder>` | vault 内的一个文件夹（相对 vault 的路径） |
-| `<id>` | 一条元数据预设 / 模板的稳定机器 id |
+| `<id>` | 一条 metadata preset / 模板的稳定机器 id |
 | `<repo>` | 本插件仓库根 |
 | `<count>` | 任意数量（文件数、行数、字节数） |
 | `<ms>` | 任意耗时 |

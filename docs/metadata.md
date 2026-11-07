@@ -1,6 +1,10 @@
-# 元数据预设（preset）与 sidecar 渲染
+# Metadata presets and sidecar rendering
 
-「生成元数据」写出的 sidecar（`<stem>.md`）由**元数据预设**驱动：一条预设 =
+> **UI language:** all plugin-authored user-facing text is English-only until bilingual UI (i18n) support exists.
+> This covers settings, notices, modals, status text, progress/results, errors, hints and shipped preset display text.
+> Stable IDs, configuration keys and user-authored values are never translated.
+
+「Generate metadata」写出的 sidecar（`<stem>.md`）由**metadata preset**驱动：一条预设 =
 一条正则 + 具名捕获组 → **frontmatter 字典**（键顺序、值类型、固定值都写在字典里）
 + 可选的正文模板（vault 里的 `.md`）。
 
@@ -9,11 +13,11 @@ schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的 
 [`src/core/profile-files.ts`](../src/core/profile-files.ts)，渲染在
 [`src/core/sidecar.ts`](../src/core/sidecar.ts)。
 
-**预设从哪来（冻结口径）**：运行时的唯一来源是设置页「元数据预设」里登记的**外部 `.json` 文件** ——
+**预设从哪来（冻结口径）**：运行时的唯一来源是设置页「metadata preset」里登记的**外部 `.json` 文件** ——
 **一份 JSON = 一条预设**，顶层必须是一条 `ParseProfile` 对象（数组、`{ "profiles": [...] }` 都不接受）。
 `data.json` 里只存 `profileFiles: [{ path }]`（vault 相对路径）；`id` / `name` / `frontmatter` 一律以
 文件内容为准。旧的内联 `profiles` 数组**不读、不迁移、不删除**（设置页只显示一条失效提示）。
-右键 **Annex Gallery → 生成元数据** 的弹窗按 `match` 自动预选、并列出全部已登记的预设让人挑；
+右键 **Annex Gallery → Generate metadata** 的弹窗按 `match` 自动预选、并列出全部已登记的预设让人挑；
 预设的选择与 ask 值都按文件夹记住。
 
 ## 一条预设的字段
@@ -71,8 +75,8 @@ schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的 
 | 变量 | 值 | 备注 |
 |---|---|---|
 | `stem` | 文件名去掉最后一个扩展名 | **不可覆盖**：正则组也叫 `stem` 时仍然取文件名。 |
-| `tags` | 图片所在目录相对 vault 的**第一段路径** | 例如 `20260417-run/批次A/xxx.tif` ⇒ `20260417-run`。 |
-| `session` | 图片所在文件夹名 | 例如 `批次A`。 |
+| `tags` | 图片所在目录相对 vault 的**第一段路径** | 例如 `20260417-run/批次 A/xxx.tif` ⇒ `20260417-run`。 |
+| `session` | 图片所在文件夹名 | 例如 ` 批次 A`。 |
 | `date` | `session` 前 8 位数字 → `YYYY-MM-DD` | `session` 不是 `YYYYMMDD…` 开头 ⇒ 空值。 |
 | `width` / `height` | `magick identify` 得到的像素宽高 | `magick` 失败 ⇒ 空值。 |
 | `size` | 文件字节数 | |
@@ -144,11 +148,11 @@ schema 的唯一真相是 [`src/core/profiles.ts`](../src/core/profiles.ts) 的 
 
 每份 sidecar 都带一条 detail，写清这一份的异常（正常时没有）：
 
-- `stem "xxx" 不符合预设 <id> 的正则` —— 主正则没命中（`onMismatch: "empty"` 时仍然生成）。
-- `正则组没参与匹配：a,b` —— 可选组没命中。
-- `空值（写成 YAML null）：sample` —— 取不到值或值为空的键。
-- `列表里的空项已丢弃：keywords` —— 列表里有整项被丢掉。
-- `没有来源的占位符：{{fooo}}` —— 占位符既不是捕获组、也不是 ask、也不是内置变量。
+- `stem "xxx" 不符合预设 <id> 的正则 ` —— 主正则没命中（`onMismatch: "empty"` 时仍然生成）。
+- ` 正则组没参与匹配：a,b` —— 可选组没命中。
+- ` 空值（写成 YAML null）：sample` —— 取不到值或值为空的键。
+- ` 列表里的空项已丢弃：keywords` —— 列表里有整项被丢掉。
+- ` 没有来源的占位符：{{fooo}}` —— 占位符既不是捕获组、也不是 ask、也不是内置变量。
 
 ## 正文模板（`template`）
 
@@ -309,9 +313,9 @@ tif: "[[20260417-plate-run/plate01_wellA3_4000x_007.png]]"
 detail 记「正则组没参与匹配：well」「空值（写成 YAML null）：well」。
 `instrument` 是**固定值**，直接写在字典里 —— 没有 `constFields` 这一层了。
 
-## 内置预设素材（「从预设创建」）
+## 内置预设素材（「Create from preset」）
 
-设置页的「从预设创建…」会写出**两份**文件（同名加序号，不覆盖、不自动打开）：
+设置页的「Create from preset…」会写出**两份**文件（同名加序号，不覆盖、不自动打开）：
 
 | 预设 id | 写出的 JSON | 写出的正文 |
 |---|---|---|
@@ -327,7 +331,7 @@ JSON 里的 `template` 写成正文**实际**落盘的路径。素材原文在
 
 2.0 及更早的预设（顶层带 `keyOrder` / `fields` / `constFields` / `pathFields` / `whenMissing` /
 `metadataTemplate`）**不迁移、不改写、不删除**：文件原样留在 vault 里，加载时给出明确错误，
-设置页据此显示非阻塞提示，引导用户用「从预设创建」生成新格式的 `.json`，再把字段手工搬过去。
+设置页据此显示非阻塞提示，引导用户用「Create from preset」生成新格式的 `.json`，再把字段手工搬过去。
 旧的 metadata 模板登记表（`data.json` 的 `metadataTemplates`）同样不再被读取，旧正文文件也仍在 vault 里。
 
 对照表：
@@ -436,7 +440,7 @@ CLI **只认 `--preset <file>`**：给的是**文件路径**（相对当前工�
 
 | 命令 | 钉住什么 |
 |---|---|
-| `npm run verify:sidecar` | 重跑语义：`--plan` 不写盘、默认只补缺失、`--overwrite` 覆盖重算、脏文件保护 |
+| `npm run verify:sidecar` | 重跑语义：`--plan` 不写盘、默认 Only add missing、`--overwrite` Recompute all、脏文件保护 |
 | `npm run verify:gallery` | 标签：sidecar 的 `tags` 里恒有 `annex-gallery-metadata`；`.base` 的属性顺序跟随预设字典的键序 |
 | `npm run smoke` | 外部预设 JSON 的登记 / 各种坏法（数组、`{ profiles: [...] }`、坏 JSON、坏正则、文件丢失、跨文件 id 重复）、旧格式预设的行内错误、运行时重读外部内容、坏文件在写盘前停下 |
 | `npm test` | sidecar 与 annex 操作的组合场景（含内容逐字节不变的断言） |

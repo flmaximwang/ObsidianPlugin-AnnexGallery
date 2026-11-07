@@ -91,7 +91,7 @@ export class ProfileEditor {
     try {
       vaultRoot = this.host.vaultRoot();
     } catch (error) {
-      rootError = `读不了 vault 路径：${errText(error)}`;
+      rootError = `Cannot read the vault path: ${errText(error)}`;
     }
 
     const rows = this.buildRows(refs, vaultRoot, rootError);
@@ -101,8 +101,8 @@ export class ProfileEditor {
       list.createDiv({
         cls: "annex-profiles-empty",
         text:
-          "还没有登记元数据预设。填 vault 里的 .json 路径点「登记」，或用「从预设创建…」生成一份" +
-          "（frontmatter 与可选的正文模板都写在这份 .json 里）。",
+          "No metadata presets registered yet. Enter a vault .json path and press Register, or create one with Create from preset…" +
+          " (frontmatter and an optional body template live in that .json file).",
       });
       return;
     }
@@ -117,10 +117,10 @@ export class ProfileEditor {
     const input = toolbar.createEl("input", { cls: "annex-profile-path-input", type: "text" });
     input.setAttr(
       "placeholder",
-      "vault 里的元数据预设路径（.json，一条预设一个文件；frontmatter / 正文模板写在文件里）",
+      "Vault path to a metadata preset (.json; one preset per file; frontmatter / body template live inside)",
     );
 
-    const register = toolbar.createEl("button", { cls: "annex-profile-register", text: "登记" });
+    const register = toolbar.createEl("button", { cls: "annex-profile-register", text: "Register" });
     const submit = (): void => void this.register(input.value);
     register.addEventListener("click", submit);
     input.addEventListener("keydown", (event) => {
@@ -128,9 +128,9 @@ export class ProfileEditor {
     });
 
     const presetSelect = toolbar.createEl("select", { cls: "dropdown annex-profile-preset" });
-    presetSelect.createEl("option", { text: "从预设创建…", value: "" });
+    presetSelect.createEl("option", { text: "Create from preset…", value: "" });
     for (const preset of PRESET_PROFILES) {
-      presetSelect.createEl("option", { text: `${preset.name}（${preset.id}）`, value: preset.id });
+      presetSelect.createEl("option", { text: `${preset.name} (${preset.id})`, value: preset.id });
     }
     presetSelect.addEventListener("change", () => {
       const chosen = PRESET_PROFILES.find((preset) => preset.id === presetSelect.value);
@@ -158,7 +158,7 @@ export class ProfileEditor {
         index,
         ref,
         inspection,
-        ...(errors.length > 0 ? { error: errors.join("；") } : {}),
+        ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
         warnings,
       };
     });
@@ -179,7 +179,7 @@ export class ProfileEditor {
       if (id === undefined) continue;
       const paths = pathsById.get(id) ?? [];
       if (paths.length > 1) {
-        row.error = `元数据预设 id「${id}」重复登记：${paths.join("、")}（请删掉多余的一条，或修改其中一份 JSON 的 id）`;
+        row.error = `Metadata preset id "${id}" is registered more than once: ${paths.join(", ")} (remove the duplicate, or change the id in one of the JSON files)`;
       }
     }
   }
@@ -200,18 +200,18 @@ export class ProfileEditor {
 
     const rawName = row.inspection?.profile?.name;
     const name = typeof rawName === "string" ? rawName.trim() : "";
-    el.createSpan({ cls: "annex-profile-name", text: name === "" ? "（未命名）" : name });
+    el.createSpan({ cls: "annex-profile-name", text: name === "" ? "(unnamed)" : name });
     if (id !== undefined) {
       el.createSpan({ cls: "annex-profile-id", text: `id: ${id}` });
     }
     el.createSpan({ cls: "annex-profile-path", text: row.ref.path });
 
-    const open = el.createEl("button", { cls: "annex-profile-open", text: "打开" });
-    open.setAttr("aria-label", "用系统默认应用打开这份 JSON（改完在设置页重新读取即可生效）");
+    const open = el.createEl("button", { cls: "annex-profile-open", text: "Open" });
+    open.setAttr("aria-label", "Open this JSON with the system default application (changes are picked up when Settings reloads)");
     open.addEventListener("click", () => void this.open(row.ref));
 
-    const remove = el.createEl("button", { cls: "annex-profile-del mod-warning", text: "删除" });
-    remove.setAttr("aria-label", "取消登记（不删除文件）");
+    const remove = el.createEl("button", { cls: "annex-profile-del mod-warning", text: "Remove" });
+    remove.setAttr("aria-label", "Unregister (the file is not deleted)");
     remove.addEventListener("click", () => void this.unregister(row.index));
 
     if (row.error !== undefined) {
@@ -228,7 +228,7 @@ export class ProfileEditor {
     try {
       relPath = resolveVaultFile(this.host.vaultRoot(), raw, "profile").relPath;
     } catch (error) {
-      new Notice(`登记失败：${errText(error)}`, 10000);
+      new Notice(`Registration failed: ${errText(error)}`, 10000);
       return;
     }
 
@@ -236,14 +236,14 @@ export class ProfileEditor {
       (ref) => ref.path === relPath || normalizedOrNull(ref.path) === relPath,
     );
     if (duplicate) {
-      new Notice(`这个文件已经登记过：${relPath}`);
+      new Notice(`This file is already registered: ${relPath}`);
       return;
     }
 
     this.host.settings.profileFiles.push({ path: relPath });
     await this.host.saveSettings();
     this.render();
-    new Notice(`已登记：${relPath}`);
+    new Notice(`Registered: ${relPath}`);
   }
 
   /**
@@ -262,7 +262,7 @@ export class ProfileEditor {
         loaded.map((entry) => entry.profile.id),
         preset.id,
       );
-      const name = id === preset.id ? preset.name : `${preset.name}（副本）`;
+      const name = id === preset.id ? preset.name : `${preset.name} (copy)`;
 
       let templatePath = "";
       if (preset.body !== undefined) {
@@ -274,9 +274,9 @@ export class ProfileEditor {
       this.host.settings.profileFiles.push({ path: relPath });
       await this.host.saveSettings();
       this.render();
-      new Notice(`已从预设创建：${relPath}`);
+      new Notice(`Created from preset: ${relPath}`);
     } catch (error) {
-      new Notice(`从预设创建失败：${errText(error)}`, 12000);
+      new Notice(`Create from preset failed: ${errText(error)}`, 12000);
     }
   }
 
@@ -286,7 +286,7 @@ export class ProfileEditor {
       const file = resolveVaultFile(this.host.vaultRoot(), ref.path, "profile");
       await this.host.openWithDefaultApp(file.absPath);
     } catch (error) {
-      new Notice(`打不开「${ref.path}」：${errText(error)}`, 12000);
+      new Notice(`Cannot open "${ref.path}": ${errText(error)}`, 12000);
     }
   }
 
@@ -297,6 +297,6 @@ export class ProfileEditor {
     this.host.settings.profileFiles.splice(index, 1);
     await this.host.saveSettings();
     this.render();
-    new Notice(`已取消登记（文件未删除）：${target.path}`);
+    new Notice(`Unregistered (file not deleted): ${target.path}`);
   }
 }

@@ -1,4 +1,8 @@
-# Status bar：未提交 / 未跟踪 / 未入库 largefiles
+# Status bar：Uncommitted / Untracked / Annex-missing largefiles
+
+> **UI language:** all plugin-authored user-facing text is English-only until bilingual UI (i18n) support exists.
+> This covers settings, notices, modals, status text, progress/results, errors, hints and shipped preset display text.
+> Stable IDs, configuration keys and user-authored values are never translated.
 
 > 状态栏那一行的**唯一口径**：它替谁回答什么问题、三个数字各自怎么数、刷新与交互上有哪些不变量、
 > 代码落在哪、以及用什么判据钉住。
@@ -14,27 +18,27 @@
 「要不要跑一次 add / 要不要 commit」。
 
 ```
-未提交 <a> · 未跟踪 <b> · 未入库 largefiles <c>  ⟳
+Uncommitted <a> · Untracked <b> · Annex-missing largefiles <c>  ⟳
 └──────── .annex-status-counts ────────────────┘  └ .annex-status-refresh（refresh-cw）
 ```
 
 （`<a>` / `<b>` / `<c>` 是三个各自独立计的数。）
 
 这一行 = `addStatusBarItem()` 返回的 `<div class="status-bar-item annex-status-bar">`，**一个窗口一行**；
-插件卸载时随 `registerInterval` / `registerDomEvent` 一起回收，不留 handler。
+插件卸载时随 ` 登记 Interval` / ` 登记 DomEvent` 一起回收，不留 handler。
 
 **不可统计时不隐藏、也不只显示 `—`**：同一位置换成「原因 + 出路」，并且那一行仍可点。状态栏是遇到
-「未初始化」的第一个地方，藏起来等于把唯一的入口藏了。
+`Not initialized` 的第一个地方，藏起来等于把唯一的入口藏了。
 
 ## 三个计数的口径
 
 | 计数 | 定义 | 为什么必须有这一个 |
 |---|---|---|
-| 未提交 | 已跟踪文件的改动（staged + unstaged）= `git status --porcelain -uall` 里**非 `??`** 的行数；`MM` 也只算一行 | 这一批已经进了 index/历史，缺的是 commit。插件不代劳 commit，所以只能把量报出来 |
-| 未跟踪 | 同一份输出里 `??` 开头的行数；用 `-uall`，**一个文件一行** | 这一批既不在 git、也不在 annex，`git annex add` 不会碰它，是三个口径里最容易被忘掉的一批 |
-| 未入库 largefiles | `git annex add --dry-run --json` 里 note **不含** `git repository` 的文件数（会进 annex 的那些） | 这是「库」的完整性：文件只在 annex 里才算入库。这个数决定要不要跑一次 `git annex add` |
+| Uncommitted | 已跟踪文件的改动（staged + unstaged）= `git status --porcelain -uall` 里**非 `??`** 的行数；`MM` 也只算一行 | 这一批已经进了 index/历史，缺的是 commit。插件不代劳 commit，所以只能把量报出来 |
+| Untracked | 同一份输出里 `??` 开头的行数；用 `-uall`，**一个文件一行** | 这一批既不在 git、也不在 annex，`git annex add` 不会碰它，是三个口径里最容易被忘掉的一批 |
+| Annex-missing largefiles | `git annex add --dry-run --json` 里 note **不含** `git repository` 的文件数（会进 annex 的那些） | 这是「库」的完整性：文件只在 annex 里才算入库。这个数决定要不要跑一次 `git annex add` |
 
-三个数而不是一个总数，是因为它们对应文件可能停留的三个不同位置（工作树未跟踪 / index 里未提交 /
+三个数而不是一个总数，是因为它们对应文件可能停留的三个不同位置（工作树 Untracked / index 里 Uncommitted /
 annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什么都不用做）。合成一个数就分不出
 「该 add」和「该 commit」。
 
@@ -42,54 +46,54 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
 
 - **范围 = 整个 vault 所在的仓库**：从 `git rev-parse --show-toplevel` 拿仓库根（vault 通常就是仓库根），
   两条命令都在仓库根跑、不带路径过滤，出**一个总数**，不按文件夹拆。
-- **同一个文件可以在两个口径里各算一次**：已 annexed 的图解锁后改过、还没重新 add，则「未提交」与
-  「未入库」都非零。这不是重复计数，是两个不同的问题都还没解决。
+- **同一个文件可以在两个口径里各算一次**：已 annexed 的图解锁后改过、还没重新 add，则「Uncommitted」与
+  「Annex-missing」都非零。这不是重复计数，是两个不同的问题都还没解决。
 
 ## 刷新与交互的不变量
 
 | 不变量 | 形态 | 为什么 |
 |---|---|---|
-| 轮询间隔 | `this.registerInterval(window.setInterval(..., this.statusRefreshMs))`，`statusRefreshMs = STATUS_REFRESH_MS = 30_000` | 30 秒是「足够快地发现刚 add 完的那批」与「不无谓跑子进程」之间的取值；间隔只从常量来，不在调用点写字面量，冒烟测试直接读字段断言 |
+| 轮询间隔 | `this.登记 Interval(window.setInterval(..., this.statusRefreshMs))`，`statusRefreshMs = STATUS_REFRESH_MS = 30_000` | 30 秒是「足够快地发现刚 add 完的那批」与「不无谓跑子进程」之间的取值；间隔只从常量来，不在调用点写字面量，冒烟测试直接读字段断言 |
 | 点击 | 整行可点 = `onStatusClick()`：可统计 → `refreshStatus()`；`uninitialized` → `runInit()`，跑完自动重算 | 不整块可点的话，「看一眼数字」和「做下一步」就是两处入口；这一行本身就是入口 |
 | 单飞 | 同一时刻只跑一趟 git 子进程；期间的请求只登记一个标记，当前这趟跑完再补一趟 | 连点/轮询撞在一起时不叠进程，也不会丢最后一次请求 |
-| busy 态 | `data-busy="true"` 时刷新图标半透明（这一趟还没跑完）；重载后首趟是 `统计中…` + `data-level="loading"` | 耗时随 vault 的文件数增长、不是零成本，所以要能看出「正在算」而不是「算出来是 0」 |
+| busy 态 | `data-busy="true"` 时刷新图标半透明（这一趟还没跑完）；重载后首趟是 `Counting…` + `data-level="loading"` | 耗时随 vault 的文件数增长、不是零成本，所以要能看出「正在算」而不是「算出来是 0」 |
 | `aria-label` | 写**口径**，不写标语：仓库路径、三个计数各是什么、刷新节奏 | 定义放不进状态栏那一行，但解释必须随手可得 |
 
 `aria-label` 的文案模板（多行）：
 
 ```
-仓库：/Users/<user>/Documents/Lab/<library>/Data_<library>
-未提交：已跟踪文件的改动（staged + unstaged），= git status --porcelain -uall 的行数
-未跟踪：同一份输出里 ?? 开头的文件数（一个文件一行）
-未入库 largefiles：git annex add --dry-run 里会进 annex 的文件数（.md / .thumbnail.png / .base 按 .gitattributes 进 git，不算）
-每 30 秒自动刷新 · 点击这一行立即刷新
+Repository: /Users/<user>/Documents/Lab/<library>/Data_<library>
+Uncommitted: changes in tracked files (staged + unstaged) = lines from git status --porcelain -uall
+Untracked: files starting with ?? in the same output (one file per line)
+Annex-missing largefiles: files that would enter annex according to git annex add --dry-run (.md / .thumbnail.png / .base go to git via .gitattributes and do not count)
+Refreshes every 30 s · click this line to refresh now
 ```
 
-最后一行跟着当前状态换（`初始化 gallery` / `重新统计` / `立即刷新`）—— 因为点击的含义随
+最后一行跟着当前状态换（`Initialize gallery` / `Recount` / `Refresh now`）—— 因为点击的含义随
 `uninitialized` 变，提示若不自洽就成了一句错话。
 
 ## 不可统计的三档：写明原因 + 给出路
 
 | 情形 | 状态栏文字 | 悬停提示里的原因 | 点击 |
 |---|---|---|---|
-| 不是 git 仓库 | `未初始化 · 点击初始化 gallery` | 不是 git 仓库（未初始化） | 跑「初始化 gallery」 |
-| 不是 git-annex 仓库 | `未初始化 · 点击初始化 gallery` | 不是 git-annex 仓库（未初始化 annex） | 跑「初始化 gallery」 |
-| 找不到 git-annex 命令 | `无法统计：找不到 git-annex 命令（brew install git-annex）` | 同上 | 重新统计 |
+| Not a git repository | `Not initialized · click to initialize gallery` | Not a git repository (not initialized) | Run Initialize gallery |
+| Not a git-annex repository | `Not initialized · click to initialize gallery` | Not a git-annex repository (annex not initialized) | Run Initialize gallery |
+| git-annex not found | `Cannot count: git-annex was not found (brew install git-annex)` | same as above | Recount |
 
-前两档合并成一句「未初始化」，因为对状态栏这一行来说它们要做的动作是同一个；区别留在悬停提示里。
+前两档合并成一句 `Not initialized`，因为对状态栏这一行来说它们要做的动作是同一个；区别留在悬停提示里。
 
 「找不到 git-annex」有两种来路，别混：**真的没装**，与**装了但 GUI 的 PATH 里没有它**。从 Finder / Dock
 启动的 Obsidian 继承的是 launchd 的那份极小 PATH（`/usr/bin:/bin:/usr/sbin:/sbin`），Homebrew 的
 `/opt/homebrew/bin` 不在里面 —— `git` 找得到（`/usr/bin/git`），`git annex` 却退化成
 `git: 'annex' is not a git command. See 'git --help'.`（exit 1），后者才是本插件必须自己处理的。做法是给
 **每个子进程**的 PATH 末尾补上常见可执行目录（见下节），于是「装了但 GUI 看不见」这一档不再出现；真的
-一个都找不到时，状态栏写「找不到 git-annex 命令（brew install git-annex）」，悬停提示里写明是 PATH 的问题
+一个都找不到时，状态栏写 `git-annex was not found (brew install git-annex)`，悬停提示里写明是 PATH 的问题
 （细节与复现见 [`issues/git-annex-not-on-gui-path_2026.10.19.md`](../issues/git-annex-not-on-gui-path_2026.10.19.md)）。
 
 同一根因还会让 **`git status` 自己失败**：`git annex init` 写下的 `* filter=annex` 与
 `filter.annex.process = git-annex filter-process` 意味着「工作树里尺寸不变的改动」必须过 clean filter 才算得出
 哈希，这时 git 报 `git-annex filter-process: git-annex: command not found`（exit 128）—— 连前两个数都拿不到。
-两条命令的失败点因此都要认这两种原文，各自报同一句「找不到 git-annex 命令」。
+两条命令的失败点因此都要认这两种原文，各自报同一句 `git-annex was not found`。
 
 ## 数据来源与为什么是异步
 
@@ -145,30 +149,30 @@ annex 里已入库），**下一步动作各不相同**（`add` / `commit` / 什
 | 场景 | 期望 |
 |---|---|
 | 干净仓库 | 三个数全 0 |
-| 拷进 `<n>` 张图 + 1 个 md（都未跟踪） | 未跟踪 = 拷入的文件数；未入库只数图（md 进 git，不算） |
-| `git annex add .` 之后（已 add 未 commit） | 未提交 = 已 add 的文件数；未入库归 0 |
+| 拷进 `<n>` 张图 + 1 个 md（都 Untracked） | Untracked = 拷入的文件数；Annex-missing 只数图（md 进 git，不算） |
+| `git annex add .` 之后（已 add 未 commit） | Uncommitted = 已 add 的文件数；Annex-missing 归 0 |
 | commit 之后 | 三个数全 0 |
-| 解锁后改一张已 annexed 的图（未重新 add） | 未提交与未入库**都变成非零** —— 同一个文件在两个口径里各算一次 |
-| 重新 add | 未入库归 0；未提交仍计（还没 commit） |
-| 未跟踪目录里放多个文件 | 未跟踪 = 文件数（不是目录数） |
+| 解锁后改一张已 annexed 的图（未重新 add） | Uncommitted 与 Annex-missing**都变成非零** —— 同一个文件在两个口径里各算一次 |
+| 重新 add | Annex-missing 归 0；Uncommitted 仍计（还没 commit） |
+| Untracked 目录里放多个文件 | Untracked = 文件数（不是目录数） |
 | 被 `.gitignore` 忽略的 `.obsidian` 下的文件 | 三个数都不变（dry-run 尊重忽略规则） |
-| 非 annex 仓库 / 非 git 目录 | `未初始化 · 点击初始化 gallery` |
-| PATH 只剩 launchd 那四个目录（= 从 Finder / Dock 启动的 Obsidian） | 三个数与终端里**逐个相同**；关掉补 PATH（`ANNEX_GALLERY_NO_PATH_FIX=1`）时变成 `无法统计：找不到 git-annex 命令（brew install git-annex）` |
-| 空目录点一下状态栏（= 初始化 gallery） | 初始化成功，那一行变成可统计的三段（未跟踪 = 盘上原本就在的文件） |
+| 非 annex 仓库 / 非 git 目录 | `Not initialized · click to initialize gallery` |
+| PATH 只剩 launchd 那四个目录（= 从 Finder / Dock 启动的 Obsidian） | 三个数与终端里**逐个相同**；关掉补 PATH（`ANNEX_GALLERY_NO_PATH_FIX=1`）时变成 ` 无法统计：找不到 git-annex 命令（brew install git-annex）` |
+| 空目录点一下状态栏（= Initialize gallery） | 初始化成功，那一行变成可统计的三段（Untracked = 盘上原本就在的文件） |
 
 这些场景**全 PASS** 才算口径成立；出现 FAIL 时按下面五条查是哪一层错。
 
 ## 五个「不量就会写错」的判定要点
 
-1. **「未入库」的判据只能是 `git annex add --dry-run`**（`--json` 的 `note` 字段）。它列的是
+1. **「Annex-missing」的判据只能是 `git annex add --dry-run`**（`--json` 的 `note` 字段）。它列的是
    **「还没 add 进 index 的文件」**：已跟踪、但内容改过还没重新 add 的大文件也在里面。所以
-   「未入库」= **没 add 进 annex**，**不是**「没 commit」—— verify:status 里两条断言把这层区分钉住了
-   （`git annex add .` 之后未提交非零、而未入库归 0）。
-2. **必须 `git status --porcelain -uall`**：默认的 `-unormal` 把整个未跟踪目录压成 `?? dir/` 一行，
-   未跟踪数会变成「目录数」。verify:status 并存断言了这两种输出（同一批文件，两种口径给出两个不同的数）。
+   「Annex-missing」= **没 add 进 annex**，**不是**「没 commit」—— verify:status 里两条断言把这层区分钉住了
+   （`git annex add .` 之后 Uncommitted 非零、而 Annex-missing 归 0）。
+2. **必须 `git status --porcelain -uall`**：默认的 `-unormal` 把整个 Untracked 目录压成 `?? dir/` 一行，
+   Untracked 数会变成「目录数」。verify:status 并存断言了这两种输出（同一批文件，两种口径给出两个不同的数）。
 3. **同一时刻只跑一趟子进程**：状态栏的价值在「随时可看」，不在「点得越快越好」。单飞 + 补一趟，
    避免连点把 git 进程叠起来 —— 代价是点击后最多等一趟的延迟，这个代价可以接受。
-4. **未初始化那一档也是入口**：点一下就真跑「初始化 gallery」（`git init -b main` + `git annex init` +
+4. **`Not initialized` 那一档也是入口**：点一下就真跑「Initialize gallery」（`git init -b main` + `git annex init` +
    git-annex 分支 `annex.addunlocked=true`（并按标准状态修本机覆盖 / `thin`）+ 合并
    `.gitattributes` / `.gitignore`，口径见 [`docs/commands.md`](commands.md)），盘上复核 `.git/annex` 出现，
    不是只看 Notice 文案。
@@ -199,11 +203,11 @@ npm run gui:status -- --reload  # 先把插件关/开一次（会改运行中的
 1.14.4 实测）：
 
 ```bash
-obsidian vault=<vault名> dev:dom selector=".annex-status-bar" text           # 那一行的文字
-obsidian vault=<vault名> dev:dom selector=".annex-status-bar" attr=data-level
-obsidian vault=<vault名> dev:dom selector=".annex-status-bar .annex-status-counts" css=color  # 整份 computed style
-obsidian vault=<vault名> plugin:reload id=annex-gallery                      # 换上 vault 里的 main.js，不重启 app
-obsidian vault=<vault名> eval 'code=document.querySelector(".annex-status-bar")?.dataset.level'  # 返回 `=> dirty`
+obsidian vault=<vault 名> dev:dom selector=".annex-status-bar" text           # 那一行的文字
+obsidian vault=<vault 名> dev:dom selector=".annex-status-bar" attr=data-level
+obsidian vault=<vault 名> dev:dom selector=".annex-status-bar .annex-status-counts" css=color  # 整份 computed style
+obsidian vault=<vault 名> plugin:reload id=annex-gallery                      # 换上 vault 里的 main.js，不重启 app
+obsidian vault=<vault 名> eval 'code=document.querySelector(".annex-status-bar")?.dataset.level'  # 返回 `=> dirty`
 ```
 
 `dev:dom css=<prop>` 打印的是**整份** computed style（不是只那一项），`eval` 的结果带 `=> ` 前缀。
@@ -215,12 +219,12 @@ obsidian vault=<vault名> eval 'code=document.querySelector(".annex-status-bar")
 
 ```html
 <div class="status-bar-item plugin-annex-gallery annex-status-bar" data-level="dirty" data-busy="false"
-     aria-label="仓库：/Users/<user>/Documents/Lab/<library>/Data_<library>
-未提交：已跟踪文件的改动（staged + unstaged），= git status --porcelain -uall 的行数
-未跟踪：同一份输出里 ?? 开头的文件数（一个文件一行）
-未入库 largefiles：git annex add --dry-run 里会进 annex 的文件数（.md / .thumbnail.png / .base 按 .gitattributes 进 git，不算）
-每 30 秒自动刷新 · 点击这一行立即刷新">
-  <span class="annex-status-counts">未提交 <a> · 未跟踪 <b> · 未入库 largefiles <c></span>
+     aria-label="Repository: /Users/<user>/Documents/Lab/<library>/Data_<library>
+Uncommitted: changes in tracked files (staged + unstaged) = lines from git status --porcelain -uall
+Untracked: files starting with ?? in the same output (one file per line)
+Annex-missing largefiles: files that would enter annex according to git annex add --dry-run (.md / .thumbnail.png / .base go to git via .gitattributes and do not count)
+Refreshes every 30 s · click this line to refresh now">
+  <span class="annex-status-counts">Uncommitted <a> · Untracked <b> · Annex-missing largefiles <c></span>
   <span class="annex-status-refresh"><svg …/></span>
 </div>
 ```
@@ -244,7 +248,7 @@ obsidian vault=<vault名> eval 'code=document.querySelector(".annex-status-bar")
 | 步骤 | 期望 |
 |---|---|
 | `app.plugins.disablePlugin('annex-gallery')` → `enablePlugin('annex-gallery')` | 重载成功；重载后 `.annex-status-bar` 出现（证明跑着的是当前构建，而不是旧的插件实例） |
-| 重载后第一趟还没跑完时 | 文字 `统计中…`、`data-level=loading`、`data-busy=true` |
+| 重载后第一趟还没跑完时 | 文字 `Counting…`、`data-level=loading`、`data-busy=true` |
 | `el.click()`（= 点那一行） | 短时间内 `data-busy` 变成 `true` —— 点击**真的**触发了一趟刷新，而不只是绑了 handler |
 | 那趟跑完 | `data-busy=false`、`data-level` 回到 `dirty`，三个数回到与命令行独立量一致的值 |
 

@@ -1,6 +1,6 @@
 {
   "name": "obsidian-annex-gallery",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Obsidian plugin: git + git-annex backed image gallery (thumbnails + sidecar md + .base)",
   "main": "main.js",
   "scripts": {
@@ -19,7 +19,8 @@
     "gui:status": "python3 tools/status-gui-check.py",
     "layout": "node tools/layout-check.cjs",
     "gui": "python3 tools/real-gui-check.py",
-    "cli": "node tools/annex-gallery.mjs"
+    "cli": "node tools/annex-gallery.mjs",
+    "verify:english": "node tools/verify-english.cjs"
   },
   "license": "MIT",
   "devDependencies": {

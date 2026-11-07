@@ -125,10 +125,10 @@ export const LEGACY_PROFILE_KEYS = [
 
 /** 旧格式预设的人类可读提示（不改写、不迁移，引导用户从预设重建）。 */
 export function legacyProfileMessage(keys: readonly string[]): string {
-  const which = keys.length > 0 ? `（${keys.join(" / ")}）` : "";
+  const which = keys.length > 0 ? ` (${keys.join(" / ")})` : "";
   return (
-    `旧格式的元数据预设${which}不再支持，也不会自动迁移：` +
-    "请用「从预设创建」生成新格式 .json，再把 regex / ask / frontmatter 手工搬过去。"
+    `Legacy metadata preset format${which} is no longer supported and is not migrated automatically: ` +
+    "use Create from preset to generate a new-format .json, then move regex / ask / frontmatter over manually."
   );
 }
 
@@ -144,7 +144,7 @@ function compileRegex(pattern: string, flags: string | undefined, label: string)
     return new RegExp(pattern, flags ?? "");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${label}：正则无法编译（${message}）`);
+    throw new Error(`${label}: regex failed to compile (${message})`);
   }
 }
 
@@ -174,7 +174,7 @@ export function parseWithProfile(profile: ParseProfile, ctx: ParseContext): Pars
   const source: PatternSource = profile.source ?? "stem";
   const subject = source === "relpath" ? ctx.relpath : source === "filename" ? ctx.filename : ctx.stem;
 
-  const re = compileRegex(profile.regex, profile.flags, `预设 ${profile.id}`);
+  const re = compileRegex(profile.regex, profile.flags, `preset ${profile.id}`);
   const match = re.exec(subject);
   const groups = (match?.groups ?? {}) as Record<string, string | undefined>;
 
@@ -189,7 +189,7 @@ export function parseWithProfile(profile: ParseProfile, ctx: ParseContext): Pars
 
   let pathNames: string[] = [];
   if (profile.pathRegex !== undefined) {
-    const pathRe = compileRegex(profile.pathRegex, profile.flags, `预设 ${profile.id} pathRegex`);
+    const pathRe = compileRegex(profile.pathRegex, profile.flags, `preset ${profile.id} pathRegex`);
     const pathMatch = pathRe.exec(ctx.relpath);
     const pathGroups = (pathMatch?.groups ?? {}) as Record<string, string | undefined>;
     pathNames = namedGroups(profile.pathRegex);
@@ -246,41 +246,41 @@ export function validateProfile(profile: ParseProfile, opts: ValidateProfileOpti
   };
 
   if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
-    add("error", "预设必须是 JSON 对象");
+    add("error", "A preset must be a JSON object");
     return issues;
   }
 
-  if (typeof profile.id !== "string" || profile.id.trim() === "") add("error", "id 不能为空");
+  if (typeof profile.id !== "string" || profile.id.trim() === "") add("error", "id must not be empty");
   if (typeof profile.name !== "string" || profile.name.trim() === "") {
-    add("warn", "name 为空：设置页与弹窗里会显示「（未命名）」");
+    add("warn", "name is empty: Settings and the picker will show \"(unnamed)\"");
   }
 
   let mainGroups: string[] = [];
   const flags = typeof profile.flags === "string" ? profile.flags : "";
-  if (profile.flags !== undefined && typeof profile.flags !== "string") add("error", "flags 必须是字符串");
+  if (profile.flags !== undefined && typeof profile.flags !== "string") add("error", "flags must be a string");
   if (typeof profile.regex !== "string" || profile.regex.trim() === "") {
-    add("error", "regex 必须是非空字符串");
+    add("error", "regex must be a non-empty string");
   } else {
     try {
       new RegExp(profile.regex, flags);
       mainGroups = namedGroups(profile.regex);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      add("error", `regex 无法编译：${message}`);
+      add("error", `regex failed to compile: ${message}`);
     }
   }
 
   let pathGroups: string[] = [];
   if (profile.pathRegex !== undefined) {
     if (typeof profile.pathRegex !== "string") {
-      add("error", "pathRegex 必须是字符串");
+      add("error", "pathRegex must be a string");
     } else {
       try {
         new RegExp(profile.pathRegex, flags);
         pathGroups = namedGroups(profile.pathRegex);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        add("error", `pathRegex 无法编译：${message}`);
+        add("error", `pathRegex failed to compile: ${message}`);
       }
     }
   }
@@ -289,57 +289,57 @@ export function validateProfile(profile: ParseProfile, opts: ValidateProfileOpti
 
   if (profile.types !== undefined) {
     if (profile.types === null || typeof profile.types !== "object" || Array.isArray(profile.types)) {
-      add("error", "types 必须是对象（变量名 → \"number\" / \"date\" / \"text\"）");
+      add("error", "types must be an object (variable name → \"number\" / \"date\" / \"text\")");
     } else {
       for (const [key, value] of Object.entries(profile.types as Record<string, unknown>)) {
         if (value !== "number" && value !== "text" && value !== "date") {
-          add("error", `types.${key} 只能是 "number" / "date" / "text"`);
+          add("error", `types.${key} must be "number" / "date" / "text"`);
         }
-        if (!known.has(key)) add("warn", `types 里的 "${key}" 不是变量（名字写错了？）`);
+        if (!known.has(key)) add("warn", `types."${key}" is not a variable (typo in the name?)`);
       }
     }
   }
 
   if (profile.ask !== undefined) {
     if (!Array.isArray(profile.ask) || profile.ask.some((key) => typeof key !== "string" || key.trim() === "")) {
-      add("error", "ask 必须是非空字符串数组");
+      add("error", "ask must be a non-empty array of strings");
     }
   }
 
   if (profile.onMismatch !== undefined && profile.onMismatch !== "empty" && profile.onMismatch !== "skip") {
-    add("error", "onMismatch 只能是 \"empty\" 或 \"skip\"");
+    add("error", "onMismatch must be \"empty\" or \"skip\"");
   }
 
   if (profile.template !== undefined && typeof profile.template !== "string") {
-    add("error", "template 必须是字符串（vault 相对 .md 路径，可留空）");
+    add("error", "template must be a string (vault-relative .md path, may be empty)");
   }
 
   const frontmatter = profile.frontmatter;
   if (frontmatter === null || typeof frontmatter !== "object" || Array.isArray(frontmatter)) {
-    add("error", "frontmatter 必须是对象（键顺序就是写出顺序；值可以是任意 JSON）");
+    add("error", "frontmatter must be an object (key order is write order; values may be any JSON)");
   } else {
     const fm = frontmatter as Record<string, unknown>;
     if (!Object.prototype.hasOwnProperty.call(fm, "tags")) {
-      add("error", `frontmatter 必须包含 tags（列表，且含 "${GALLERY_TAG}"）`);
+      add("error", `frontmatter must contain tags (a list containing "${GALLERY_TAG}")`);
     } else {
       const tags = fm.tags;
       if (!Array.isArray(tags) || !tags.some((tag) => tag === GALLERY_TAG)) {
-        add("error", `frontmatter.tags 必须是列表且含字面量 "${GALLERY_TAG}"（画廊靠它识别 sidecar）`);
+        add("error", `frontmatter.tags must be a list containing the literal "${GALLERY_TAG}" (the gallery uses it to recognize sidecars)`);
       } else if (tags.some((tag) => typeof tag !== "string")) {
-        add("error", "frontmatter.tags 的每一项都必须是字符串");
+        add("error", "every entry in frontmatter.tags must be a string");
       }
     }
 
     const used = new Set<string>();
     collectPlaceholders(fm, used);
     for (const name of used) {
-      if (!known.has(name)) add("warn", `frontmatter 里的 {{${name}}} 没有来源（不是具名捕获组 / ask / 内置变量）`);
+      if (!known.has(name)) add("warn", `{{${name}}} in frontmatter has no source (not a named capture group / ask / built-in variable)`);
     }
   }
 
   if (opts.bodyText !== undefined) {
     for (const name of placeholdersOf(opts.bodyText)) {
-      if (!known.has(name)) add("warn", `正文模板里的 {{${name}}} 没有来源（不是具名捕获组 / ask / 内置变量）`);
+      if (!known.has(name)) add("warn", `{{${name}}} in the body template has no source (not a named capture group / ask / built-in variable)`);
     }
   }
 
@@ -353,11 +353,11 @@ export function pickProfile(profiles: ParseProfile[], ctx: ParseContext): ParseP
     if (match === undefined) continue;
     if (match.relpathRegex === undefined && match.filenameRegex === undefined) continue;
     if (match.relpathRegex !== undefined) {
-      const re = compileRegex(match.relpathRegex, "", `预设 ${profile.id} match.relpathRegex`);
+      const re = compileRegex(match.relpathRegex, "", `preset ${profile.id} match.relpathRegex`);
       if (!re.test(ctx.relpath)) continue;
     }
     if (match.filenameRegex !== undefined) {
-      const re = compileRegex(match.filenameRegex, "", `预设 ${profile.id} match.filenameRegex`);
+      const re = compileRegex(match.filenameRegex, "", `preset ${profile.id} match.filenameRegex`);
       if (!re.test(ctx.filename)) continue;
     }
     return profile;
