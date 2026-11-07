@@ -190,7 +190,7 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
         repoRoot,
         (line) => {
           for (const row of parseAnnexLines(line)) {
-            if (row.file !== undefined) progress(`${ANNEX_OP_TITLE.add}：${path.basename(row.file)}`);
+            if (row.file !== undefined) progress(`${ANNEX_OP_TITLE.add}: ${path.basename(row.file)}`);
           }
         },
       );
@@ -222,7 +222,7 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
   if (op === "unlock" || op === "lock") {
     const result = await gitStream(annexArgs(op, [], scope), repoRoot, (line) => {
       for (const row of parseAnnexLines(line)) {
-        if (row.file !== undefined && row.success === true) progress(`${ANNEX_OP_TITLE[op]}：${path.basename(row.file)}`);
+        if (row.file !== undefined && row.success === true) progress(`${ANNEX_OP_TITLE[op]}: ${path.basename(row.file)}`);
       }
     });
     collectResultLines(parseAnnexLines(result.stdout), entries);
@@ -239,7 +239,7 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
   void unlocked;
   const result = await gitStream(annexArgs("unannex", [], scope), repoRoot, (line) => {
     for (const row of parseAnnexLines(line)) {
-      if (row.file !== undefined && row.success === true) progress(`${ANNEX_OP_TITLE.unannex}：${path.basename(row.file)}`);
+      if (row.file !== undefined && row.success === true) progress(`${ANNEX_OP_TITLE.unannex}: ${path.basename(row.file)}`);
     }
   });
   const rows = parseAnnexLines(result.stdout);

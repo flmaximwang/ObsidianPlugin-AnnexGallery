@@ -158,7 +158,7 @@ export class ProfileEditor {
         index,
         ref,
         inspection,
-        ...(errors.length > 0 ? { error: errors.join("；") } : {}),
+        ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
         warnings,
       };
     });

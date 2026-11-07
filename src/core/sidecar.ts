@@ -485,7 +485,7 @@ function isDirty(repoRoot: string, target: string): boolean {
 function mergeDetail(base: string | undefined, extra: string | undefined): string | undefined {
   if (base === undefined || base === "") return extra;
   if (extra === undefined || extra === "") return base;
-  return `${base}；${extra}`;
+  return `${base}; ${extra}`;
 }
 
 /**

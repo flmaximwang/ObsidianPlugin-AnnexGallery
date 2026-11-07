@@ -18,7 +18,8 @@ const path = require("path");
 const ts = require("typescript");
 
 const repoRoot = path.resolve(__dirname, "..");
-const CJK = /[\u3400-\u9fff\uf900-\ufaff]/;
+// Ideographs plus CJK punctuation (U+3000-303F) and fullwidth forms (U+FF00-FFEF).
+const CJK = /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]/;
 let pass = 0;
 let fail = 0;
 
@@ -42,8 +43,7 @@ function walkFiles(dir, predicate) {
   return out;
 }
 
-function scanTypeScript(file) {
-  const text = fs.readFileSync(file, "utf8");
+function scanTypeScriptText(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const hits = [];
   const visit = (node) => {
@@ -63,6 +63,10 @@ function scanTypeScript(file) {
   return hits;
 }
 
+function scanTypeScript(file) {
+  return scanTypeScriptText(file, fs.readFileSync(file, "utf8"));
+}
+
 function scanShippedText(file) {
   const text = fs.readFileSync(file, "utf8");
   if (!CJK.test(text)) return [];
@@ -73,6 +77,14 @@ function scanShippedText(file) {
     .map(({ line, index }) => `${path.relative(repoRoot, file)}:${index + 1} ${line.trim()}`);
 }
 
+// Negative fixture: the scanner itself must see CJK punctuation and fullwidth forms,
+// not just ideographs. Without this, a narrow class can silently let `：` / `；` through.
+const NEGATIVE_FIXTURE = 'const separators = ["：", "；", "、", "「」", "（）"];';
+const fixtureFile = path.join(repoRoot, "tools", "__negative_fixture__.ts");
+const fixtureHits = scanTypeScriptText(fixtureFile, NEGATIVE_FIXTURE);
+check(fixtureHits.length === 5, "negative fixture: CJK punctuation / fullwidth forms are detected (5 literals)");
+if (fixtureHits.length !== 5) for (const hit of fixtureHits) console.log(`      ${hit}`);
+
 console.log("English-only UI text check (main.ts + src/** + src/defaults/**)");
 
 const tsFiles = [
@@ -81,13 +93,13 @@ const tsFiles = [
 ];
 let hits = [];
 for (const file of tsFiles) hits.push(...scanTypeScript(file));
-check(hits.length === 0, `no CJK in user-facing string literals (${tsFiles.length} TS file(s))`);
+check(hits.length === 0, `no CJK/Chinese punctuation in user-facing string literals (${tsFiles.length} TS file(s))`);
 if (hits.length > 0) for (const hit of hits.slice(0, 40)) console.log(`      ${hit}`);
 
 const shippedFiles = walkFiles(path.join(repoRoot, "src", "defaults"), () => true);
 let shippedHits = [];
 for (const file of shippedFiles) shippedHits.push(...scanShippedText(file));
-check(shippedHits.length === 0, `no CJK in shipped defaults (${shippedFiles.length} file(s))`);
+check(shippedHits.length === 0, `no CJK/Chinese punctuation in shipped defaults (${shippedFiles.length} file(s))`);
 if (shippedHits.length > 0) for (const hit of shippedHits.slice(0, 40)) console.log(`      ${hit}`);
 
 console.log(`\nPASS=${pass} FAIL=${fail}`);
