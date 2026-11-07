@@ -45,9 +45,10 @@
 ┌ .annex-remotes-card ────────────────────────────────────────────┐
 │ Remotes                                                          │
 │ Read from .git/config; written only when you save.               │
-│ [名称: <remote>] [Fetch URL: ssh://<host>/<volume>/<path>] [×]   │  ← 一行一条单 URL git remote
-│ [名称: <remote>] [Fetch URL: /Volumes/<volume>/<path>] (+ Push URL)│
-│ [Save] [Reload]                                                   │
+│ [名称: <remote>] [Fetch URL: ssh://<host>/<volume>/<path>] … [Delete]│  ← 一行一条单 URL git remote
+│ [名称: <remote>] [Fetch URL: /Volumes/<volume>/<path>] [Push URL] [待改标记] [Delete]│
+│                                                            [+ push URL] │
+│ [Add remote]                                    [Save] [Reload]  │
 │ 只读：multi-URL remotes / git-annex special remotes（带文档链接）  │
 └─────────────────────────────────────────────────────────────────┘
 .setting-group（heading「元数据预设与画廊模板」）
@@ -336,7 +337,10 @@
 - 运行时：坏文件、重复 id、空列表 ⇒ 弹窗都不开，更不写盘；外部改 id/name 后下一次生成读到新值
 - 旧内联 profiles：显示失效提示、不迁移、不参与运行时
 - 常规 group 里渲染出「缩略图边长」「调试日志」两个 setting-item
-- remote：打开读 git、Save 前不写盘、Save 后增删改、无仓库禁用
+- remote：打开读 git、Save 前不写盘（待删只是草稿，Undo 还原）、Save 后增删改、删除确认
+  （带 annex-uuid 时多一条警告）、校验失败一条命令都不跑、外部改过则 Save 不执行并重载、无仓库禁用；
+  编辑器直接用 esbuild 现场打包 `src/ui/remotes-editor.ts`，挂到临时真 git 仓库上跑
+- 旧 `data.json` 的 `remotes` 键加载时静默丢弃，下一次落盘不再写回
 ```
 
 ### 离屏几何（`npm run layout`）
@@ -356,13 +360,15 @@
 - 面板没有横向溢出
 ```
 
-remote 区同一套量法（装两条时）：
+remote 区同一套量法（布局 vault 是真 git 仓库，种了 2 条单 URL remote + 1 条多 URL + 1 条 special remote）：
 
 ```
 - remote 卡片撑满内容宽；标题左 = 卡片内容左，标题自身 padding=0
-- 每一行的 name / Fetch URL / Push URL / 待删除标记 跨行同列对齐
-- Save / Reload 与标题同列，排在所有可编辑行下面
-- 只读列表（多 URL / special remotes）与可编辑行分开，不混排
+- 每一行的控件从左往右 = 名称 → Fetch URL →（有 pushurl 时多一格 Push URL）→ 待改标记 → Delete；
+  窄行允许换行（push / 标记 / Delete 折到第二行），断言的是「左→右顺序不变」与「不横向溢出卡片」
+- 行内 fetch URL 那一格比名称宽（地址更长）；有 pushurl 的行多一格 push 输入框
+- [Add remote] 与标题左对齐，排在所有可编辑行下面；未改动时 Save 是禁用态（aria-disabled=true）
+- 只读列表（多 URL / special remotes）与可编辑行分开，不混排；special remote 的 type 带文档链接
 ```
 
 `node tools/layout-check.cjs --json` 另把原始几何打出来，用来检查字段齐不齐 —— 具体数值不作为断言。

@@ -1083,6 +1083,9 @@ writeText("Templates/broken.base", "views: [\n");
   stub.registry.savedData = {
     thumbnailEdge: 256,
     profiles: [JSON.parse(JSON.stringify(tec))],
+    // 旧版本把 remote 列表存在 data.json 里：加载时必须静默丢掉（.git/config 是唯一真相），
+    // 不提示、不迁移，下一次 saveSettings 也不再写回来。
+    remotes: [{ name: "origin", url: "ssh://old.example/gallery" }],
     folderSamples: {},
     folderProfiles: { [legacyVault]: tec.id },
   };
@@ -1098,6 +1101,7 @@ writeText("Templates/broken.base", "views: [\n");
   assert(legacyWarningBody !== undefined && /不会读取、不会自动迁移/.test(legacyWarningBody.textContent), "提示写明不读取、不自动迁移");
   assert(legacyWarningBody !== undefined && /分别保存成 vault 里的一个 \.json 文件/.test(legacyWarningBody.textContent), "提示引导手工登记外部 JSON");
   assert(legacyPlugin.settings.profileFiles.length === 0, "旧内联 profiles 没有变成 profileFiles（不迁移）");
+  assert(legacyPlugin.settings.remotes === undefined, "旧 data.json 的 remotes 键在加载时被静默丢弃（插件照常工作）");
   assert(byClass(legacyTab.containerEl, "annex-profile-row").length === 0, "旧内联 profiles 不渲染成外部模板行");
   modalsBefore = stub.registry.modals.length;
   const legacyMenu = new stub.Menu();
@@ -1108,6 +1112,8 @@ writeText("Templates/broken.base", "views: [\n");
   assert(/还没有登记任何元数据预设/.test(lastNotice()), "旧内联 profiles 不参与运行时（不 fallback）");
   assert(stub.registry.modals.length === modalsBefore, "旧内联 profiles 不打开生成弹窗");
   assert(stub.registry.savedData.profiles.length === 1 && stub.registry.savedData.profileFiles === undefined, "旧 data.json 的 profiles 原样保留、没有被迁移成 profileFiles");
+  await legacyPlugin.saveSettings();
+  assert(stub.registry.savedData.remotes === undefined, "下一次落盘后 data.json 里不再有 remotes");
   stub.registry.savedData = mainSavedData;
   rmrf(legacyVault);
 
