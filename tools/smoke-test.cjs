@@ -635,6 +635,37 @@ writeText("Templates/broken.base", "views: [\n");
         "编辑器：staleness 后卡片按 git 重画",
       );
       assert(stub.registry.notices.length === noticesBeforeStale + 1, "编辑器：staleness 只多一条 Notice");
+
+      // c22: delete + identical re-add is real work (`remote remove` + `remote add`), so the
+      // identity-based dirty check must keep Save enabled even though the rows line up.
+      const c22Repo = makeTempGitRepo("annex-remotes-c22-");
+      gitRun(c22Repo, ["remote", "add", "origin", "https://example.com/origin.git"]);
+      const c22Container = new stub.FakeEl("div");
+      new RemotesEditor(c22Container, hostFor(c22Repo)).render();
+      assert(one(c22Container, "annex-remotes-save").disabled === true, "编辑器：c22 前置 —— 未改动时 Save 禁用");
+      one(c22Container, "annex-remote-del").click();
+      assert(
+        one(c22Container, "annex-remote-row").hasClass("is-deleted"),
+        "编辑器：c22 前置 —— 原有 remote 标为待删除",
+      );
+      one(c22Container, "annex-remote-add").click();
+      const c22Rows = byClass(c22Container, "annex-remote-row");
+      const c22NewRow = c22Rows[c22Rows.length - 1];
+      const c22Name = one(c22NewRow, "annex-remote-name");
+      const c22Fetch = one(c22NewRow, "annex-remote-fetch");
+      c22Name.value = "origin";
+      c22Name.dispatchEvent({ type: "input" });
+      c22Fetch.value = "https://example.com/origin.git";
+      c22Fetch.dispatchEvent({ type: "input" });
+      assert(
+        one(c22Container, "annex-remotes-save").disabled === false,
+        "编辑器：删除 + 新增同值 remote 仍算改动（Save 可用，c22）",
+      );
+      one(c22Container, "annex-remotes-save").click();
+      assert(
+        gitConfigGet(c22Repo, "remote.origin.url") === "https://example.com/origin.git",
+        "编辑器：c22 的 remove + add 真的执行了（origin 仍是同一地址）",
+      );
     } finally {
       fs.rmSync(plainDir, { recursive: true, force: true });
     }
