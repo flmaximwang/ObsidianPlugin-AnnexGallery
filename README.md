@@ -29,7 +29,7 @@ Obsidian's vault API does not expose a git + git-annex repository, and thumbnail
 
 - **Repository state.** It reads and merges the vault repository's own `.gitattributes` / `.gitignore`, and runs annex actions through the local `git` and `git-annex` binaries. Every command is anchored with `git -C <vault folder>`.
 - **Thumbnails and sidecars.** It walks the gallery folder you invoked and writes `<stem>.thumbnail.png` and `<stem>.md` beside the source image.
-- **Registered files.** It reads the metadata preset, body-template and gallery-template files you 登记 ed; their paths are validated as vault-relative, and absolute paths or `..` are rejected.
+- **Registered files.** It reads the metadata preset, body-template and gallery-template files you registered; their paths are validated as vault-relative, and absolute paths or `..` are rejected.
 
 External programs invoked: `git`, `git-annex` (through `git annex`), and ImageMagick 7 (`magick`, for thumbnails and image dimensions). Commands are passed as argument arrays and never through a shell. No files outside the vault are read or written, apart from the system git configuration and the SSH/GPG credentials that `git` / `git-annex` use for the remotes you configure, plus existence checks for the `magick` binary in Homebrew's standard locations. The bundled CLI (`scripts/cli.ts`, built to `tools/annex-gallery.mjs`) reads and writes only the directories and preset / template files you pass on its command line.
 

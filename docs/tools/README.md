@@ -37,7 +37,7 @@
 | `tools/verify-annex-ops.cjs` | 真仓库层 | `npm run verify:annex` | `context-menu.md` |
 | `tools/verify-sidecar-overwrite.cjs` | 真仓库层 | `npm run verify:sidecar` | `metadata.md` |
 | `tools/verify-gallery.cjs` | 真仓库层 | `npm run verify:gallery` | `gallery.md` |
-| `tools/verify-english.cjs` | 源码层（AST） | `npm run verify:english` | `design.md`（UI language） |
+| `tools/verify-english.cjs` | 源码层（AST）+ README 文本 | `npm run verify:english` | `design.md`（UI language）、`publish-checklist.md`（README 英文区） |
 | `tools/status-gui-check.py` | 真机层 | `npm run gui:status` | `status-bar.md` |
 | `tools/real-gui-check.py` | 真机层 | `npm run gui` | `setting-panel.md` |
 | `scripts/cli.ts` → `tools/annex-gallery.mjs` | CLI | `npm run cli` | `cli.md` |
