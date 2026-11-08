@@ -27,7 +27,7 @@ gh api "repos/obsidianmd/obsidian-releases/commits?path=community-plugins.json&p
 
 | # | 要求 | 为什么（原则） | 判据 |
 |---|---|---|---|
-| 1 | 根目录 `README.md` 说明用途与用法 | 目录会把 README 摘录当作**公开简介**抓取 | 读一遍根 README：是否只写安装 / 依赖 / 用法 / 披露，有没有内部开发笔记、绝对路径 |
+| 1 | 根目录 `README.md` 说明用途与用法 | 目录会把 README 摘录当作**公开简介**抓取 | 读一遍根 README：是否只写安装 / 依赖 / 用法 / 披露，有没有内部开发笔记、绝对路径；`## 中文说明` 之前的英文区另由 `npm run verify:english` 强制无 CJK（见下） |
 | 2 | 根目录 `LICENSE`，且 README 里标明 | 许可证要在**默认分支**上可见，否则目录侧等于没有 | `gh repo view <owner>/<repo> --json licenseInfo` + README 有 License 段 |
 | 3 | 用了 Node/Electron API ⇒ `manifest.json` 的 `isDesktopOnly: true` | 声明不实会在移动端崩，是最常见的打回原因 | 查 `manifest.json`；再 grep 代码里的 `child_process` / `fs` / `TMPDIR` |
 | 4 | `id` 全目录唯一，且不含 `obsidian` | 目录按 `id` 认插件，重名即冲突 | 见下方「id 唯一性」命令 |
@@ -41,6 +41,10 @@ gh api "repos/obsidianmd/obsidian-releases/commits?path=community-plugins.json&p
 | 12 | 提交 lockfile，且与 `package.json` 同步 | CI 与本地构建要可复现 | `npm ci --dry-run`（能过 = 同步；不要用 `npm install` 判） |
 | 13 | 不硬编码样式（no hardcoded styling） | 主题切换会瞎 | `grep -Ei '#[0-9a-f]{3,8}\b' styles.css` 应为空；颜色走 `var(--…)`。少量 `px`（间距 / 线宽）可接受 |
 | 14 | Disclosures：网络使用、访问 vault 之外的文件，必须写进 README | 插件连了什么、碰了什么属于必须公开的信息 | 把代码里的子进程 / 网络 / 写盘点列一遍，逐条对到 README 的 Disclosures 段 |
+
+### README English-region validation
+
+`npm run verify:english` also scans the root `README.md`. Everything before the intentional `## 中文说明` heading is the public English region (the community directory excerpts it as the plugin blurb) and must contain no CJK ideographs, CJK punctuation or fullwidth forms; the bilingual section from that heading onwards is intentional and is not scanned. The gate carries both a rejection fixture and an acceptance fixture, so a stray Chinese word in the English region fails the check even when every TypeScript string is clean.
 
 **id 唯一性**（判据，不写结论）：
 
