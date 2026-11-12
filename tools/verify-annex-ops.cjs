@@ -5,7 +5,9 @@
  * 在**临时** annex 仓库里复刻真实布局 —— 图片进 annex、`.md` / `.thumbnail.png` 按
  * `annex.largefiles=nothing` 进 git、另一个仓库有副本、另有一个文件只有本地这一份 —— 然后：
  *
- *   1. `annex add`      ：未跟踪的新图进 annex（locked 软链），`.md` 不进 annex；候选数只算图片
+ *   1. `annex add`      ：dry-run 发现的候选（新图 + 非图片 largefile）进 annex（locked 软链）；
+ *                          `.md` / `.thumbnail.png` / `.DS_Store` 按 `annex.largefiles` 进 git 的那一侧，dry-run
+ *                          里带 `git repository` 的 note，既不算候选也不被 add / 暂存
  *   2. `annex unlock`   ：变实文件（index 100644，Obsidian 能索引）
  *   3. `annex lock`     ：变回软链（index 120000）
  *   4. `annex drop`     ：别处有副本的丢成、本地唯一副本被挡下；`.md` / 缩略图逐字节未动
@@ -149,6 +151,12 @@ async function main() {
     cleanup.push(lab);
     // 新图（未跟踪）+ 只给 copy 的副本：new.tif 故意不拷给 clone，用它验证「唯一副本」路径
     writeRandom(path.join(src, "images/new.tif"), 150 * 1024);
+    // 非图片的大文件：按 `.gitattributes` 的 `* annex.largefiles=anything` 同样该进 annex。
+    writeRandom(path.join(src, "images/construct.dna"), 180 * 1024);
+    // 未跟踪的非 large 文件：dry-run 会报 `git repository` 的 note，必须既不进 annex、也不被暂存。
+    writeText(path.join(src, "images/notes.md"), "# untracked note\n");
+    writeRandom(path.join(src, "images/untracked.thumbnail.png"), 4096);
+    writeText(path.join(src, "images/.DS_Store"), "Mac metadata\n");
     git(["annex", "copy", "--to", "clone", "--", "images/a.tif", "images/b.tif", "images/sub/c.tif"], src);
 
     console.log(`  临时仓库 ${lab}`);
@@ -158,38 +166,59 @@ async function main() {
     // ── add ──
     const addReport = runCliJson(["annex", "add", path.join(src, "images"), "--json"]);
     console.log(`    add → candidates=${addReport.candidates} ok=${addReport.ok}`);
-    check(addReport.candidates === 4, "add：候选只数图片（4 张：3 旧 + 1 新；a.thumbnail.png 被排除）");
+    // dry-run 只列「还没进 index / 改过待重新 add」的文件：3 张已入库的图不算，候选 = new.tif + construct.dna。
+    check(addReport.candidates === 2, "add：候选 = dry-run 发现的待入库 largefile（new.tif + construct.dna，已入库的 3 张不算）");
+    check(addReport.ok === 2, "add：两个候选都真的进了 annex");
     check(annexFind(src).includes("images/new.tif"), "add：未跟踪的新图进了 annex");
+    check(annexFind(src).includes("images/construct.dna"), "add：非图片 largefile（.dna）也进了 annex");
     check(indexMode(src, "images/new.tif") === "120000", "add：新图是 locked 软链（index 120000）");
+    check(indexMode(src, "images/construct.dna") === "120000", "add：construct.dna 是 locked 软链（index 120000）");
     check(indexMode(src, "images/a.md") === "100644", "add：.md 仍由 git 管（index 100644，不进 annex）");
+    const untrackedAfterAdd = git(["status", "--porcelain", "-uall"], src).stdout;
+    console.log(`    未跟踪文件（add 后）：${untrackedAfterAdd.split("\n").filter((l) => l.startsWith("??")).map((l) => l.slice(3)).join(", ") || "(无)"}`);
+    check(!annexFind(src).includes("images/notes.md"), "add：未跟踪的 .md 没进 annex");
+    check(!annexFind(src).includes("images/untracked.thumbnail.png"), "add：未跟踪的 .thumbnail.png 没进 annex");
+    check(!annexFind(src).includes("images/.DS_Store"), "add：dotfile .DS_Store 没进 annex");
+    const untrackedLines = untrackedAfterAdd.split("\n").filter((line) => line.startsWith("?? ")).map((line) => line.slice(3));
+    check(untrackedLines.includes("images/notes.md"), "add：未跟踪的 .md 仍是未跟踪（没被暂存）");
+    check(untrackedLines.includes("images/untracked.thumbnail.png"), "add：未跟踪的 .thumbnail.png 仍是未跟踪（没被暂存）");
+    // .DS_Store 通常被 .gitignore 忽略（`git status` 不列它），所以只能断言「没进 index / 没进 annex」。
+    check(
+      git(["check-ignore", "-q", "--", "images/.DS_Store"], src).status === 0 || untrackedLines.includes("images/.DS_Store"),
+      "add：.DS_Store 仍是未跟踪/被忽略（没被暂存）",
+    );
+    check(
+      ["images/notes.md", "images/untracked.thumbnail.png", "images/.DS_Store"].every((file) => indexMode(src, file) === "(不在 index)"),
+      "add：三个非 large 文件都不在 index 里",
+    );
 
     // ── unlock ──
     const unlockReport = runCliJson(["annex", "unlock", path.join(src, "images"), "--json"]);
     console.log(`    unlock → ok=${unlockReport.ok}`);
-    check(unlockReport.ok === 4, "unlock：4 张图都解锁了");
+    check(unlockReport.ok === 5, "unlock：5 个 largefile（3 旧图 + new.tif + construct.dna）都解锁了");
     check(
-      ["images/a.tif", "images/b.tif", "images/sub/c.tif", "images/new.tif"].every(
+      ["images/a.tif", "images/b.tif", "images/sub/c.tif", "images/new.tif", "images/construct.dna"].every(
         (file) => indexMode(src, file) === "100644" && !isSymlink(path.join(src, file)),
       ),
       "unlock：全部变成实文件（index 100644，Obsidian 能索引）",
     );
-    check(annexFind(src).length === 4, "unlock：annex 仍然认这 4 张图（只是解锁，不是退出）");
+    check(annexFind(src).length === 5, "unlock：annex 仍然认这 5 个文件（只是解锁，不是退出）");
 
     // ── lock ──
     const lockReport = runCliJson(["annex", "lock", path.join(src, "images"), "--json"]);
     console.log(`    lock → ok=${lockReport.ok}`);
-    check(lockReport.ok === 4, "lock：4 张图都锁上了");
+    check(lockReport.ok === 5, "lock：5 个 largefile 都锁上了");
     check(indexMode(src, "images/a.tif") === "120000" && isSymlink(path.join(src, "images/a.tif")), "lock：a.tif 又变回软链");
 
     // ── drop（本地唯一副本的 new.tif 应被挡下）──
     const dropReport = runCliJson(["annex", "drop", path.join(src, "images"), "--json"]);
     console.log(`    drop → ok=${dropReport.ok} skipped=${dropReport.skipped} freed=${dropReport.bytesFreed}`);
     check(dropReport.ok === 3, "drop：别处有副本的 3 张丢了");
-    check(dropReport.skipped === 1, "drop：本地唯一副本的新图被 annex 挡下");
+    check(dropReport.skipped === 2, "drop：本地唯一副本的新图 + construct.dna 被 annex 挡下");
     check(dropReport.bytesFreed === 3 * 200 * 1024, "drop：报出释放的字节数 = 3×200KB");
     check(
-      annexFind(src, ["--in=here"]).join(",") === "images/new.tif",
-      "drop：只有 new.tif 还有本地内容",
+      annexFind(src, ["--in=here"]).join(",") === "images/construct.dna,images/new.tif",
+      "drop：只有 new.tif 与 construct.dna 还有本地内容",
     );
 
     // ── get ──
@@ -197,13 +226,13 @@ async function main() {
     console.log(`    get → candidates=${getReport.candidates} ok=${getReport.ok}`);
     check(getReport.candidates === 3, "get：先数出本地缺内容 3 个");
     check(getReport.ok === 3, "get：3 个都取回");
-    check(annexFind(src, ["--in=here"]).length === 4, "get：本地内容回到 4 个");
+    check(annexFind(src, ["--in=here"]).length === 5, "get：本地内容回到 5 个");
 
     // ── unannex ──
     const unannexReport = runCliJson(["annex", "unannex", path.join(src, "images"), "--json"]);
     console.log(`    unannex → ok=${unannexReport.ok} staged=${unannexReport.staged}`);
-    check(unannexReport.ok === 4, "unannex：4 张图退出 annex");
-    check(unannexReport.staged === 4, "unannex：4 张都补了 git add（--force-small）");
+    check(unannexReport.ok === 5, "unannex：5 个 largefile 退出 annex");
+    check(unannexReport.staged === 5, "unannex：5 个都补了 git add（--force-small）");
     check(annexFind(src).length === 0, "unannex：annex 不再认这些文件");
     check(
       fs.statSync(path.join(src, "images/a.tif")).size === 200 * 1024 && !isSymlink(path.join(src, "images/a.tif")),

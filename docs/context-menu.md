@@ -46,7 +46,7 @@ interface language and needs no custom icon assets. Every title is fixed English
 | Generate metadata | 按 metadata preset 写 `<stem>.md` 侧车（`src/core/sidecar.ts`） | 先选一条 metadata preset、再填该预设的 `ask` 字段（没有模板下拉：正文由预设的 `template` 决定）；已有侧车时**二次确认**（Recompute all / Only add missing / Cancel） |
 | Generate thumbnails | 写 `<stem>.thumbnail.png`（`src/core/thumbnails.ts`） | 直接跑，结束时报告新建 / 跳过 / 失败三类 |
 | Create Gallery | 写 `<folder>/<folder 名>.base`（vault 根 → `<vault name>.base`，`src/core/gallery.ts`） | 先只读盘点；旧 sidecar 未打标签时**三选一**（Add tag / Skip / Cancel）；`.base` 已存在时**三选一**（Overwrite / Open existing / Cancel）；多份模板时先选模板 |
-| Add largefiles to Annex | 对目录内**图片**分批 `git annex add` | 直接跑；候选集 = 图片（排除缩略图） |
+| Add largefiles to Annex | 先 `git annex add --dry-run --json` 发现目录内**待入库的 largefile 候选**，再对它们分批 `git annex add` | 直接跑；候选集 = dry-run 列出的、note 不带 `git repository` 的文件（`.md` / `.thumbnail.png` / `.base` / `.DS_Store` 不算），具体进 annex 还是 git 由 `.gitattributes` 决定 |
 | Unlock & unannex largefiles | `annex unlock` → `annex unannex` → `git annex add --force-small` | 直接跑；结束提示「还需一次 commit」 |
 | Lock largefiles | `annex lock`（整棵子树） | 直接跑；结束提示软链的代价（见 §3.7） |
 | Unlock largefiles | `annex unlock`（整棵子树） | 直接跑 |
@@ -69,8 +69,10 @@ interface language and needs no custom icon assets. Every title is fixed English
    ```
 3. **报告口径 = 「工具真的报了动作的文件」**，不是「目录里的文件数」。不需要动的文件不产生任何输出
    （例如 unlock 一个已解锁的文件），所以报告里的数字天然会小于目录里的图片数 —— 不能当失败处理。
-4. **先收敛目标集，再交给 git**。Add 只对枚举出来的图片跑（排除 `.thumbnail.png`），不会顺手把 `.DS_Store`
-   之类也 `git add` 进去；谁进 annex、谁进 git 仍由 `.gitattributes` 的 `annex.largefiles` 决定，插件不越权改这个判断。
+4. **先让 `.gitattributes` 收敛目标集，再交给 git**。Add 不按扩展名枚举：先 `git annex add --dry-run --json`
+   在目标子树里问一遍，note 带 `git repository` 的（`.md` / `.thumbnail.png` / `.base` / `.DS_Store`）不算候选，
+   只有会进 annex 的 largefile 才拿去 `git annex add` —— 非图片的大文件（`.dna` / `.prot` / `.pdf` …）因此同样
+   会被处理。谁进 annex、谁进 git 完全由 `.gitattributes` 的 `annex.largefiles` 决定，插件不越权改这个判断。
 5. **`--force-small` 是语义的一部分，不是优化**。`git annex init` 会把 annex 的 clean filter 挂进 git，
    于是普通 `git add` 会把文件**重新 annex 回去** —— unannex 就成了假动作（提交里落的是指针而不是内容）。
    `git annex add --force-small` 才是「按普通 git 文件暂存」的正解，这一步不能省、不能换。

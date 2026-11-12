@@ -221,13 +221,20 @@ async function main() {
     check(annexFind(local, ["--in=here"]).length === 2, "起点：本地 2 个图片都有内容");
     check(indexMode(local, "images/a.tif") === "120000", "起点：图片是 locked 软链");
 
-    // 1) add：一张新图
+    // 1) add：一张新图 + 一个非图片 largefile + 一个未跟踪的 .md
     writeRandom(path.join(local, "images/new.tif"), 160 * 1024);
     const newHash = sha256(path.join(local, "images/new.tif"));
+    writeRandom(path.join(local, "images/construct.dna"), 160 * 1024);
+    const dnaHash = sha256(path.join(local, "images/construct.dna"));
+    writeText(path.join(local, "images/untracked.md"), "# not a largefile\n");
     let r = runOp(local, "add");
     checkNoError(name, "add", r);
     check(annexFind(local).includes("images/new.tif"), `${name}｜add：新图进了 annex`);
     check(hashOrNull(path.join(local, "images/new.tif")) === newHash, `${name}｜add：新图内容没被动过`);
+    check(annexFind(local).includes("images/construct.dna"), `${name}｜add：非图片 largefile（.dna）也进了 annex`);
+    check(hashOrNull(path.join(local, "images/construct.dna")) === dnaHash, `${name}｜add：.dna 内容没被动过`);
+    check(!annexFind(local).includes("images/untracked.md"), `${name}｜add：未跟踪的 .md 没进 annex`);
+    check(indexMode(local, "images/untracked.md") === "(不在 index)", `${name}｜add：未跟踪的 .md 也没被暂存`);
     checkPairIntegrity(name, pair, "add 之后");
 
     // 2) unlock：变实文件
@@ -252,6 +259,8 @@ async function main() {
     r = runOp(local, "drop");
     checkNoError(name, "drop", r);
     check(r.report.ok === 2, `${name}｜drop：2 张都丢了（别处有副本）`);
+    check(r.report.skipped === 2, `${name}｜drop：本地唯一副本的 new.tif + construct.dna 被 annex 挡下（skipped，实测 ${r.report.skipped}）`);
+
     check(hashOrNull(path.join(local, "images/a.tif")) === null, `${name}｜drop：本地内容真的不在了`);
     checkPairIntegrity(name, pair, "drop 之后");
     for (const [image] of originals) {
@@ -264,7 +273,7 @@ async function main() {
     // 5) get：取回内容
     r = runOp(local, "get");
     checkNoError(name, "get", r);
-    check(r.report.ok === 2, `${name}｜get：2 张都取回`);
+    check(r.report.ok === 2, `${name}｜get：2 张都取回（construct.dna 被挡下后仍在本地，无需下载）`);
     for (const [image, hash] of originals) {
       check(hashOrNull(path.join(local, image)) === hash, `${name}｜get：${path.basename(image)} 取回后哈希 = 原始字节`);
     }
@@ -273,7 +282,7 @@ async function main() {
     // 6) unannex：退出 annex、交给 git
     r = runOp(local, "unannex");
     checkNoError(name, "unannex", r);
-    check(annexFind(local).length === 0, `${name}｜unannex：本地 annex 里不再有文件`);
+    check(annexFind(local).length === 0, `${name}｜unannex：本地 annex 里不再有文件（含 construct.dna）`);
     for (const [image, hash] of originals) {
       check(hashOrNull(path.join(local, image)) === hash, `${name}｜unannex：${path.basename(image)} 内容仍在`);
     }

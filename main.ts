@@ -866,7 +866,7 @@ export default class AnnexGalleryPlugin extends Plugin implements SettingsHost {
       } (no enough copies elsewhere) · ${report.failed} failed — files that needed no action are not listed`,
     ];
     if (op === "add" && report.candidates !== undefined) {
-      lines.push(`${report.candidates} candidate image(s) — .gitattributes annex.largefiles decides what enters annex and what stays in git`);
+      lines.push(`${report.candidates} candidate largefile(s) — .gitattributes annex.largefiles decides what enters annex and what stays in git`);
       lines.push("Hint: newly added/staged changes still need a commit to enter history.");
     }
     if (op === "get" && report.candidates !== undefined) {

@@ -1,6 +1,5 @@
 import * as path from "path";
-import { git, gitStream, isAnnexRepo, repoRelativePath, repoScope } from "./git";
-import { collectImages } from "./stems";
+import { git, gitStream, isAnnexRepo, repoScope } from "./git";
 import { Progress } from "./types";
 
 /**
@@ -47,7 +46,7 @@ export interface AnnexReport {
   skipped: number;
   failed: number;
   entries: AnnexEntry[];
-  /** add：候选图片数；get：本地缺内容的份数（预估要下载多少）。 */
+  /** add：dry-run 发现的待入库 largefile 候选数；get：本地缺内容的份数（预估要下载多少）。 */
   candidates?: number;
   /** unannex：随后 `git annex add --force-small` 回索引的份数。 */
   staged?: number;
@@ -139,6 +138,31 @@ function reportFrom(op: AnnexOp, dir: string, repoRoot: string, relpath: string,
   };
 }
 
+/**
+ * `git annex add --dry-run --json` 列出的「待入库 largefile」候选（仓库相对路径，保持 annex 的输出顺序、去重）。
+ *
+ * 判据与状态栏 `countPendingLargefiles`（`src/core/status.ts`）逐字一致：只认有 `file` 的行，
+ * note 里带 `git repository` 的是「按 `.gitattributes` 进 git」的那一类（`non-large file` /
+ * `dotfile`，如 `.md` / `.thumbnail.png` / `.base` / `.DS_Store`），不算候选。
+ * dry-run 只列**还没进 index**（或改过待重新 add）的文件，所以候选数 = 本次真的要 add 的份数。
+ */
+function discoverPendingLargefiles(repoRoot: string, scope: string[]): string[] {
+  const result = git(["annex", "add", "--dry-run", "--json", "--json-error-messages", ...scope], repoRoot);
+  if (result.code !== 0) {
+    throw new Error(`git annex add --dry-run failed: ${firstLine(result.stderr) || firstLine(result.stdout) || `exit code ${result.code}`}`);
+  }
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const row of parseAnnexLines(result.stdout)) {
+    if (typeof row.file !== "string" || row.file === "") continue;
+    if ((row.note ?? "").includes("git repository")) continue;
+    if (seen.has(row.file)) continue;
+    seen.add(row.file);
+    files.push(row.file);
+  }
+  return files;
+}
+
 /** `git annex find --not --in=here`：这些 annex 文件本地没有内容（get 的目标）。 */
 function countContentMissing(repoRoot: string, relpath: string): number {
   const scope = relpath === "" ? [] : ["--", relpath];
@@ -155,9 +179,11 @@ function annexArgs(op: string, extra: string[], scope: string[]): string[] {
 /**
  * 跑一个 largefiles 操作。除 `drop`（见 `dropLargefiles`，它有预览/字节数语义）外都在这里。
  *
- * - `add`：只对**这个目录里的图片**（`collectImages`，已排除 `.thumbnail.png`）跑 `git annex add`。
- *   这样不会顺手把 `.DS_Store` 之类的东西也 `git add` 进去；annex 仍按 `.gitattributes` 的
- *   `annex.largefiles` 决定每个文件进 annex 还是进 git。
+ * - `add`：先用 `git annex add --dry-run --json` 在 `scope` 下**发现待入库的 largefile 候选**
+ *   （排除 note 里带 `git repository` 的行，即按 `.gitattributes` 进 git 的 `non-large file` /
+ *   `dotfile` —— `.md` / `.thumbnail.png` / `.base` / `.DS_Store` 这类），再对这些候选分批跑
+ *   `git annex add`。是否进 annex 始终由 `.gitattributes` 的 `annex.largefiles` 决定，插件不按
+ *   扩展名越权筛选 —— 非图片的大文件（`.dna` / `.prot` / `.pdf` …）同样会被处理。
  * - `unlock` / `lock` / `get`：对整个子树跑，annex 自己会跳过不需要动的文件（它们不产生输出行）。
  * - `unannex`：先 `unlock` 再 `unannex`，最后把这些文件 `git add` 回索引 —— annex 的 `unannex`
  *   会把文件从 index 里移除、内容留在工作树（此时它们是**未跟踪**文件，`git clean` 一下就没），
@@ -180,9 +206,9 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
   const entries: AnnexEntry[] = [];
 
   if (op === "add") {
-    const images = collectImages(dir).map((file) => repoRelativePath(relpath, dir, file));
-    const chunks = chunked(images, PATH_CHUNK);
-    progress(`${ANNEX_OP_TITLE.add}: ${images.length} image(s) to process (${chunks.length} batch(es))`);
+    const candidates = discoverPendingLargefiles(repoRoot, scope);
+    const chunks = chunked(candidates, PATH_CHUNK);
+    progress(`${ANNEX_OP_TITLE.add}: ${candidates.length} largefile(s) to process (${chunks.length} batch(es))`);
     const rows: AnnexJsonLine[] = [];
     for (const batch of chunks) {
       const result = await gitStream(
@@ -198,7 +224,7 @@ export async function runAnnexOp(op: AnnexOp, dir: string, opts: AnnexOpOptions 
     }
     collectResultLines(rows, entries);
     const report = reportFrom("add", dir, repoRoot, relpath, entries);
-    return { ...report, candidates: images.length };
+    return { ...report, candidates: candidates.length };
   }
 
   if (op === "get") {

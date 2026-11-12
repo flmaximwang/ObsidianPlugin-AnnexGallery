@@ -14,3 +14,5 @@ __pycache__/
 .cursor
 .codex
 .agents
+AGENTS.md
+CLAUDE.md
