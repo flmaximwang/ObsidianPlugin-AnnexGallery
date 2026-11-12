@@ -14,5 +14,7 @@ __pycache__/
 .cursor
 .codex
 .agents
+.beads
+.beads.gate.lock
 AGENTS.md
 CLAUDE.md
